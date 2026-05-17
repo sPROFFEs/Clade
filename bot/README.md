@@ -174,6 +174,27 @@ Subsequent runs: seconds.
 - `/nano_update` — upgrades the deps, re-runs `playwright install
   chromium --force`, re-primes Nano. Use after a Chrome major bump.
 
+### Running on a headless VM (Proxmox, true server)
+
+Chrome's on-device-model service refuses to start without a display,
+even with a GPU available. The bridge handles this by:
+
+1. Probing `$DISPLAY` (and `:0`) with `xdpyinfo` — uses it if a real
+   X server answers.
+2. Otherwise spawning **Xvfb** (virtual framebuffer) on `:99` so
+   Chrome has somewhere to draw. `xvfb` is installed automatically
+   by `install_chrome.sh`.
+3. Cleaning up the Xvfb subprocess when the bridge stops.
+
+**GPU caveat**: Xvfb gives Chrome a display but does *not* give it
+real GPU access. On a VM without GPU passthrough (the typical
+Proxmox guest), Chrome falls back to swiftshader software rendering
+and the on-device-model service may still refuse to initialise. If
+your two GPUs aren't passed through to this VM, Nano probably won't
+work no matter what — but the `/use <ollama-model>` chat path
+already runs end-to-end through your local Ollama and needs none of
+the Chrome dance.
+
 ### Bridge runs non-headless by default
 
 Chrome's on-device-model service refuses to initialise in pure

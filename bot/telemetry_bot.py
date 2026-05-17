@@ -510,10 +510,15 @@ def _run_setup_streaming(message, mode: str) -> None:
             pass
 
     try:
+        # PYTHONUNBUFFERED=1 forces line-immediate prints even though
+        # stdout is a pipe (Python normally goes block-buffered when
+        # not attached to a TTY, which truncated streamed output).
+        env = os.environ.copy()
+        env["PYTHONUNBUFFERED"] = "1"
         proc = subprocess.Popen(
-            [sys.executable, str(script), mode],
+            [sys.executable, "-u", str(script), mode],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-            bufsize=1)
+            bufsize=1, env=env)
     except OSError as e:
         bot.edit_message_text(f"❌ launch failed: {e}", CHAT_ID,
                               placeholder.message_id)
@@ -528,8 +533,18 @@ def _run_setup_streaming(message, mode: str) -> None:
             _flush()
             last_edit = now
     proc.wait()
-    buf.append(f"\n_exit code: {proc.returncode}_")
-    _flush(force=True)
+    # Show last ~80 lines on the final flush instead of 40 — when
+    # something failed deep into the run we want the full tail, not
+    # just whatever happened in the last 1.5s window before the loop
+    # ended.
+    body = "\n".join(buf[-80:] + [f"\n_exit code: {proc.returncode}_"]) + "\n```"
+    try:
+        bot.edit_message_text(body, CHAT_ID, placeholder.message_id,
+                              parse_mode="Markdown")
+    except Exception:
+        # If the message got too long for an edit, send the tail as a
+        # follow-up so the user at least sees the conclusion.
+        bot.send_message(CHAT_ID, body, parse_mode="Markdown")
 
 
 # ---------- end controller helpers ----------

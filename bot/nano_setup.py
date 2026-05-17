@@ -49,21 +49,83 @@ CHROME_BIN = os.environ.get("NANO_CHROME_EXECUTABLE") or None
 # On a true server you can force headless via NANO_HEADLESS=1.
 HEADLESS = os.environ.get("NANO_HEADLESS", "0") != "0"
 
-# When run as a systemd subprocess we may not inherit DISPLAY; fill
-# in best-guess values so a non-headless Chrome can attach to the
-# user's desktop session.
-if not HEADLESS:
-    if not os.environ.get("DISPLAY"):
-        os.environ["DISPLAY"] = ":0"
-    if not os.environ.get("XAUTHORITY"):
-        cand = os.path.join(os.path.expanduser("~"), ".Xauthority")
-        if os.path.exists(cand):
-            os.environ["XAUTHORITY"] = cand
-
-
 def log(msg: str) -> None:
     """Tag every line so the bot can prefix nicely."""
     print(msg, flush=True)
+
+
+# Xvfb subprocess we may have started so trigger_download has a
+# display to attach to on a headless box.
+_xvfb_proc: Optional[subprocess.Popen] = None
+
+
+def _display_works(disp: str) -> bool:
+    if not shutil.which("xdpyinfo"):
+        return True
+    try:
+        return subprocess.call(["xdpyinfo", "-display", disp],
+                               stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL,
+                               timeout=3) == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def _start_xvfb() -> Optional[str]:
+    global _xvfb_proc
+    if not shutil.which("Xvfb"):
+        return None
+    disp = os.environ.get("NANO_XVFB_DISPLAY", ":99")
+    try:
+        _xvfb_proc = subprocess.Popen(
+            ["Xvfb", disp, "-screen", "0", "1280x720x24",
+             "-nolisten", "tcp", "-ac"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        return None
+    import time as _time
+    for _ in range(20):
+        _time.sleep(0.1)
+        if _display_works(disp):
+            return disp
+    _xvfb_proc.terminate()
+    _xvfb_proc = None
+    return None
+
+
+def _stop_xvfb() -> None:
+    global _xvfb_proc
+    if _xvfb_proc is not None:
+        try:
+            _xvfb_proc.terminate()
+            _xvfb_proc.wait(timeout=5)
+        except (OSError, subprocess.TimeoutExpired):
+            try:
+                _xvfb_proc.kill()
+            except OSError:
+                pass
+        _xvfb_proc = None
+
+
+# When run as a systemd subprocess we may not inherit DISPLAY; pick
+# one that actually works (or spin up Xvfb if nothing is reachable).
+if not HEADLESS:
+    cur = os.environ.get("DISPLAY", "")
+    if not (cur and _display_works(cur)):
+        if _display_works(":0"):
+            os.environ["DISPLAY"] = ":0"
+            cand = os.path.join(os.path.expanduser("~"), ".Xauthority")
+            if os.path.exists(cand) and not os.environ.get("XAUTHORITY"):
+                os.environ["XAUTHORITY"] = cand
+        else:
+            d = _start_xvfb()
+            if d:
+                os.environ["DISPLAY"] = d
+                log(f"  ↳ no real display; spawned Xvfb on {d}")
+            else:
+                log("WARN: no DISPLAY and Xvfb not installed — "
+                    "Chrome will probably fail to start. "
+                    "apt install xvfb (or run /install_chrome which now bundles it).")
 
 
 # ---------- phase 1: python deps ----------

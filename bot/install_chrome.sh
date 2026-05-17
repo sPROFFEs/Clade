@@ -60,9 +60,11 @@ if [[ ! -f "$LIST" ]]; then
     > "$LIST"
 fi
 
-echo "→ apt-get update (Google source) + install google-chrome-stable"
+echo "→ apt-get update (Google source) + install google-chrome-stable + xvfb"
 apt-get update -qq
-apt-get install -y google-chrome-stable
+# xvfb provides a virtual display so non-headless Chrome can attach
+# even on a Proxmox VM / true server with no real X session.
+apt-get install -y google-chrome-stable xvfb
 
 # Confirm the binary the bridge will auto-detect.
 loc="$(command -v google-chrome || true)"

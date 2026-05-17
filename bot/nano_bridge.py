@@ -37,7 +37,9 @@ import asyncio
 import json
 import logging
 import os
+import shutil
 import signal
+import subprocess
 import sys
 import time
 import uuid
@@ -103,21 +105,98 @@ HEADLESS = os.environ.get("NANO_HEADLESS", "0") != "0"
 LOG_FILE = os.environ.get("NANO_LOG_FILE", "")
 
 
+_xvfb_proc: Optional[subprocess.Popen] = None
+
+
+def _display_works(disp: str) -> bool:
+    """Return True if `xdpyinfo -display <disp>` exits 0 — i.e. an X
+    server is actually listening there. We use this to decide whether
+    DISPLAY=:0 is a real display or just a hopeful default."""
+    if not shutil.which("xdpyinfo"):
+        # No xdpyinfo means we can't probe; assume it works rather
+        # than spawn Xvfb pre-emptively on a desktop box.
+        return True
+    try:
+        return subprocess.call(["xdpyinfo", "-display", disp],
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL,
+                                timeout=3) == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def _start_xvfb() -> Optional[str]:
+    """Spawn a virtual X server on the first free display number and
+    return its DISPLAY string. Returns None if Xvfb isn't installed.
+    The subprocess is tracked in _xvfb_proc and torn down on bridge
+    stop."""
+    global _xvfb_proc
+    if not shutil.which("Xvfb"):
+        return None
+    # Pick a display number that's almost certainly free. :99 is the
+    # classical CI choice.
+    disp = os.environ.get("NANO_XVFB_DISPLAY", ":99")
+    try:
+        _xvfb_proc = subprocess.Popen(
+            ["Xvfb", disp, "-screen", "0", "1280x720x24",
+             "-nolisten", "tcp", "-ac"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError:
+        return None
+    # Give it a moment to come up. Then probe to confirm.
+    for _ in range(20):
+        time.sleep(0.1)
+        if _display_works(disp):
+            return disp
+    # Probe never returned True — clean up and give up.
+    _xvfb_proc.terminate()
+    _xvfb_proc = None
+    return None
+
+
+def _stop_xvfb() -> None:
+    global _xvfb_proc
+    if _xvfb_proc is not None:
+        try:
+            _xvfb_proc.terminate()
+            _xvfb_proc.wait(timeout=5)
+        except (OSError, subprocess.TimeoutExpired):
+            try:
+                _xvfb_proc.kill()
+            except OSError:
+                pass
+        _xvfb_proc = None
+
+
 def _auto_display() -> None:
-    """When the bot runs as a systemd service it inherits no DISPLAY
-    or XAUTHORITY, so a non-headless Chrome can't attach to the
-    user's desktop session. Fill them in with best-guess defaults
-    derived from the running uid — same heuristic gdm/lightdm use."""
+    """Decide what Chrome should attach to:
+       1. honour DISPLAY if it already points at a working X server,
+       2. else try :0 + ~/.Xauthority (the desktop-session case),
+       3. else fall back to spawning Xvfb (headless box, no GUI).
+    Sets os.environ so the playwright child inherits it."""
     if HEADLESS:
         return
-    if not os.environ.get("DISPLAY"):
+
+    cur = os.environ.get("DISPLAY", "")
+    if cur and _display_works(cur):
+        return
+
+    # Try the desktop-session default before bringing up Xvfb.
+    if _display_works(":0"):
         os.environ["DISPLAY"] = ":0"
-        # Don't spam — picked up by the launch log below.
-    if not os.environ.get("XAUTHORITY"):
-        home = os.path.expanduser("~")
-        candidate = os.path.join(home, ".Xauthority")
-        if os.path.exists(candidate):
-            os.environ["XAUTHORITY"] = candidate
+        cand = os.path.join(os.path.expanduser("~"), ".Xauthority")
+        if os.path.exists(cand) and not os.environ.get("XAUTHORITY"):
+            os.environ["XAUTHORITY"] = cand
+        return
+
+    # No real display reachable — spawn Xvfb (virtual framebuffer).
+    # Note: GPU-bound features (like Chrome's on-device-model
+    # service) may STILL refuse to initialise without real GPU
+    # access. That's a Chrome policy, not ours.
+    disp = _start_xvfb()
+    if disp:
+        os.environ["DISPLAY"] = disp
+        # XAUTHORITY isn't required for Xvfb because we passed -ac.
 
 
 _auto_display()
@@ -331,6 +410,8 @@ class Bridge:
                 await self.pw.stop()
             self.ctx = None
             self.page = None
+            # Tear down our Xvfb if we started one.
+            _stop_xvfb()
 
     async def prompt(self, system: str, history: list[dict], user_text: str) -> str:
         if not self.page:
