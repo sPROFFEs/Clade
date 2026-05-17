@@ -198,13 +198,16 @@ func (m newChatFromTemplateModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				a := m.agents[m.cursor]
 				if !a.Available {
-					// Same convention as the agents picker: jump to the
-					// installer. The user can re-create the chat after
-					// the install finishes.
-					stub := launcher.Workspace{
-						Name: m.template.Name, Root: m.cfg.WorkspacesRoot,
-					}
-					return m, wrap(newInstallModel(m.cfg, stub, a.ID))
+					// Jump to the installer. Pass returnTo so when the
+					// install completes the user lands back at the
+					// template picker (re-detect agents, re-pick) — NOT
+					// at an agents picker carrying a stub workspace,
+					// which would later trigger the empty-sandbox bug
+					// when the user picks a launchable agent.
+					cfg := m.cfg
+					return m, wrap(newInstallModelWithReturn(cfg, a.ID, func() tea.Model {
+						return newPickTemplateModel(cfg)
+					}))
 				}
 				cfg := *m.cfg
 				cfg.LastAgent = string(a.ID)

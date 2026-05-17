@@ -44,6 +44,35 @@ func TestInstall_AutoFixableOnly_DoesNotBlock(t *testing.T) {
 	}
 }
 
+// TestInstall_ReturnToFromNewChatGoesToPickTemplate: the new-chat flow
+// must not drag a stub workspace through to the post-install screen
+// (that's what caused the "empty sandbox path" defensive bail-out the
+// user hit when picking an unavailable agent during chat creation).
+// Pressing esc after install should land on the template picker, not
+// on an agents picker with bogus state.
+func TestInstall_ReturnToFromNewChatGoesToPickTemplate(t *testing.T) {
+	cfg := &launcher.Config{WorkspacesRoot: t.TempDir()}
+
+	called := false
+	m := newInstallModelWithReturn(cfg, launcher.AgentOpenCode, func() tea.Model {
+		called = true
+		return newPickTemplateModel(cfg)
+	})
+
+	// esc on the picker step → exitTo
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if cmd == nil {
+		t.Fatal("esc should produce a Cmd")
+	}
+	done := runCmd(t, cmd).(screenDoneMsg)
+	if !called {
+		t.Error("returnTo factory should have been invoked")
+	}
+	if _, ok := done.next.(pickTemplateModel); !ok {
+		t.Errorf("expected pickTemplateModel after install esc, got %T", done.next)
+	}
+}
+
 // TestInstall_UnfixablePrereq_Blocks verifies a method that needs Node
 // (or anything not in the auto-fix set) DOES surface a warning when the
 // prereq is missing.

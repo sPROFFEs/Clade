@@ -29,6 +29,14 @@ type installModel struct {
 	methods []installer.Method
 	cursor  int
 
+	// returnTo, when set, names the screen to transition back to once
+	// install completes (or the user backs out). Lets the install screen
+	// integrate cleanly into either the chat-list flow (back to agents)
+	// or the new-chat wizard (back to the template picker — passing a
+	// stub workspace into the agents picker would otherwise trigger an
+	// empty-sandbox error).
+	returnTo func() tea.Model
+
 	// running state
 	running    bool
 	output     *runningOutput
@@ -74,10 +82,36 @@ func newInstallModel(cfg *launcher.Config, ws launcher.Workspace, agent launcher
 	}
 }
 
+// newInstallModelWithReturn lets the caller name where to go after
+// install completes — used by new-chat to avoid carrying a stub
+// workspace through to the post-install screen.
+func newInstallModelWithReturn(cfg *launcher.Config, agent launcher.AgentID, returnTo func() tea.Model) installModel {
+	id := installer.AgentID(agent)
+	methods := installer.Methods(id, installer.ActionInstall, installer.DetectOS())
+	return installModel{
+		cfg:      cfg,
+		agentID:  agent,
+		methods:  methods,
+		returnTo: returnTo,
+	}
+}
+
 type installDoneMsg struct{ err error }
 type installTickMsg struct{}
 
 func (m installModel) Init() tea.Cmd { return nil }
+
+// exitTo returns the Cmd the install screen should fire when the user
+// backs out or finishes. Defaults to the agents picker on the wrapping
+// workspace, but the new-chat flow overrides this with a returnTo that
+// lands the user back at the template picker (so we don't drag a stub
+// workspace into the launch path).
+func (m installModel) exitTo() tea.Cmd {
+	if m.returnTo != nil {
+		return wrap(m.returnTo())
+	}
+	return wrap(newAgentsModel(m.cfg, m.ws))
+}
 
 func (m installModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -87,13 +121,13 @@ func (m installModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// wrong if we transition mid-stream. Esc after completion is
 			// allowed below.
 			if m.exitDone && (msg.String() == "esc" || msg.String() == "enter") {
-				return m, wrap(newAgentsModel(m.cfg, m.ws))
+				return m, m.exitTo()
 			}
 			return m, nil
 		}
 		switch msg.String() {
 		case "esc":
-			return m, wrap(newAgentsModel(m.cfg, m.ws))
+			return m, m.exitTo()
 		case "up", "k":
 			if m.cursor > 0 {
 				m.cursor--

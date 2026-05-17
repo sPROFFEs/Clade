@@ -198,7 +198,11 @@ func ApplyCodex(s Settings) (configPath string, err error) {
 	stripped := stripCodexBlocks(string(existing))
 	wireAPI := s.WireAPI
 	if wireAPI == "" {
-		wireAPI = "chat"
+		// Codex CLI 0.40+ deprecated "chat" and requires "responses".
+		// Older Codex builds still want "chat" — pass s.WireAPI="chat"
+		// explicitly in those cases. We default to "responses" because
+		// new installs hit the deprecation error otherwise.
+		wireAPI = "responses"
 	}
 	block := fmt.Sprintf(`
 [model_providers.%s]

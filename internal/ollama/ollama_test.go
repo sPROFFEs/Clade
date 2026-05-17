@@ -126,7 +126,7 @@ func TestApplyCodex_RoundTripAndIdempotent(t *testing.T) {
 		`base_url = "http://192.168.1.10:11434/v1"`,
 		"[profiles.ollama_remote]",
 		`model = "qwen3"`,
-		`wire_api = "chat"`,
+		`wire_api = "responses"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("config missing %q\n%s", want, body)
