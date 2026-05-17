@@ -221,6 +221,43 @@ func pnpmGlobalBinDir(ctx context.Context) string {
 	return s
 }
 
+// ImportPnpmPathIfPresent looks for the OS-default pnpm bin dir on disk;
+// if it exists but isn't already in PATH, prepends it (and exports
+// PNPM_HOME). Use this at launcher startup so a previously-installed
+// agent (via `pnpm add -g …` in some past session) is found by
+// exec.LookPath even when the user's shell hasn't picked up the env
+// vars `pnpm setup` wrote to the Windows registry / shell rc.
+//
+// Safe to call repeatedly: no-op when the dir is already in PATH.
+func ImportPnpmPathIfPresent() {
+	dir := defaultPnpmHome()
+	if dir == "" {
+		return
+	}
+	if _, err := os.Stat(dir); err != nil {
+		return // pnpm setup has never run
+	}
+	path := os.Getenv("PATH")
+	// Case-insensitive compare on Windows (paths in PATH may have mixed case).
+	cmp := func(a, b string) bool { return a == b }
+	if runtime.GOOS == "windows" {
+		cmp = strings.EqualFold
+	}
+	sep := ":"
+	if runtime.GOOS == "windows" {
+		sep = ";"
+	}
+	for _, entry := range strings.Split(path, sep) {
+		if cmp(strings.TrimRight(entry, `\/`), strings.TrimRight(dir, `\/`)) {
+			return // already on PATH
+		}
+	}
+	_ = os.Setenv("PATH", dir+sep+path)
+	if os.Getenv("PNPM_HOME") == "" {
+		_ = os.Setenv("PNPM_HOME", dir)
+	}
+}
+
 // defaultPnpmHome returns the OS-default location pnpm setup writes to.
 // Used as a fallback when neither pnpm config get nor parsing the setup
 // output gives us a value.

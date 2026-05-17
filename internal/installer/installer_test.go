@@ -2,6 +2,8 @@ package installer
 
 import (
 	"context"
+	"os"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -195,6 +197,69 @@ Setup complete. Open a new terminal to start using pnpm.`
 func TestExtractPnpmHome_AbsentReturnsEmpty(t *testing.T) {
 	if got := extractPnpmHome("nothing here"); got != "" {
 		t.Errorf("expected empty, got %q", got)
+	}
+}
+
+func TestImportPnpmPathIfPresent_AddsExistingDirToPath(t *testing.T) {
+	// Build a fake pnpm bin dir and point defaultPnpmHome's env at it
+	// (Linux uses XDG_DATA_HOME, Windows uses LOCALAPPDATA, macOS uses
+	// HOME). Whichever applies, the test ensures the dir gets prepended.
+	dir := t.TempDir()
+	switch runtime.GOOS {
+	case "windows":
+		t.Setenv("LOCALAPPDATA", dir)
+		// The function joins LOCALAPPDATA + "pnpm".
+		if err := os.MkdirAll(dir+`\pnpm`, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	case "darwin":
+		t.Setenv("HOME", dir)
+		if err := os.MkdirAll(dir+`/Library/pnpm`, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	default:
+		t.Setenv("XDG_DATA_HOME", dir)
+		if err := os.MkdirAll(dir+`/pnpm`, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Setenv("PATH", "/nowhere")
+	t.Setenv("PNPM_HOME", "")
+	ImportPnpmPathIfPresent()
+	got := os.Getenv("PATH")
+	expected := defaultPnpmHome()
+	if !strings.Contains(got, expected) {
+		t.Errorf("PATH = %q, expected to contain %q", got, expected)
+	}
+	if os.Getenv("PNPM_HOME") != expected {
+		t.Errorf("PNPM_HOME = %q, want %q", os.Getenv("PNPM_HOME"), expected)
+	}
+
+	// Second call is a no-op.
+	pathBefore := os.Getenv("PATH")
+	ImportPnpmPathIfPresent()
+	if os.Getenv("PATH") != pathBefore {
+		t.Errorf("ImportPnpmPathIfPresent should be idempotent")
+	}
+}
+
+func TestImportPnpmPathIfPresent_NoopWhenDirMissing(t *testing.T) {
+	// Point env at a tmp dir that has NO pnpm subdir.
+	dir := t.TempDir()
+	switch runtime.GOOS {
+	case "windows":
+		t.Setenv("LOCALAPPDATA", dir)
+	case "darwin":
+		t.Setenv("HOME", dir)
+	default:
+		t.Setenv("XDG_DATA_HOME", dir)
+	}
+	pathBefore := "/preexisting"
+	t.Setenv("PATH", pathBefore)
+	ImportPnpmPathIfPresent()
+	if os.Getenv("PATH") != pathBefore {
+		t.Errorf("PATH should be untouched when pnpm dir doesn't exist; got %q", os.Getenv("PATH"))
 	}
 }
 

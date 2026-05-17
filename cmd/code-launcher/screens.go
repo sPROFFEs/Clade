@@ -563,6 +563,9 @@ func (m agentsModel) View() string {
 		if !a.Available {
 			statusStyle = missingStyle
 			statusText = "not installed"
+			if a.ProbeError != "" {
+				statusText = "broken install"
+			}
 			render = listItemStyle.Render // never highlight a disabled row
 		}
 		line := fmt.Sprintf("%s%s %s", marker, label, statusStyle.Render("— "+statusText))
@@ -570,8 +573,13 @@ func (m agentsModel) View() string {
 			line += " " + versionStyle.Render("("+a.Version+")")
 		}
 		b.WriteString(render(line) + "\n")
-		if i == m.cursor && !a.Available && a.InstallHint != "" {
-			b.WriteString(descStyle.Render("install: "+a.InstallHint) + "\n")
+		if i == m.cursor && !a.Available {
+			if a.ProbeError != "" {
+				b.WriteString(descStyle.Render(errorStyle.Render("--version failed: "+a.ProbeError)) + "\n")
+			}
+			if a.InstallHint != "" {
+				b.WriteString(descStyle.Render("install/repair: "+a.InstallHint) + "\n")
+			}
 		}
 	}
 

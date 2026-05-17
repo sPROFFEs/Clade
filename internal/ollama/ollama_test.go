@@ -20,6 +20,13 @@ func TestNormalizeEndpoint(t *testing.T) {
 		"  http://x.local:11434  ":   "http://x.local:11434",
 		"https://ollama.example.com": "https://ollama.example.com",
 		"":                           "",
+		// Real bug the user hit: a missing-slashes typo in the scheme.
+		// Without the fix, the value would later be prepended with
+		// another "http://" downstream, producing "http://http:host:port".
+		"http:192.168.100.242:11434":  "http://192.168.100.242:11434",
+		"https:example.com":           "http://example.com",
+		"HTTP:192.168.1.10:11434":     "http://192.168.1.10:11434",
+		"http:/lonely.slash:11434":    "http://lonely.slash:11434",
 	}
 	for in, want := range cases {
 		if got := NormalizeEndpoint(in); got != want {

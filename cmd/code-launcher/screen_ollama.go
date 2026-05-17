@@ -311,7 +311,12 @@ func (m ollamaModel) View() string {
 		b.WriteString(helpStyle.Render("enter probe · esc back"))
 
 	case ollamaStepModel:
-		b.WriteString(subtitleStyle.Render("Endpoint: ") + m.endpoint.Value() + "\n\n")
+		b.WriteString(subtitleStyle.Render("Endpoint: ") + m.endpoint.Value() + "\n")
+		if m.probeErr != "" {
+			b.WriteString(errorStyle.Render("Probe failed: "+m.probeErr) + "\n")
+			b.WriteString(hintStyle.Render("Endpoint unreachable — type a model name manually to continue, or esc to fix the URL.") + "\n")
+		}
+		b.WriteString("\n")
 		if len(m.probedModels) == 0 {
 			b.WriteString(inputLabelStyle.Render("Model: "))
 			b.WriteString(m.modelInput.View())

@@ -22,6 +22,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/sdksdk/code-launcher/internal/installer"
 	"github.com/sdksdk/code-launcher/internal/launcher"
 )
 
@@ -32,6 +33,13 @@ func main() {
 		fmt.Printf("code-launcher 0.1.0 %s/%s\n", runtime.GOOS, runtime.GOARCH)
 		return
 	}
+
+	// If pnpm setup ran in a prior session, the user-level env vars it
+	// wrote (registry on Windows, shell rc on Unix) won't have propagated
+	// to the shell that spawned us. Eagerly add the pnpm bin dir to PATH
+	// when it exists on disk so agent detection finds tools installed in
+	// past sessions.
+	installer.ImportPnpmPathIfPresent()
 
 	cfg, err := launcher.LoadConfig()
 	if err != nil {

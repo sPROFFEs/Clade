@@ -30,9 +30,11 @@ type Settings struct {
 	WireAPI  string `json:"wireApi,omitempty"` // codex: "chat" or "responses"
 }
 
-// NormalizeEndpoint trims, lowercases scheme, and ensures the URL starts
-// with http:// (we do not assume TLS — local Ollama deployments are
-// almost always plaintext).
+// NormalizeEndpoint trims, ensures the URL starts with http:// (we do
+// not assume TLS — local Ollama deployments are almost always plaintext),
+// and repairs common typos like "http:host:port" with no slashes —
+// which would otherwise lead to "http://http:host:port" downstream when
+// the value is used by Claude Code's URL parser.
 func NormalizeEndpoint(raw string) string {
 	s := strings.TrimSpace(raw)
 	s = strings.TrimRight(s, "/")
@@ -40,10 +42,22 @@ func NormalizeEndpoint(raw string) string {
 		return ""
 	}
 	lower := strings.ToLower(s)
-	if !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
-		s = "http://" + s
+
+	// Already well-formed.
+	if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
+		return s
 	}
-	return s
+	// Typo case: "http:host:port" or "https:host" — scheme present but
+	// missing the //. Strip the stray prefix; we'll re-add it cleanly.
+	for _, scheme := range []string{"https:", "http:"} {
+		if strings.HasPrefix(lower, scheme) {
+			s = s[len(scheme):]
+			break
+		}
+	}
+	// Trim any stray slashes left over.
+	s = strings.TrimLeft(s, "/")
+	return "http://" + s
 }
 
 // ListModels asks the Ollama server what's loaded. Tries /api/tags first
