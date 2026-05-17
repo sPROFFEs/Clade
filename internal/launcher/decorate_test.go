@@ -208,7 +208,7 @@ func TestDecorate_MemoryDirectiveInjectedIntoAgentInstructions(t *testing.T) {
 			if err != nil {
 				t.Fatalf("read %s: %v", tc.wantSection, err)
 			}
-			if !strings.Contains(string(body), "Persistent memory across sessions") {
+			if !strings.Contains(string(body), "Persistent memory — required workflow") {
 				t.Errorf("expected memory directive in %s; got:\n%s", tc.wantSection, body)
 			}
 			if !strings.Contains(string(body), "MEMORY.md") {
@@ -228,8 +228,72 @@ func TestDecorate_MemoryDirectiveIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	body, _ := os.ReadFile(filepath.Join(ws.SandboxDir, ".claude", "skills", "reversing", "SKILL.md"))
-	if count := strings.Count(string(body), "## Persistent memory across sessions"); count != 1 {
+	if count := strings.Count(string(body), "## Persistent memory — required workflow"); count != 1 {
 		t.Errorf("memory directive appended %d times, want exactly 1", count)
+	}
+}
+
+func TestDecorate_PersonalityPrependedAfterFrontmatter(t *testing.T) {
+	ws := freshWorkspace(t, WorkspaceSettings{})
+	// Write a personality file the loader will pick up.
+	persona := "You are a brutally honest senior architect. Do not soften the truth."
+	if err := os.WriteFile(filepath.Join(ws.WorkpathDir, "personality.md"), []byte(persona), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	agent := Agent{ID: AgentClaude, Binary: "claude", WpcTarget: "claude", Available: true}
+	if err := PrepareSandbox(ws, agent); err != nil {
+		t.Fatal(err)
+	}
+	skill := filepath.Join(ws.SandboxDir, ".claude", "skills", "reversing", "SKILL.md")
+	body, err := os.ReadFile(skill)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "## Persona") {
+		t.Errorf("expected ## Persona section; got:\n%s", body)
+	}
+	if !strings.Contains(string(body), persona) {
+		t.Errorf("persona body not injected verbatim")
+	}
+	// Must come AFTER the YAML frontmatter so the Claude skill loader
+	// still parses correctly.
+	frontEnd := strings.Index(string(body), "\n---\n")
+	personaIdx := strings.Index(string(body), "## Persona")
+	if personaIdx < frontEnd {
+		t.Errorf("persona placed before frontmatter end (clobbers YAML)")
+	}
+}
+
+func TestDecorate_PersonalityCommentsOnlyIsNoOp(t *testing.T) {
+	// The auto-scaffolded placeholder is HTML-comments only — the
+	// decorator must NOT inject "## Persona" in that case.
+	ws := freshWorkspace(t, WorkspaceSettings{})
+	commentOnly := "<!-- placeholder -->\n\n<!-- another -->\n"
+	if err := os.WriteFile(filepath.Join(ws.WorkpathDir, "personality.md"), []byte(commentOnly), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	agent := Agent{ID: AgentClaude, Binary: "claude", WpcTarget: "claude", Available: true}
+	if err := PrepareSandbox(ws, agent); err != nil {
+		t.Fatal(err)
+	}
+	body, _ := os.ReadFile(filepath.Join(ws.SandboxDir, ".claude", "skills", "reversing", "SKILL.md"))
+	if strings.Contains(string(body), "## Persona") {
+		t.Errorf("comments-only personality.md should NOT inject a Persona section:\n%s", body)
+	}
+}
+
+func TestStripHTMLComments(t *testing.T) {
+	cases := map[string]string{
+		"hello":                        "hello",
+		"<!-- x -->hello":              "hello",
+		"a <!-- x --> b <!-- y --> c":  "a  b  c",
+		"<!-- unclosed":                "",
+		"line1\n<!-- block -->\nline2": "line1\n\nline2",
+	}
+	for in, want := range cases {
+		if got := stripHTMLComments(in); got != want {
+			t.Errorf("stripHTMLComments(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
 

@@ -30,6 +30,13 @@ import (
 func applyDecorations(ws Workspace, agent Agent) []string {
 	var notes []string
 
+	// Personality is the highest-priority context — comes first so it
+	// lands at the top of the agent's instructions, right after any
+	// frontmatter.
+	if err := prependPersonality(ws, agent); err != nil {
+		notes = append(notes, "personality: "+err.Error())
+	}
+
 	if lang := strings.TrimSpace(ws.Settings.Language); lang != "" {
 		if err := prependLanguage(ws, agent, lang); err != nil {
 			notes = append(notes, "language: "+err.Error())
@@ -82,6 +89,83 @@ func agentInstructionsPath(ws Workspace, agent Agent) string {
 	return ""
 }
 
+// prependPersonality reads <workpath>/personality.md (if present) and
+// injects it at the very top of the compiled instructions, framed as
+// a persona / system-prompt block. Acts as the agent's "you are"
+// directive — comes before everything else (mission, playbook, rules)
+// so it influences tone and decision-making throughout the chat.
+//
+// No-op when personality.md doesn't exist or is empty.
+func prependPersonality(ws Workspace, agent Agent) error {
+	// Read from the chat's workpath (which is a clone of the template's
+	// workpath at chat creation), so per-chat overrides of personality
+	// work naturally.
+	wpDir := filepath.Join(ws.Root, "workpath")
+	if _, err := os.Stat(wpDir); err != nil {
+		// Old layout: workpath was the chat root itself; fall back.
+		wpDir = ws.Root
+	}
+	body, err := os.ReadFile(filepath.Join(wpDir, "personality.md"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	persona := strings.TrimSpace(stripHTMLComments(string(body)))
+	if persona == "" {
+		// File exists but only contains comments / whitespace — treat
+		// as "no persona configured" so the auto-created placeholder
+		// doesn't leak into the agent's instructions.
+		return nil
+	}
+
+	path := agentInstructionsPath(ws, agent)
+	if path == "" {
+		return nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	full := string(raw)
+
+	directive := "\n## Persona\n\nAdopt the following persona for the entire session. " +
+		"It overrides default tone defaults and applies to every reply.\n\n" +
+		persona + "\n"
+
+	// Insert AFTER YAML frontmatter for Claude's SKILL.md so the loader
+	// stays happy; otherwise prepend to the body.
+	if strings.HasPrefix(full, "---\n") {
+		if end := strings.Index(full[4:], "\n---\n"); end >= 0 {
+			cut := 4 + end + len("\n---\n")
+			full = full[:cut] + directive + full[cut:]
+		} else {
+			full = directive + full
+		}
+	} else {
+		full = directive + "\n" + full
+	}
+	return os.WriteFile(path, []byte(full), 0o644)
+}
+
+// stripHTMLComments returns s with every <!-- ... --> block removed.
+// Used by personality processing so a comments-only personality.md
+// (the auto-scaffolded placeholder) doesn't get treated as content.
+func stripHTMLComments(s string) string {
+	for {
+		i := strings.Index(s, "<!--")
+		if i < 0 {
+			return s
+		}
+		j := strings.Index(s[i:], "-->")
+		if j < 0 {
+			return s[:i] // unclosed comment — drop the tail
+		}
+		s = s[:i] + s[i+j+3:]
+	}
+}
+
 func prependLanguage(ws Workspace, agent Agent, lang string) error {
 	path := agentInstructionsPath(ws, agent)
 	if path == "" {
@@ -109,25 +193,49 @@ func prependLanguage(ws Workspace, agent Agent, lang string) error {
 
 // memoryDirectiveSection is the text appended to the compiled
 // instructions when MemoryEnabled is true. The exact wording matters —
-// it's the only signal the agent gets that MEMORY.md exists.
+// it's the only signal the agent gets that MEMORY.md exists, and the
+// previous softer version produced empty files because agents didn't
+// actually treat "if the user asks, append..." as a reliable trigger.
 const memoryDirectiveSection = `
-## Persistent memory across sessions
+## Persistent memory — required workflow
 
-This chat has a ` + "`MEMORY.md`" + ` file at the root of your current working
-directory. It carries notes from prior sessions of THIS chat and is
-synced back to durable storage when you exit, so anything written there
-survives a restart.
+A file named ` + "`MEMORY.md`" + ` sits at the root of your current working
+directory. It is YOUR notebook for this chat and the only state that
+survives across launches. The launcher syncs it back to durable
+storage when you exit.
 
-On startup, **read ` + "`MEMORY.md`" + `** to recall context the user established
-in earlier sessions (their preferences, in-flight tasks, conventions,
-prior decisions).
+You MUST follow this protocol:
 
-When the user asks you to "remember" something, or when you uncover a
-non-obvious fact worth keeping (a build invariant, a key path, a
-gotcha), **append a clearly-labelled section to ` + "`MEMORY.md`" + `** with the
-date so future sessions can find it.
+**1. At session start (before responding to the first user message):**
+   - Read ` + "`MEMORY.md`" + ` end-to-end.
+   - If non-trivial notes exist, open your reply with a one-line
+     "📒 Recalled: …" summary so the user sees the context carried over.
+   - If the file only contains the starter header, say nothing about it.
 
-Do not modify any other file in the chat root unless explicitly asked.
+**2. During the session, ` + "`MEMORY.md`" + ` MUST be updated when ANY of:**
+   - The user says "remember", "save", "note this", "for later", or
+     similar memory-intent phrasing.
+   - You discover a durable fact about THIS project that a future
+     session would benefit from knowing — build commands, key file
+     paths, conventions, gotchas, user preferences, decisions already
+     made and their rationale, in-flight tasks.
+   - The user asks you to track a TODO list or a running summary.
+
+**3. How to update:**
+   - Use your file-write tool (Edit / Write — whichever your CLI
+     exposes) to **append** to ` + "`MEMORY.md`" + `.
+   - Each new entry starts with a date and a 1-line title:
+     ` + "`## YYYY-MM-DD — short title`" + `, followed by the body.
+   - Never overwrite or shorten existing entries unless asked.
+   - After writing, tell the user "✓ saved to MEMORY.md: <title>" in
+     one short line so they see the action.
+
+**4. What NOT to do:**
+   - Do not modify other files in the chat root.
+   - Do not invent memory entries to look helpful — only save real,
+     durable facts.
+   - Do not skip step 1; the user can tell when you ignored prior
+     context.
 `
 
 // appendMemoryDirective tacks the persistent-memory section onto the
@@ -144,7 +252,7 @@ func appendMemoryDirective(ws Workspace, agent Agent) error {
 	}
 	body := string(raw)
 	// Idempotency: don't append twice if applyDecorations runs again.
-	if strings.Contains(body, "## Persistent memory across sessions") {
+	if strings.Contains(body, "## Persistent memory — required workflow") {
 		return nil
 	}
 	body = strings.TrimRight(body, "\n") + "\n" + memoryDirectiveSection

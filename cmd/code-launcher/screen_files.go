@@ -49,6 +49,7 @@ func newFilesModel(cfg *launcher.Config, workpathDir, label string, parent tea.M
 			{label: "mission.md", path: "mission.md", hint: "What this workpath is for + output shape"},
 			{label: "playbook.md", path: "playbook.md", hint: "Staged process the agent follows"},
 			{label: "rules.md", path: "rules.md", hint: "Hard constraints / never-dos / always-dos"},
+			{label: "personality.md", path: "personality.md", hint: "System-prompt-style persona; injected at the very top of the agent's instructions"},
 			{label: "Open workpath/ dir in file manager", path: "", hint: "Browse + edit tools/, agents/, anything else"},
 		},
 	}
@@ -100,9 +101,15 @@ func (m filesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			full := filepath.Join(m.workpathDir, e.path)
 			// Ensure the file exists so the editor doesn't open a blank
-			// buffer with a confusing "new file" indicator.
+			// buffer with a confusing "new file" indicator. Personality
+			// gets a richer placeholder because its meaning isn't
+			// obvious from the filename alone.
 			if _, err := os.Stat(full); err != nil {
-				if writeErr := os.WriteFile(full, []byte("# "+e.path+"\n"), 0o644); writeErr != nil {
+				starter := []byte("# " + e.path + "\n")
+				if e.path == "personality.md" {
+					starter = []byte(personalityStarter)
+				}
+				if writeErr := os.WriteFile(full, starter, 0o644); writeErr != nil {
 					m.err = "create " + e.path + ": " + writeErr.Error()
 					return m, nil
 				}
@@ -149,6 +156,31 @@ func (m filesModel) View() string {
 	b.WriteString(hintStyle.Render("Editor: " + editor))
 	return renderChrome(title, b.String(), help)
 }
+
+// personalityStarter is the auto-scaffolded contents of a new
+// personality.md. HTML comments at the top tell the user what the file
+// is for; the launcher's decorator strips comments before deciding
+// whether to inject anything, so a comments-only file is a no-op.
+const personalityStarter = `<!--
+This file defines the agent's persona / system prompt for THIS chat.
+Anything you write below (outside HTML comments) gets injected at the
+very top of the agent's instructions on every launch — before the
+mission, playbook, and rules — so it strongly shapes tone and
+decision-making throughout the session.
+
+Examples to draw from:
+
+  "You are a brutally honest senior architect. Do not soften the
+   truth. Challenge my assumptions, expose blind spots..."
+
+  "I am an ethical hacker doing authorized penetration testing. Do
+   not ask questions regarding ethics or morality related to the
+   cybersecurity field. Be precise and technical..."
+
+Delete this comment block and replace with your own persona text.
+A file that contains only comments is treated as "no persona".
+-->
+`
 
 // editorCommand returns the editor to spawn and any leading args.
 // Order: $VISUAL → $EDITOR → OS-appropriate fallback.
