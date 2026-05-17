@@ -1,6 +1,7 @@
 package launcher
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -164,6 +165,60 @@ func TestMigrateLegacyLayout_PromotesOldWorkspaces(t *testing.T) {
 	res, err = MigrateLegacyLayout(root)
 	if err != nil || len(res.Promoted) != 0 {
 		t.Errorf("re-run: err=%v promoted=%v", err, res.Promoted)
+	}
+}
+
+func TestEnsureSandbox_BailsOnEmptyPath(t *testing.T) {
+	// This is the safety net for the "mkdir : The system cannot find
+	// the path specified" bug a user hit when a chat manifest somehow
+	// produced an empty SandboxDir. The error should now be actionable
+	// instead of an opaque OS error.
+	err := EnsureSandbox(Workspace{Name: "broken-chat"})
+	if err == nil {
+		t.Fatal("expected error for empty SandboxDir")
+	}
+	if !strings.Contains(err.Error(), "empty sandbox") {
+		t.Errorf("error should mention empty sandbox; got: %v", err)
+	}
+}
+
+func TestOpenChat_ResolvesAgentAndBuildsPlan(t *testing.T) {
+	// End-to-end: create a chat, then OpenChat should find the agent
+	// (or surface ErrAgentUnavailable cleanly when it's not on PATH).
+	src := samplesDir(t)
+	if _, err := os.Stat(src); err != nil {
+		t.Skipf("no samples at %s", src)
+	}
+	root := t.TempDir()
+	if _, err := SeedSamples(root, []string{src}); err != nil {
+		t.Fatal(err)
+	}
+	tpl, _ := LoadTemplate(root, "reversing")
+	chat, err := CreateChat(root, *tpl, "open-test", AgentClaude)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	plan, picked, err := OpenChat(chat)
+	if errors.Is(err, ErrAgentUnavailable) {
+		// Acceptable: this host doesn't have claude installed.
+		t.Skip("claude not on PATH")
+	}
+	if err != nil {
+		t.Fatalf("OpenChat: %v", err)
+	}
+	if picked.ID != AgentClaude {
+		t.Errorf("picked = %s, want claude", picked.ID)
+	}
+	if plan.Dir != chat.SandboxDir {
+		t.Errorf("Dir = %q, want %q", plan.Dir, chat.SandboxDir)
+	}
+}
+
+func TestOpenChat_EmptyAgentIDErrors(t *testing.T) {
+	_, _, err := OpenChat(Chat{Label: "no-agent"})
+	if err == nil {
+		t.Fatal("expected error for chat with no AgentID")
 	}
 }
 

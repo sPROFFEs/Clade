@@ -477,9 +477,28 @@ func allMethods(agent AgentID, action Action, current OS) []Method {
 				{ID: "paru", Label: "AUR via paru", Command: paruCmd(action, "opencode")},
 			}
 		case OSWindows:
-			return []Method{
-				{ID: "pnpm", Label: "pnpm global package", Command: pnpmPkg("opencode-ai"), Recommended: true, Prereqs: []string{"node", "pnpm"}},
+			// Offer the official curl|bash installer on Windows too,
+			// when a Bash shell is on PATH (Git Bash / WSL / Cygwin).
+			// The opencode-ai npm package has shipped Windows binaries
+			// that some hosts reject ("not compatible with this version
+			// of Windows"); the official script downloads a native
+			// build that works around it. Recommend when both bash and
+			// curl exist.
+			methods := []Method{
+				{ID: "curl", Label: "Official install script (needs bash + curl)",
+					Command: "curl -fsSL https://opencode.ai/install | bash",
+					Shell:   ShellBash, Recommended: true},
+				{ID: "pnpm", Label: "pnpm global package",
+					Command: pnpmPkg("opencode-ai"),
+					Prereqs: []string{"node", "pnpm"}},
 			}
+			// If bash isn't on PATH the curl method will be filtered
+			// out; demote pnpm to recommended in that case.
+			if _, err := exec.LookPath("bash"); err != nil {
+				methods = methods[1:]
+				methods[0].Recommended = true
+			}
+			return methods
 		}
 	}
 	return nil

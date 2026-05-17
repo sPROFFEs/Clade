@@ -5,6 +5,7 @@ package main
 // management. Replaces the old workspacesModel.
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -89,12 +90,42 @@ func (m chatListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, wrap(newPickTemplateModel(m.cfg))
 			}
 			c := m.items[m.cursor]
-			return m, wrap(newAgentsModel(m.cfg, c.AsWorkspace()))
+			cfg := *m.cfg
+			cfg.LastAgent = string(c.AgentID)
+			return m, func() tea.Msg {
+				plan, _, err := launcher.OpenChat(c)
+				if errors.Is(err, launcher.ErrAgentUnavailable) {
+					// Locked agent isn't installed — route to the install
+					// screen instead of crashing. After install, user can
+					// resume the chat normally.
+					return screenDoneMsg{next: newInstallModel(&cfg, c.AsWorkspace(), c.AgentID)}
+				}
+				if err != nil {
+					return errMsg{err: err}
+				}
+				_ = launcher.TouchChat(&c)
+				wsCopy := c.AsWorkspace()
+				return screenDoneMsg{launch: &plan, updateCfg: &cfg, launchedWS: &wsCopy}
+			}
 		case "n":
 			return m, wrap(newPickTemplateModel(m.cfg))
 		case "d":
 			if m.cursor < len(m.items) {
 				m.deleteAsk = true
+			}
+		case "e":
+			if m.cursor < len(m.items) {
+				// Per-chat settings editor: same screen as templates,
+				// smart saver routes the write to chat.json.
+				c := m.items[m.cursor]
+				ws := c.AsWorkspace()
+				return m, wrap(newSettingsModel(m.cfg, ws))
+			}
+		case "a":
+			// Power-user escape hatch: open the agents picker for this
+			// chat (install / update / pick a different agent).
+			if m.cursor < len(m.items) {
+				return m, wrap(newAgentsModel(m.cfg, m.items[m.cursor].AsWorkspace()))
 			}
 		case "t":
 			return m, wrap(newTemplateListModel(m.cfg))
@@ -169,7 +200,7 @@ func (m chatListModel) View() string {
 	}
 
 	b.WriteString(helpStyle.Render(
-		"↑/↓ select · enter open · n new · d delete · t templates · r refresh · ctrl-c quit"))
+		"↑/↓ select · enter open · n new · e settings · a agents · d delete · t templates · r refresh · ctrl-c quit"))
 	return b.String()
 }
 

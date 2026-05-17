@@ -198,22 +198,34 @@ func (m newChatFromTemplateModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				a := m.agents[m.cursor]
 				if !a.Available {
-					// Same convention as agents picker: jump to installer.
+					// Same convention as the agents picker: jump to the
+					// installer. The user can re-create the chat after
+					// the install finishes.
 					stub := launcher.Workspace{
 						Name: m.template.Name, Root: m.cfg.WorkspacesRoot,
 					}
 					return m, wrap(newInstallModel(m.cfg, stub, a.ID))
 				}
-				cfg := m.cfg
+				cfg := *m.cfg
+				cfg.LastAgent = string(a.ID)
 				tpl := m.template
 				label := strings.TrimSpace(m.label.Value())
 				agentID := a.ID
+				picked := a
 				return m, func() tea.Msg {
 					chat, err := launcher.CreateChat(cfg.WorkspacesRoot, tpl, label, agentID)
 					if err != nil {
 						return errMsg{err: err}
 					}
-					return screenDoneMsg{next: newAgentsModel(cfg, chat.AsWorkspace())}
+					// Skip the redundant agents picker — we already know
+					// the agent. Build the plan and launch directly.
+					plan, err := launcher.Plan(chat.AsWorkspace(), picked)
+					if err != nil {
+						return errMsg{err: err}
+					}
+					_ = launcher.TouchChat(&chat)
+					wsCopy := chat.AsWorkspace()
+					return screenDoneMsg{launch: &plan, updateCfg: &cfg, launchedWS: &wsCopy}
 				}
 			}
 		}

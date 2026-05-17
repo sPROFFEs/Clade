@@ -226,10 +226,15 @@ func firstParagraph(missionPath string) string {
 
 // EnsureSandbox creates <Root>/sandbox the first time and drops a
 // .gitignore so the agent's generated files don't pollute the workspace's
-// git history if the user puts it under version control.
+// git history if the user puts it under version control. Bails early
+// with an actionable error if SandboxDir is empty — that signals a
+// corrupt manifest, not a recoverable filesystem condition.
 func EnsureSandbox(ws Workspace) error {
+	if ws.SandboxDir == "" {
+		return fmt.Errorf("workspace %q has an empty sandbox path — chat.json or workspace state is corrupt; delete the chat dir or re-create it", ws.Name)
+	}
 	if err := os.MkdirAll(ws.SandboxDir, 0o755); err != nil {
-		return err
+		return fmt.Errorf("create sandbox %s: %w", ws.SandboxDir, err)
 	}
 	gi := filepath.Join(ws.SandboxDir, ".gitignore")
 	if _, err := os.Stat(gi); errors.Is(err, fs.ErrNotExist) {
