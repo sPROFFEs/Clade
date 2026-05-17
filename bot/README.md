@@ -98,6 +98,10 @@ short description — no need to memorise them.
 | `/load <name> [TTL]` | Pin into VRAM, default TTL = `OLLAMA_KEEP_ALIVE` env      |
 | `/unload <name>`     | Flush from VRAM right away                                |
 | `/keepalive <dur>`   | `5m` `1h` `24h` `-1` (pin) `0` (unload). Applied to every currently-loaded model and used as the new default for `/load` |
+| **Chat with Nano**   |                                                           |
+| `/ask <text>`        | One-shot question to Gemini Nano (no memory)              |
+| `/chat`              | Toggle "chat mode" — every non-command message goes to Nano with rolling history |
+| `/reset`             | Clear the in-memory Nano chat history                     |
 | **Nano bridge**      |                                                           |
 | `/nano_setup`        | One-time install: deps + Chromium + Nano model download   |
 | `/nano_update`       | Upgrade bridge deps + Chromium, re-prime Nano             |

@@ -95,9 +95,10 @@ def main_kb() -> ReplyKeyboardMarkup:
     kb.add(KeyboardButton("📊 status"),
            KeyboardButton("🧠 ollama"))
     kb.add(KeyboardButton("🤖 nano bridge"),
-           KeyboardButton("⚡ loaded"))
-    kb.add(KeyboardButton("ℹ️ help"),
-           KeyboardButton("💀 kill all"))
+           KeyboardButton("💬 chat nano"))
+    kb.add(KeyboardButton("⚡ loaded"),
+           KeyboardButton("ℹ️ help"))
+    kb.add(KeyboardButton("💀 kill all"))
     return kb
 
 
@@ -113,27 +114,53 @@ def ollama_kb() -> InlineKeyboardMarkup:
     return kb
 
 
-def model_list_kb(models: list, prefix: str = "m") -> InlineKeyboardMarkup:
+# Telegram caps callback_data at 64 bytes; long model names like
+# "hf.co/library/qwen2.5-coder:7b-instruct-q4_K_M" overflow when
+# embedded directly. We assign each currently-listed model a short
+# integer id and look up the name from this cache when the user taps.
+# Cache lives only as long as the bot process; if a stale button is
+# clicked after a restart we fall back to refreshing the list.
+_MODEL_CACHE: dict[int, str] = {}
+
+
+def _cache_models(models: list) -> None:
+    _MODEL_CACHE.clear()
+    for i, m in enumerate(models):
+        _MODEL_CACHE[i] = m.name
+
+
+def _cached_name(idx: str) -> Optional[str]:
+    try:
+        return _MODEL_CACHE.get(int(idx))
+    except ValueError:
+        return None
+
+
+def model_list_kb(models: list) -> InlineKeyboardMarkup:
     """One button per installed model — clicking opens the action
-    sheet for that model. Truncated names so long IDs don't overflow."""
+    sheet for that model. Uses indices in callback_data so long
+    model IDs can't overflow Telegram's 64-byte cap."""
+    _cache_models(models)
     kb = InlineKeyboardMarkup(row_width=1)
-    for m in models:
-        label = f"{m.name[:34]:34s} · {oc._humanize_mb(m.size_mb)}"
-        kb.add(InlineKeyboardButton(label.strip() + "  ›",
-                                    callback_data=f"{prefix}:open:{m.name}"))
+    for i, m in enumerate(models):
+        # Display the full name in the label (Telegram allows long
+        # button text); the callback only carries the index.
+        size = oc._humanize_mb(m.size_mb) if hasattr(oc, "_humanize_mb") else ""
+        label = f"{m.name}  ·  {size}".strip(" ·")
+        kb.add(InlineKeyboardButton(label + "  ›", callback_data=f"m:open:{i}"))
     kb.add(InlineKeyboardButton("← back", callback_data="oll:back"))
     return kb
 
 
-def model_actions_kb(name: str, is_loaded: bool) -> InlineKeyboardMarkup:
+def model_actions_kb(idx: int, is_loaded: bool) -> InlineKeyboardMarkup:
     """Per-model action sheet. Hides 'unload' when not in VRAM,
     'load' when already loaded — no dead actions."""
     kb = InlineKeyboardMarkup(row_width=2)
     if is_loaded:
-        kb.add(InlineKeyboardButton("❄️ unload", callback_data=f"m:unload:{name}"))
+        kb.add(InlineKeyboardButton("❄️ unload", callback_data=f"m:unload:{idx}"))
     else:
-        kb.add(InlineKeyboardButton("🔥 load", callback_data=f"m:load:{name}"))
-    kb.add(InlineKeyboardButton("🗑 delete", callback_data=f"m:delask:{name}"))
+        kb.add(InlineKeyboardButton("🔥 load", callback_data=f"m:load:{idx}"))
+    kb.add(InlineKeyboardButton("🗑 delete", callback_data=f"m:delask:{idx}"))
     kb.add(InlineKeyboardButton("← back", callback_data="oll:browse"))
     return kb
 
@@ -169,10 +196,11 @@ def status_refresh_kb() -> InlineKeyboardMarkup:
 def nano_kb() -> InlineKeyboardMarkup:
     kb = InlineKeyboardMarkup(row_width=2)
     if bridge.running():
-        kb.add(InlineKeyboardButton("⏹ stop bridge", callback_data="nano:stop"),
+        kb.add(InlineKeyboardButton("💬 chat", callback_data="nano:chat"),
                InlineKeyboardButton("🔗 url", callback_data="nano:url"))
         kb.add(InlineKeyboardButton("📋 status", callback_data="nano:status"),
                InlineKeyboardButton("📜 logs", callback_data="nano:logs"))
+        kb.add(InlineKeyboardButton("⏹ stop bridge", callback_data="nano:stop"))
     elif _bridge_ready():
         kb.add(InlineKeyboardButton("▶️ start bridge", callback_data="nano:start"))
         kb.add(InlineKeyboardButton("📋 status", callback_data="nano:status"),
@@ -527,6 +555,10 @@ def cmd_help(m):
         "  /unload <name>\n"
         "  /keepalive [duration] — `5m` `1h` `24h` `-1` (pin) `0` (unload),\n"
         "    no arg → shows quick-pick buttons\n"
+        "\n*chat with gemini nano*\n"
+        "  /ask <text> — one-shot question (no memory)\n"
+        "  /chat — toggle chat mode (every message → Nano, with history)\n"
+        "  /reset — clear nano chat history\n"
         "\n*nano bridge* — tap *🤖 nano bridge* for state-aware buttons\n"
         "  /nano_setup — one-time: install Playwright + Chromium + download Nano\n"
         "  /nano_update — upgrade bridge deps + Chromium + re-prime Nano\n"
@@ -572,6 +604,12 @@ def btn_nano(m):
 def btn_help(m):
     # Reply-keyboard help shortcut → reuse the /help handler.
     cmd_help(m)
+
+
+@bot.message_handler(func=lambda m: m.text == "💬 chat nano")
+@auth
+def btn_chat_nano(m):
+    cmd_chat(m)
 
 
 @bot.message_handler(func=lambda m: m.text == "⚡ loaded")
@@ -825,6 +863,146 @@ def cmd_nano_check(m):
     _run_setup_streaming(m, "check")
 
 
+# ---------- chat with nano from Telegram ----------
+#
+# Two ways to use it:
+#   /ask <text>     — one-shot, no memory between calls.
+#   💬 chat nano    — toggle "chat mode" so every non-command message
+#                      goes to Nano; bot replies with the model output.
+# History is per-process and short — a handful of recent turns, capped
+# to avoid blowing past Nano's context window.
+
+import requests as _requests  # local alias keeps the top imports tidy
+
+_CHAT_MODE = False
+_CHAT_HISTORY: list[dict] = []
+_CHAT_MAX_TURNS = 8  # user+assistant pairs we keep around
+
+
+def _nano_ask(prompt: str, keep_history: bool = False) -> str:
+    """POST to the local bridge; raises on failure with a readable
+    message. We always hit localhost regardless of NANO_BRIDGE_HOST
+    because the bot lives on the same box as the bridge."""
+    if not bridge.running():
+        raise RuntimeError("nano bridge isn't running — tap *🤖 nano bridge* → ▶️ start.")
+    msgs: list[dict] = []
+    if keep_history and _CHAT_HISTORY:
+        msgs.extend(_CHAT_HISTORY)
+    msgs.append({"role": "user", "content": prompt})
+    payload = {"model": "gemini-nano", "messages": msgs}
+    try:
+        # Long timeout — Nano can take a while on long prompts.
+        r = _requests.post(f"http://127.0.0.1:{NANO_PORT}/v1/chat/completions",
+                           json=payload, timeout=120)
+    except _requests.RequestException as e:
+        raise RuntimeError(f"bridge unreachable: {e}") from e
+    if r.status_code != 200:
+        # Bridge returns JSON {"error": "..."} on 4xx/5xx.
+        try:
+            err = r.json().get("error", r.text[:200])
+        except ValueError:
+            err = r.text[:200]
+        raise RuntimeError(f"bridge http {r.status_code}: {err}")
+    try:
+        reply = r.json()["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, ValueError) as e:
+        raise RuntimeError(f"bridge returned bad payload: {e}") from e
+    if keep_history:
+        _CHAT_HISTORY.append({"role": "user", "content": prompt})
+        _CHAT_HISTORY.append({"role": "assistant", "content": reply})
+        # Trim oldest turns first so the history stays bounded.
+        max_msgs = _CHAT_MAX_TURNS * 2
+        if len(_CHAT_HISTORY) > max_msgs:
+            del _CHAT_HISTORY[: len(_CHAT_HISTORY) - max_msgs]
+    return reply
+
+
+def _send_long(text: str, prefix: str = "") -> None:
+    """Telegram caps message bodies at 4096 chars; Nano can exceed
+    that on a verbose answer, so chunk before sending."""
+    body = (prefix + text).strip() or "(empty reply)"
+    LIMIT = 3800
+    if len(body) <= LIMIT:
+        bot.send_message(CHAT_ID, body)
+        return
+    for i in range(0, len(body), LIMIT):
+        bot.send_message(CHAT_ID, body[i:i + LIMIT])
+
+
+@bot.message_handler(commands=["ask"])
+@auth
+def cmd_ask(m):
+    # Everything after "/ask " is the prompt. No history.
+    parts = (m.text or "").split(" ", 1)
+    if len(parts) < 2 or not parts[1].strip():
+        bot.reply_to(m, "usage: `/ask <your question>`", parse_mode="Markdown")
+        return
+    typing = bot.send_message(CHAT_ID, "🤔 asking nano…")
+    try:
+        reply = _nano_ask(parts[1].strip(), keep_history=False)
+    except RuntimeError as e:
+        bot.edit_message_text(f"❌ {e}", CHAT_ID, typing.message_id,
+                              parse_mode="Markdown")
+        return
+    bot.delete_message(CHAT_ID, typing.message_id)
+    _send_long(reply, prefix="🤖 ")
+
+
+@bot.message_handler(commands=["chat"])
+@auth
+def cmd_chat(m):
+    global _CHAT_MODE
+    _CHAT_MODE = not _CHAT_MODE
+    if _CHAT_MODE:
+        if not bridge.running():
+            _CHAT_MODE = False
+            bot.send_message(CHAT_ID,
+                             "❌ nano bridge isn't running — start it from "
+                             "*🤖 nano bridge* first.",
+                             parse_mode="Markdown")
+            return
+        bot.send_message(CHAT_ID,
+                         "💬 *chat mode ON* — every message (that isn't a "
+                         "command) goes to Gemini Nano. `/chat` to turn off, "
+                         "`/reset` to clear history.",
+                         parse_mode="Markdown")
+    else:
+        bot.send_message(CHAT_ID, "💬 chat mode OFF.")
+
+
+@bot.message_handler(commands=["reset"])
+@auth
+def cmd_reset(m):
+    _CHAT_HISTORY.clear()
+    bot.reply_to(m, "🧹 nano chat history cleared.")
+
+
+# Fallback handler — only fires when chat mode is on and the user sent
+# a plain text message that no other handler matched. We register it
+# LAST (telebot dispatches in registration order) so it doesn't shadow
+# the reply-keyboard buttons / slash commands above.
+def _register_chat_fallback() -> None:
+    @bot.message_handler(func=lambda m: _CHAT_MODE and m.content_type == "text"
+                         and not (m.text or "").startswith("/"),
+                         content_types=["text"])
+    @auth
+    def on_chat_text(m):
+        text = (m.text or "").strip()
+        if not text:
+            return
+        # Send a typing indicator so the user sees the bot is working.
+        try:
+            bot.send_chat_action(CHAT_ID, "typing")
+        except Exception:
+            pass
+        try:
+            reply = _nano_ask(text, keep_history=True)
+        except RuntimeError as e:
+            bot.reply_to(m, f"❌ {e}", parse_mode="Markdown")
+            return
+        _send_long(reply, prefix="🤖 ")
+
+
 # ---------- inline keyboard callbacks ----------
 
 def _loaded_names() -> set:
@@ -895,43 +1073,64 @@ def on_cb(c):
                    "applies to currently-loaded models + future loads.",
                    keepalive_kb())
 
-    # --- per-model action sheet ---
+    # --- per-model action sheet (indexed; cache rebuilt on refresh) ---
     elif data.startswith("m:open:"):
-        name = data[len("m:open:"):]
+        idx_s = data[len("m:open:"):]
+        name = _cached_name(idx_s)
+        if not name:
+            _safe_edit(c, "menu expired — tap *📦 browse models* again.",
+                       ollama_kb())
+            return
         loaded = name in _loaded_names()
         _safe_edit(c, f"*{name}* {'· ⚡ loaded' if loaded else ''}",
-                   model_actions_kb(name, loaded))
+                   model_actions_kb(int(idx_s), loaded))
 
     elif data.startswith("m:load:"):
-        name = data[len("m:load:"):]
+        idx_s = data[len("m:load:"):]
+        name = _cached_name(idx_s)
+        if not name:
+            _safe_edit(c, "menu expired — tap *📦 browse models* again.", ollama_kb())
+            return
         bot.answer_callback_query(c.id, f"loading {name}...")
         try:
             oc.load(name)
         except oc.OllamaError as e:
-            _safe_edit(c, f"❌ load failed: {e}", model_actions_kb(name, False))
+            _safe_edit(c, f"❌ load failed: {e}", model_actions_kb(int(idx_s), False))
             return
         _safe_edit(c, f"⚡ `{name}` loaded (TTL `{oc.DEFAULT_KEEP_ALIVE}`)",
-                   model_actions_kb(name, True))
+                   model_actions_kb(int(idx_s), True))
         return
 
     elif data.startswith("m:unload:"):
-        name = data[len("m:unload:"):]
+        idx_s = data[len("m:unload:"):]
+        name = _cached_name(idx_s)
+        if not name:
+            _safe_edit(c, "menu expired — tap *📦 browse models* again.", ollama_kb())
+            return
         bot.answer_callback_query(c.id, f"unloading {name}...")
         try:
             oc.unload(name)
         except oc.OllamaError as e:
-            _safe_edit(c, f"❌ unload failed: {e}", model_actions_kb(name, True))
+            _safe_edit(c, f"❌ unload failed: {e}", model_actions_kb(int(idx_s), True))
             return
-        _safe_edit(c, f"❄️ `{name}` unloaded", model_actions_kb(name, False))
+        _safe_edit(c, f"❄️ `{name}` unloaded", model_actions_kb(int(idx_s), False))
         return
 
     elif data.startswith("m:delask:"):
-        name = data[len("m:delask:"):]
+        idx_s = data[len("m:delask:"):]
+        name = _cached_name(idx_s)
+        if not name:
+            _safe_edit(c, "menu expired — tap *📦 browse models* again.", ollama_kb())
+            return
         _safe_edit(c, f"delete *{name}*? this frees disk space and cannot be undone.",
-                   confirm_kb(f"m:del:{name}"))
+                   confirm_kb(f"m:del:{idx_s}"))
 
     elif data.startswith("m:del:"):
-        name = data[len("m:del:"):]
+        idx_s = data[len("m:del:"):]
+        name = _cached_name(idx_s)
+        if not name:
+            _safe_edit(c, "menu expired — tap *📦 browse models* again.", ollama_kb())
+            return
         bot.answer_callback_query(c.id, f"deleting {name}...")
         try:
             oc.delete(name)
@@ -1017,6 +1216,12 @@ def on_cb(c):
         _safe_edit(c, f"*nano_bridge.log (last 20 lines)*\n```\n{tail}\n```",
                    nano_kb())
         return
+    elif data == "nano:chat":
+        # Toggle chat mode through the same handler the slash command
+        # uses so /chat and the button stay in sync.
+        bot.answer_callback_query(c.id)
+        cmd_chat(c.message)
+        return
 
     bot.answer_callback_query(c.id)
 
@@ -1034,6 +1239,9 @@ SLASH_COMMANDS = [
     BotCommand("load",          "pin a model into VRAM"),
     BotCommand("unload",        "flush a model from VRAM"),
     BotCommand("keepalive",     "set TTL for loaded models"),
+    BotCommand("ask",           "one-shot question to Gemini Nano"),
+    BotCommand("chat",          "toggle nano chat mode on/off"),
+    BotCommand("reset",         "clear nano chat history"),
     BotCommand("nano_setup",    "first-time Nano bridge setup"),
     BotCommand("nano_update",   "update Nano bridge"),
     BotCommand("nano_check",    "report Nano prereq state"),
@@ -1046,6 +1254,9 @@ SLASH_COMMANDS = [
 
 
 def main() -> None:
+    # Register the chat-mode fallback last so it can't shadow earlier
+    # handlers (telebot dispatches in registration order).
+    _register_chat_fallback()
     t = threading.Thread(target=alert_loop, name="alerts", daemon=True)
     t.start()
     # Register slash commands so Telegram's '/' autocomplete shows

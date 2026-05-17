@@ -136,9 +136,35 @@ class Bridge:
     async def start(self) -> None:
         if not PROFILE_DIR:
             raise RuntimeError("NANO_CHROME_PROFILE env var is required")
-        log.info("launching chrome (profile=%s, headless=%s, exec=%s)",
-                 PROFILE_DIR, HEADLESS, CHROME_BIN or "playwright default")
+        # Pre-flight the profile dir — if it doesn't exist (or is owned
+        # by another user, common when the bot ran as root once) the
+        # chromium launch hangs with no useful error.
+        prof = os.path.abspath(PROFILE_DIR)
+        if not os.path.isdir(prof):
+            try:
+                os.makedirs(prof, exist_ok=True)
+                log.info("created profile dir %s", prof)
+            except OSError as e:
+                raise RuntimeError(f"profile dir {prof} unusable: {e}") from e
+        if not os.access(prof, os.W_OK):
+            raise RuntimeError(
+                f"profile dir {prof} not writable by uid={os.geteuid()} — "
+                f"it may have been created as root. fix with: "
+                f"sudo chown -R $USER {prof}")
+
         self.pw = await async_playwright().start()
+        # Resolve the actual chromium binary up front so a missing
+        # install fails loudly here instead of inside playwright's
+        # opaque "browserType.launch" error.
+        resolved = CHROME_BIN or self.pw.chromium.executable_path
+        if not resolved or not os.path.exists(resolved):
+            raise RuntimeError(
+                f"chromium binary not found ({resolved!r}). "
+                f"run from Telegram: /nano_setup  — or manually: "
+                f"playwright install chromium")
+        log.info("launching chrome (profile=%s, headless=%s, exec=%s)",
+                 prof, HEADLESS, resolved)
+
         # Persistent context keeps cookies, flags state, and the
         # downloaded Nano model between bridge restarts.
         launch_args = [
@@ -147,12 +173,25 @@ class Bridge:
             # The Prompt API is gated; these features pick it up:
             "--enable-features=OptimizationGuideOnDeviceModel,PromptAPIForGeminiNano",
         ]
-        self.ctx = await self.pw.chromium.launch_persistent_context(
-            PROFILE_DIR,
-            headless=HEADLESS,
-            executable_path=CHROME_BIN,
-            args=launch_args,
-        )
+        try:
+            self.ctx = await self.pw.chromium.launch_persistent_context(
+                prof,
+                headless=HEADLESS,
+                executable_path=resolved,
+                args=launch_args,
+            )
+        except Exception as e:
+            # Surface the full chain so the user sees WHY launch
+            # failed. Common causes: chromium missing system deps
+            # (apt install libnss3 libxss1 libasound2t64), profile
+            # already open in another Chrome, port-of-display weirdness.
+            log.exception("chromium launch failed")
+            raise RuntimeError(
+                f"chromium launch failed: {e!r}. check the log above; "
+                f"often it's missing system libs — try: "
+                f"playwright install-deps chromium") from e
+        log.info("chromium context up")
+
         self.page = await self.ctx.new_page()
         await self.page.goto("about:blank")
         # Inject the driver and surface availability so a bad profile
@@ -302,7 +341,15 @@ async def main() -> None:
             # Windows lacks add_signal_handler; rely on KeyboardInterrupt
             pass
 
-    await bridge.start()
+    try:
+        await bridge.start()
+    except Exception as e:
+        # Bot polls the log file for the "listening on" line and treats
+        # the absence as a failure. Log the underlying error here so it
+        # ends up in NANO_LOG_FILE where the user can see it via
+        # /nano_status (or the 📜 logs button).
+        log.error("bridge.start failed: %s", e)
+        raise
     app = build_app()
     runner = web.AppRunner(app)
     await runner.setup()
