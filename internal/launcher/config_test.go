@@ -1,0 +1,75 @@
+package launcher
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+// TestConfigRoundTrip exercises save then load. We can't use the real
+// user-config dir (would pollute the developer's machine) so we
+// override the relevant env var per platform. os.UserConfigDir honors
+// XDG_CONFIG_HOME on Linux, HOME on macOS (for Library/...), and
+// APPDATA on Windows.
+func TestConfigRoundTrip(t *testing.T) {
+	tmp := t.TempDir()
+	switch {
+	case envHasKey("XDG_CONFIG_HOME") || isLinux():
+		t.Setenv("XDG_CONFIG_HOME", tmp)
+	case isWindows():
+		t.Setenv("APPDATA", tmp)
+	default:
+		// macOS or unknown: os.UserConfigDir falls back to $HOME/Library/...
+		t.Setenv("HOME", tmp)
+	}
+
+	want := &Config{WorkspacesRoot: "/tmp/ws-root", LastAgent: "codex"}
+	if err := SaveConfig(want); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	got, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if got == nil {
+		t.Fatal("LoadConfig returned nil after save")
+	}
+	if got.WorkspacesRoot != want.WorkspacesRoot || got.LastAgent != want.LastAgent {
+		t.Errorf("round-trip mismatch: got %+v, want %+v", got, want)
+	}
+
+	// Verify the path lives under the override root.
+	_, file, err := ConfigPaths()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rel, err := filepath.Rel(tmp, file)
+	if err != nil || rel == "" || rel == "." || rel[:2] == ".." {
+		t.Errorf("config file %q not under override root %q", file, tmp)
+	}
+}
+
+func TestLoadConfig_MissingReturnsNil(t *testing.T) {
+	tmp := t.TempDir()
+	switch {
+	case isLinux():
+		t.Setenv("XDG_CONFIG_HOME", tmp)
+	case isWindows():
+		t.Setenv("APPDATA", tmp)
+	default:
+		t.Setenv("HOME", tmp)
+	}
+	got, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != nil {
+		t.Errorf("expected nil on missing file, got %+v", got)
+	}
+}
+
+func envHasKey(k string) bool {
+	_, ok := os.LookupEnv(k)
+	return ok
+}

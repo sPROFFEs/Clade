@@ -1,0 +1,5 @@
+{
+  "description": "Reverse-engineer a binary and produce a structured vulnerability triage report",
+  "version": "1",
+  "license": "MIT"
+}

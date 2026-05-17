@@ -1,0 +1,8 @@
+build/
+dist/
+wpc
+wpc.exe
+waifu
+waifu.exe
+*.test
+*.tmp

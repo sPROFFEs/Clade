@@ -1,0 +1,2 @@
+- Never lie.
+- Always cite sources.

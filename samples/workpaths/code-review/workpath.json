@@ -1,0 +1,5 @@
+{
+  "description": "Review a pull request: read the diff, flag risks, suggest blocking vs nit-level comments",
+  "version": "1",
+  "license": "MIT"
+}
