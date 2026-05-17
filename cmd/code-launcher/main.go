@@ -24,6 +24,7 @@ import (
 
 	"github.com/sdksdk/code-launcher/internal/installer"
 	"github.com/sdksdk/code-launcher/internal/launcher"
+	"github.com/sdksdk/code-launcher/internal/ollama"
 )
 
 func main() {
@@ -40,6 +41,11 @@ func main() {
 	// when it exists on disk so agent detection finds tools installed in
 	// past sessions.
 	installer.ImportPnpmPathIfPresent()
+
+	// One-shot config migrations. Codex 0.40+ hard-errors on
+	// wire_api="chat" — rewrite our managed block to "responses" so
+	// existing users don't have to manually edit ~/.codex/config.toml.
+	_, _ = ollama.MigrateCodexWireAPI()
 
 	cfg, err := launcher.LoadConfig()
 	if err != nil {

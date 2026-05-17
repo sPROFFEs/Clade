@@ -237,6 +237,51 @@ func DisableCodex() (string, error) {
 	return configPath, atomicWrite(configPath, []byte(stripped))
 }
 
+// MigrateCodexWireAPI rewrites wire_api = "chat" → wire_api = "responses"
+// inside our managed [model_providers.ollama_remote] block in
+// ~/.codex/config.toml. Codex 0.40+ deprecated "chat" and hard-errors at
+// startup when it sees it. Idempotent. No-op if the file or our block
+// is missing.
+//
+// Only touches lines inside the ollama_remote block — other providers
+// are left alone.
+func MigrateCodexWireAPI() (changed bool, err error) {
+	path, err := CodexConfigPath()
+	if err != nil {
+		return false, err
+	}
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	lines := strings.Split(string(raw), "\n")
+	inOurBlock := false
+	for i, line := range lines {
+		trim := strings.TrimSpace(line)
+		if trim == "[model_providers."+codexProviderName+"]" {
+			inOurBlock = true
+			continue
+		}
+		if inOurBlock && strings.HasPrefix(trim, "[") {
+			inOurBlock = false
+		}
+		if inOurBlock {
+			// Match wire_api = "chat" (with any spacing).
+			if strings.Contains(line, `wire_api`) && strings.Contains(line, `"chat"`) {
+				lines[i] = strings.Replace(line, `"chat"`, `"responses"`, 1)
+				changed = true
+			}
+		}
+	}
+	if !changed {
+		return false, nil
+	}
+	return true, atomicWrite(path, []byte(strings.Join(lines, "\n")))
+}
+
 // stripCodexBlocks removes the [model_providers.ollama_remote] and
 // [profiles.ollama_remote] tables from a TOML body. Stops when it hits
 // the next [section] header or EOF.

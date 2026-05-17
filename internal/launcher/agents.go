@@ -2,7 +2,10 @@ package launcher
 
 import (
 	"context"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -69,13 +72,28 @@ func KnownAgents() []Agent {
 }
 
 // DetectAgents probes PATH for each known agent and returns a fresh slice
-// with Available/Version/ProbeError populated.
+// with Available/Version/ProbeError populated. When exec.LookPath fails,
+// known per-agent install dirs are checked as a fallback (some installers
+// only touch ~/.bashrc, which Windows native processes never see).
+//
+// On success, Agent.Binary is rewritten to the absolute path of the
+// resolved binary so the launcher can exec it directly even if the dir
+// isn't on PATH in our process.
 func DetectAgents(ctx context.Context) []Agent {
 	agents := KnownAgents()
 	for i := range agents {
 		path, err := exec.LookPath(agents[i].Binary)
 		if err != nil {
-			continue
+			// Try well-known install dirs that bypass shell-rc PATH updates.
+			for _, candidate := range knownInstallPaths(agents[i].ID, agents[i].Binary) {
+				if st, statErr := os.Stat(candidate); statErr == nil && !st.IsDir() {
+					path = candidate
+					break
+				}
+			}
+			if path == "" {
+				continue
+			}
 		}
 		version, perr := probeVersion(ctx, path)
 		if perr != nil {
@@ -86,8 +104,54 @@ func DetectAgents(ctx context.Context) []Agent {
 		}
 		agents[i].Available = true
 		agents[i].Version = version
+		// Cache the resolved path so exec doesn't depend on PATH being
+		// updated in the current process.
+		agents[i].Binary = path
 	}
 	return agents
+}
+
+// knownInstallPaths returns common per-agent locations to probe when
+// exec.LookPath returns nothing. The official install scripts for these
+// agents update the user shell rc; a Windows-native code-launcher
+// process never sees that PATH change.
+func knownInstallPaths(id AgentID, binary string) []string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return nil
+	}
+	bins := []string{binary}
+	if runtime.GOOS == "windows" {
+		bins = append(bins, binary+".exe", binary+".cmd", binary+".bat")
+	}
+
+	var dirs []string
+	switch id {
+	case AgentOpenCode:
+		// opencode.ai/install drops the binary here on every OS.
+		dirs = append(dirs, filepath.Join(home, ".opencode", "bin"))
+	case AgentClaude:
+		dirs = append(dirs,
+			filepath.Join(home, ".claude", "local"),
+			filepath.Join(home, ".local", "bin"),
+		)
+	case AgentCodex:
+		// npm/pnpm globals — covered by ImportPnpmPathIfPresent at
+		// startup, but keep an explicit fallback for npm's location.
+		if runtime.GOOS == "windows" {
+			if appdata := os.Getenv("APPDATA"); appdata != "" {
+				dirs = append(dirs, filepath.Join(appdata, "npm"))
+			}
+		}
+	}
+
+	var paths []string
+	for _, d := range dirs {
+		for _, b := range bins {
+			paths = append(paths, filepath.Join(d, b))
+		}
+	}
+	return paths
 }
 
 // probeVersion runs `<bin> --version` with a short timeout. Returns the

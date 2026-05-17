@@ -165,6 +165,66 @@ func TestApplyCodex_PreservesUnrelatedConfig(t *testing.T) {
 	}
 }
 
+func TestMigrateCodexWireAPI_RewritesChatToResponses(t *testing.T) {
+	tmp := t.TempDir()
+	redirectHome(t, tmp)
+	// Pre-existing config.toml with our managed block using the old "chat".
+	pre := `model_provider = "ollama_remote"
+model = "qwen3"
+
+[model_providers.ollama_remote]
+name = "Ollama Remote"
+base_url = "http://x/v1"
+env_key = "OPENAI_API_KEY"
+wire_api = "chat"
+
+[profiles.ollama_remote]
+model_provider = "ollama_remote"
+model = "qwen3"
+
+[other_provider]
+wire_api = "chat"
+`
+	codexDir := filepath.Join(tmp, ".codex")
+	_ = os.MkdirAll(codexDir, 0o755)
+	if err := os.WriteFile(filepath.Join(codexDir, "config.toml"), []byte(pre), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	changed, err := MigrateCodexWireAPI()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !changed {
+		t.Error("expected changed=true")
+	}
+	raw, _ := os.ReadFile(filepath.Join(codexDir, "config.toml"))
+	body := string(raw)
+	// Our block was rewritten.
+	if !strings.Contains(body, `wire_api = "responses"`) {
+		t.Errorf("ollama_remote wire_api not rewritten:\n%s", body)
+	}
+	// The OTHER provider's wire_api was NOT touched (we only own ollama_remote).
+	if !strings.Contains(body, "[other_provider]\nwire_api = \"chat\"") {
+		t.Errorf("other_provider wire_api was incorrectly touched:\n%s", body)
+	}
+
+	// Idempotent.
+	changed, err = MigrateCodexWireAPI()
+	if err != nil || changed {
+		t.Errorf("idempotent re-run: changed=%v err=%v", changed, err)
+	}
+}
+
+func TestMigrateCodexWireAPI_NoopWhenAbsent(t *testing.T) {
+	tmp := t.TempDir()
+	redirectHome(t, tmp)
+	changed, err := MigrateCodexWireAPI()
+	if err != nil || changed {
+		t.Errorf("no-file: changed=%v err=%v", changed, err)
+	}
+}
+
 func TestDisableCodex_RemovesBlocks(t *testing.T) {
 	tmp := t.TempDir()
 	redirectHome(t, tmp)

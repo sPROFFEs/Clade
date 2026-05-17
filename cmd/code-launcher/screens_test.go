@@ -204,13 +204,11 @@ func TestNewChatFromTemplate_LabelPlusAgentCreatesChat(t *testing.T) {
 	}
 }
 
-func TestChatListModel_EnterOnExistingLaunchesDirectly(t *testing.T) {
+func TestChatListModel_EnterOnExistingGoesToLaunchingScreen(t *testing.T) {
 	tmp := seededRoot(t)
 	redirectConfig(t, t.TempDir())
 	cfg := &launcher.Config{WorkspacesRoot: tmp}
 	tpl, _ := launcher.LoadTemplate(tmp, "reversing")
-	// Create a chat whose locked agent points at a fake binary that's on
-	// PATH so OpenChat resolves Available=true.
 	_, err := launcher.CreateChat(tmp, *tpl, "direct-launch", launcher.AgentClaude)
 	if err != nil {
 		t.Fatal(err)
@@ -222,30 +220,36 @@ func TestChatListModel_EnterOnExistingLaunchesDirectly(t *testing.T) {
 		t.Fatalf("expected 1 chat, got %d", len(m.items))
 	}
 
+	// Enter must transition to the launching screen — never to agentsModel
+	// directly (that's the bug we removed).
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("Enter on existing chat should produce a Cmd")
 	}
-	msg := runCmd(t, cmd)
-	// Result depends on whether claude is actually on PATH for this test
-	// host. Either: launch plan (claude installed), install routing
-	// (claude missing), or errMsg. None should be a transition to
-	// agentsModel — we removed that step.
-	switch v := msg.(type) {
-	case screenDoneMsg:
-		if v.next != nil {
-			if _, isAgents := v.next.(agentsModel); isAgents {
-				t.Errorf("Enter should NOT transition to agentsModel anymore; got it")
-			}
-		}
-	case errMsg:
-		// acceptable on a host with no claude — but it should not be
-		// the "mkdir : ..." empty-path error.
-		if strings.HasPrefix(v.err.Error(), "mkdir :") {
-			t.Errorf("got the empty-path mkdir error: %v", v.err)
-		}
-	default:
-		t.Errorf("unexpected msg %T %+v", msg, msg)
+	done := runCmd(t, cmd).(screenDoneMsg)
+	if _, ok := done.next.(launchingModel); !ok {
+		t.Errorf("expected launchingModel after Enter, got %T", done.next)
+	}
+}
+
+func TestChatListModel_OKeyOpensOllama(t *testing.T) {
+	tmp := seededRoot(t)
+	redirectConfig(t, t.TempDir())
+	cfg := &launcher.Config{WorkspacesRoot: tmp}
+	tpl, _ := launcher.LoadTemplate(tmp, "reversing")
+	_, _ = launcher.CreateChat(tmp, *tpl, "ollama-test", launcher.AgentClaude)
+
+	m := newChatListModel(cfg)
+	next, _ := m.Update(runCmd(t, m.Init()))
+	m = next.(chatListModel)
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+	if cmd == nil {
+		t.Fatal("'o' should open Ollama screen for the highlighted chat")
+	}
+	done := runCmd(t, cmd).(screenDoneMsg)
+	if _, ok := done.next.(ollamaModel); !ok {
+		t.Errorf("expected ollamaModel, got %T", done.next)
 	}
 }
 
