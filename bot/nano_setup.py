@@ -44,9 +44,21 @@ REQS_BRIDGE = HERE / "requirements-bridge.txt"
 
 PROFILE_DIR = os.environ.get("NANO_CHROME_PROFILE", "")
 CHROME_BIN = os.environ.get("NANO_CHROME_EXECUTABLE") or None
-# Headed mode on a server needs a display; "new" headless is what
-# Chromium uses by default and works for the model download.
-HEADLESS = os.environ.get("NANO_HEADLESS", "1") != "0"
+# Default to non-headless because Chrome's on-device-model service
+# refuses to download/initialise in headless mode on most setups.
+# On a true server you can force headless via NANO_HEADLESS=1.
+HEADLESS = os.environ.get("NANO_HEADLESS", "0") != "0"
+
+# When run as a systemd subprocess we may not inherit DISPLAY; fill
+# in best-guess values so a non-headless Chrome can attach to the
+# user's desktop session.
+if not HEADLESS:
+    if not os.environ.get("DISPLAY"):
+        os.environ["DISPLAY"] = ":0"
+    if not os.environ.get("XAUTHORITY"):
+        cand = os.path.join(os.path.expanduser("~"), ".Xauthority")
+        if os.path.exists(cand):
+            os.environ["XAUTHORITY"] = cand
 
 
 def log(msg: str) -> None:

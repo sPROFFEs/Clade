@@ -174,6 +174,20 @@ Subsequent runs: seconds.
 - `/nano_update` — upgrades the deps, re-runs `playwright install
   chromium --force`, re-primes Nano. Use after a Chrome major bump.
 
+### Bridge runs non-headless by default
+
+Chrome's on-device-model service refuses to initialise in pure
+headless mode on most setups — even with a GPU available. So the
+bridge default is now **`NANO_HEADLESS=0`** (non-headless), and the
+installer wires `DISPLAY` + `XAUTHORITY` into the systemd unit so
+the service can attach to your desktop session. You'll see a Chrome
+window pop open when `/nano_start` runs; close it manually and the
+bridge stops cleanly.
+
+If you really want headless (true server, no display), set
+`NANO_HEADLESS=1` in `bot/.env`. Expect Nano not to work in that
+configuration — that's a Chrome limit, not a bot bug.
+
 ### When `/nano_setup` reports availability but `/nano_start` fails
 
 Symptom: `Chrome LanguageModel API not available in this profile`,

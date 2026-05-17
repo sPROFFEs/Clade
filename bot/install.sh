@@ -241,6 +241,30 @@ trap 'rm -f "$TMP_ENV"' EXIT
 install -o "$RUN_USER" -g "$RUN_GROUP" -m 600 "$TMP_ENV" "$ENV_FILE"
 c_dim "    permissions: 0600 ${RUN_USER}:${RUN_GROUP}"
 
+# ---------- detect desktop session (for non-headless Chrome) ----------
+# The Nano bridge spawns Chrome non-headless by default because
+# Chrome's on-device-model service refuses to initialise without a
+# display. A systemd service inherits no DISPLAY env, so we have to
+# bake one in. Best signal: the loginctl session for our user — its
+# Display field is the X authority's display number.
+DISPLAY_VAL=""
+XAUTH_VAL="/home/${RUN_USER}/.Xauthority"
+if command -v loginctl >/dev/null 2>&1; then
+  # Pick the most recent graphical session for this user.
+  SESSION_ID="$(loginctl list-sessions --no-legend 2>/dev/null \
+                | awk -v u="${RUN_USER}" '$3==u {print $1}' | head -n1)"
+  if [[ -n "$SESSION_ID" ]]; then
+    DISPLAY_VAL="$(loginctl show-session "$SESSION_ID" -p Display --value 2>/dev/null || true)"
+    TYPE_VAL="$(loginctl show-session "$SESSION_ID" -p Type --value 2>/dev/null || true)"
+    c_dim "    desktop session detected: id=${SESSION_ID} type=${TYPE_VAL} display=${DISPLAY_VAL:-(none)}"
+  fi
+fi
+# Sensible fallback if loginctl doesn't help.
+DISPLAY_VAL="${DISPLAY_VAL:-:0}"
+if [[ ! -f "$XAUTH_VAL" ]]; then
+  c_yel "    warning: ${XAUTH_VAL} not present yet. Non-headless Chrome may fail until the user logs in graphically."
+fi
+
 # ---------- write systemd unit ----------
 echo
 c_grn "==> installing ${UNIT_PATH}"
@@ -258,6 +282,12 @@ User=${RUN_USER}
 Group=${RUN_GROUP}
 WorkingDirectory=${HERE}
 EnvironmentFile=${ENV_FILE}
+# Attach to the user's desktop so the Nano bridge can launch
+# non-headless Chrome (the on-device-model service needs a real
+# display + GPU). Set NANO_HEADLESS=1 in .env if you intentionally
+# want headless (Nano will not work in that mode).
+Environment=DISPLAY=${DISPLAY_VAL}
+Environment=XAUTHORITY=${XAUTH_VAL}
 ExecStart=${VENV_DIR}/bin/python ${HERE}/telemetry_bot.py
 Restart=on-failure
 RestartSec=3

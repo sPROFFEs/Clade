@@ -95,8 +95,32 @@ PORT = int(os.environ.get("NANO_BRIDGE_PORT", "8765"))
 HOST = os.environ.get("NANO_BRIDGE_HOST", "0.0.0.0")
 PROFILE_DIR = os.environ.get("NANO_CHROME_PROFILE", "")
 CHROME_BIN = os.environ.get("NANO_CHROME_EXECUTABLE") or None
-HEADLESS = os.environ.get("NANO_HEADLESS", "1") != "0"
+# Default to non-headless: Chrome's on-device-model service needs a
+# display + GPU to initialise. On a desktop box this attaches to
+# DISPLAY=:0; on a true server set NANO_HEADLESS=1 to force headless
+# (Nano will probably not work in that mode — that's a Chrome limit).
+HEADLESS = os.environ.get("NANO_HEADLESS", "0") != "0"
 LOG_FILE = os.environ.get("NANO_LOG_FILE", "")
+
+
+def _auto_display() -> None:
+    """When the bot runs as a systemd service it inherits no DISPLAY
+    or XAUTHORITY, so a non-headless Chrome can't attach to the
+    user's desktop session. Fill them in with best-guess defaults
+    derived from the running uid — same heuristic gdm/lightdm use."""
+    if HEADLESS:
+        return
+    if not os.environ.get("DISPLAY"):
+        os.environ["DISPLAY"] = ":0"
+        # Don't spam — picked up by the launch log below.
+    if not os.environ.get("XAUTHORITY"):
+        home = os.path.expanduser("~")
+        candidate = os.path.join(home, ".Xauthority")
+        if os.path.exists(candidate):
+            os.environ["XAUTHORITY"] = candidate
+
+
+_auto_display()
 
 
 # In-page driver script. Loaded once into about:blank; subsequent
@@ -224,8 +248,18 @@ class Bridge:
         # Self-heal the profile: re-seed Local State in case Chrome
         # rewrote it without our flags between runs.
         _seed_local_state(prof)
-        log.info("launching chrome (profile=%s, headless=%s, exec=%s)",
-                 prof, HEADLESS, resolved)
+        log.info("launching chrome (profile=%s, headless=%s, exec=%s, "
+                 "DISPLAY=%s, XAUTHORITY=%s)",
+                 prof, HEADLESS, resolved,
+                 os.environ.get("DISPLAY") or "(unset)",
+                 os.environ.get("XAUTHORITY") or "(unset)")
+        if not HEADLESS and not os.environ.get("DISPLAY"):
+            raise RuntimeError(
+                "non-headless Chrome but no DISPLAY env var. The systemd "
+                "service needs `Environment=DISPLAY=:0` and "
+                "`Environment=XAUTHORITY=/home/<user>/.Xauthority`. "
+                "Re-run sudo ./install.sh — it will detect a desktop "
+                "session and add these to the unit.")
 
         # Persistent context keeps cookies, flags state, and the
         # downloaded Nano model between bridge restarts.
