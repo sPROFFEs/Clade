@@ -23,7 +23,7 @@ func TestNormalizeEndpoint(t *testing.T) {
 		// Real bug the user hit: a missing-slashes typo in the scheme.
 		// Without the fix, the value would later be prepended with
 		// another "http://" downstream, producing "http://http:host:port".
-		"http:192.168.100.242:11434":  "http://192.168.100.242:11434",
+		"http:192.168.1.42:11434":     "http://192.168.1.42:11434",
 		"https:example.com":           "http://example.com",
 		"HTTP:192.168.1.10:11434":     "http://192.168.1.10:11434",
 		"http:/lonely.slash:11434":    "http://lonely.slash:11434",

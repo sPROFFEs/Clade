@@ -109,7 +109,7 @@ Expand-Archive code-launcher-0.1.0-windows-amd64.zip
 ### From source (Go ≥ 1.21)
 
 ```sh
-git clone http://192.168.100.86:3000/sdksdk/code-launcher.git
+git clone https://github.com/sdksdk/code-launcher.git
 cd code-launcher
 go build -o code-launcher ./cmd/code-launcher
 ./code-launcher
@@ -367,7 +367,9 @@ When Gemini officially documents a stable OpenAI-compat config
 mechanism, the launcher will pick it up — open an issue with the
 shape and we'll add it.
 
-## Phase 3 — not started
+## Roadmap
+
+Not yet implemented; PRs welcome:
 
 - First-class transcript browser (per-agent adapter for
   `~/.claude/projects/`, `~/.codex/sessions/`, etc.)

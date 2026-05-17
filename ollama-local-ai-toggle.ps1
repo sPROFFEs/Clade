@@ -23,6 +23,8 @@ function Read-Default($Prompt, $Default) {
     return $value.Trim()
 }
 
+# Accept both y/Y (English) and s/S (legacy Spanish) so the script
+# stays backwards-compatible with people who scripted it pre-rename.
 function Is-Yes($Value) {
     $v = "$Value".Trim().ToLower()
     return $v.StartsWith("s") -or $v.StartsWith("y")
@@ -60,17 +62,17 @@ function Get-OllamaModels($Endpoint) {
 
 function Select-Model($Models) {
     if ($Models.Count -eq 0) {
-        return Read-Default "No he podido detectar modelos. Escribe el nombre exacto" "qwen3-coder"
+        return Read-Default "Couldn't detect any models. Type the exact name" "qwen3-coder"
     }
 
     Write-Host ""
-    Write-Host "Modelos detectados:"
+    Write-Host "Detected models:"
     for ($i = 0; $i -lt $Models.Count; $i++) {
         Write-Host ("  {0}. {1}" -f ($i + 1), $Models[$i])
     }
 
     while ($true) {
-        $choice = Read-Host "Elige numero o escribe un modelo"
+        $choice = Read-Host "Pick a number or type a model name"
         if ($choice -match "^\d+$") {
             $idx = [int]$choice - 1
             if ($idx -ge 0 -and $idx -lt $Models.Count) { return $Models[$idx] }
@@ -204,7 +206,7 @@ function Update-OpenCodeConfig($Endpoint, $Model, $MakeDefault) {
         try {
             $json = ConvertFrom-JsonHashtable (Get-Content $OpenCodeConfig -Raw)
         } catch {
-            throw "No puedo parsear $OpenCodeConfig como JSON. Backup creado en $backup"
+            throw "Couldn't parse $OpenCodeConfig as JSON. Backup created at $backup"
         }
     } else {
         $backup = $null
@@ -258,83 +260,83 @@ function Disable-OpenCodeConfig() {
 }
 
 function Enable-LocalModels() {
-    Write-Title "Endpoint Ollama"
-    $endpoint = Normalize-Endpoint (Read-Default "Endpoint remoto" "http://192.168.1.50:11434")
+    Write-Title "Ollama endpoint"
+    $endpoint = Normalize-Endpoint (Read-Default "Remote endpoint" "http://192.168.1.50:11434")
 
-    Write-Host "Probando $endpoint ..."
+    Write-Host "Probing $endpoint ..."
     $models = Get-OllamaModels $endpoint
     if ($models.Count -eq 0) {
-        Write-Host "No se han detectado modelos. Revisa firewall, OLLAMA_HOST y /api/tags." -ForegroundColor Yellow
+        Write-Host "No models detected. Check the firewall, OLLAMA_HOST, and /api/tags." -ForegroundColor Yellow
     }
 
     $model = Select-Model $models
 
-    Write-Title "Herramientas"
-    $enableClaude = Is-Yes (Read-Default "Configurar Claude Code? (s/n)" "s")
-    $enableCodex = Is-Yes (Read-Default "Configurar Codex CLI? (s/n)" "s")
-    $enableOpenCode = Is-Yes (Read-Default "Configurar OpenCode? (s/n)" "s")
+    Write-Title "Tools"
+    $enableClaude = Is-Yes (Read-Default "Configure Claude Code? (y/n)" "y")
+    $enableCodex = Is-Yes (Read-Default "Configure Codex CLI? (y/n)" "y")
+    $enableOpenCode = Is-Yes (Read-Default "Configure OpenCode? (y/n)" "y")
 
     if ($enableClaude) {
         Set-UserEnv "ANTHROPIC_AUTH_TOKEN" "ollama"
         Set-UserEnv "ANTHROPIC_API_KEY" ""
         Set-UserEnv "ANTHROPIC_BASE_URL" $endpoint
-        Write-Host "Claude Code configurado. Uso: claude --model $model"
+        Write-Host "Claude Code configured. Use: claude --model $model"
     }
 
     if ($enableCodex) {
         Set-UserEnv "OPENAI_API_KEY" "ollama"
-        $makeDefault = Is-Yes (Read-Default "Hacer Ollama el default de Codex? Si dices no, usa codex -p $ProfileName (s/n)" "n")
-        $wireApi = Read-Default "Wire API para Codex: chat o responses" "chat"
+        $makeDefault = Is-Yes (Read-Default "Make Ollama the default for Codex? If no, run codex -p $ProfileName (y/n)" "n")
+        $wireApi = Read-Default "Wire API for Codex: chat or responses" "chat"
         if ($wireApi -notin @("chat", "responses")) { $wireApi = "chat" }
         $backup = Update-CodexConfig $endpoint $model $makeDefault $wireApi
-        Write-Host "Codex configurado en $CodexConfig"
+        Write-Host "Codex configured at $CodexConfig"
         Write-Host "Backup: $backup"
-        Write-Host "Uso recomendado: codex -p $ProfileName"
+        Write-Host "Recommended usage: codex -p $ProfileName"
     }
 
     if ($enableOpenCode) {
-        $makeDefault = Is-Yes (Read-Default "Hacer Ollama el default de OpenCode? (s/n)" "s")
+        $makeDefault = Is-Yes (Read-Default "Make Ollama the default for OpenCode? (y/n)" "y")
         $backup = Update-OpenCodeConfig $endpoint $model $makeDefault
-        Write-Host "OpenCode configurado en $OpenCodeConfig"
+        Write-Host "OpenCode configured at $OpenCodeConfig"
         if ($backup) { Write-Host "Backup: $backup" }
-        Write-Host "Uso: opencode y luego /models si quieres cambiar modelo"
+        Write-Host "Use: opencode, then /models if you want to change the model"
     }
 }
 
 function Disable-LocalModels() {
-    Write-Title "Deshabilitar"
-    $disableClaude = Is-Yes (Read-Default "Quitar variables de Claude Code? (s/n)" "s")
-    $disableCodex = Is-Yes (Read-Default "Quitar provider/profile Ollama de Codex? (s/n)" "s")
-    $disableOpenCode = Is-Yes (Read-Default "Quitar provider Ollama de OpenCode? (s/n)" "s")
+    Write-Title "Disable"
+    $disableClaude = Is-Yes (Read-Default "Remove Claude Code env vars? (y/n)" "y")
+    $disableCodex = Is-Yes (Read-Default "Remove Ollama provider/profile from Codex? (y/n)" "y")
+    $disableOpenCode = Is-Yes (Read-Default "Remove Ollama provider from OpenCode? (y/n)" "y")
 
     if ($disableClaude) {
         Remove-UserEnv "ANTHROPIC_AUTH_TOKEN"
         Remove-UserEnv "ANTHROPIC_API_KEY"
         Remove-UserEnv "ANTHROPIC_BASE_URL"
-        Write-Host "Variables de Claude Code eliminadas."
+        Write-Host "Claude Code env vars removed."
     }
 
     if ($disableCodex) {
         $backup = Disable-CodexConfig
         if ($backup) {
-            Write-Host "Bloques de Codex eliminados. Backup: $backup"
+            Write-Host "Codex blocks removed. Backup: $backup"
         } else {
-            Write-Host "No existe config de Codex."
+            Write-Host "No Codex config found."
         }
     }
 
     if ($disableOpenCode) {
         $backup = Disable-OpenCodeConfig
         if ($backup) {
-            Write-Host "Provider de OpenCode eliminado. Backup: $backup"
+            Write-Host "OpenCode provider removed. Backup: $backup"
         } else {
-            Write-Host "No existe config de OpenCode."
+            Write-Host "No OpenCode config found."
         }
     }
 }
 
 function Show-Status() {
-    Write-Title "Estado"
+    Write-Title "Status"
     Write-Host "ANTHROPIC_BASE_URL = $env:ANTHROPIC_BASE_URL"
     Write-Host "ANTHROPIC_AUTH_TOKEN = $env:ANTHROPIC_AUTH_TOKEN"
     Write-Host "OPENAI_API_KEY set = $([bool]$env:OPENAI_API_KEY)"
@@ -353,18 +355,18 @@ function Show-Status() {
 }
 
 while ($true) {
-    Write-Title "Ollama remoto para Claude Code / Codex CLI"
-    Write-Host "1. Habilitar/configurar"
-    Write-Host "2. Deshabilitar"
-    Write-Host "3. Estado"
-    Write-Host "4. Salir"
-    $choice = Read-Host "Opcion"
+    Write-Title "Remote Ollama for Claude Code / Codex CLI / OpenCode"
+    Write-Host "1. Enable / configure"
+    Write-Host "2. Disable"
+    Write-Host "3. Status"
+    Write-Host "4. Quit"
+    $choice = Read-Host "Option"
 
     switch ($choice) {
         "1" { Enable-LocalModels }
         "2" { Disable-LocalModels }
         "3" { Show-Status }
         "4" { break }
-        default { Write-Host "Opcion no valida" -ForegroundColor Yellow }
+        default { Write-Host "Invalid option" -ForegroundColor Yellow }
     }
 }

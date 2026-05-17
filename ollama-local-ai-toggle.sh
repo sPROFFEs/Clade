@@ -36,6 +36,8 @@ normalize_endpoint() {
   printf '%s' "${endpoint%/}"
 }
 
+# Accept both English (y/Y) and Spanish (s/S) so the script stays
+# backwards-compatible with anyone who had it bookmarked pre-rename.
 is_yes() {
   [[ "$1" =~ ^[sSyY] ]]
 }
@@ -73,17 +75,17 @@ select_model() {
   local choice idx
 
   if [ "${#models[@]}" -eq 0 ]; then
-    read_default "No he podido detectar modelos. Escribe el nombre exacto" "qwen3-coder"
+    read_default "Couldn't detect any models. Type the exact name" "qwen3-coder"
     return
   fi
 
-  printf '\nModelos detectados:\n' >&2
+  printf '\nDetected models:\n' >&2
   for i in "${!models[@]}"; do
     printf '  %s. %s\n' "$((i + 1))" "${models[$i]}" >&2
   done
 
   while true; do
-    printf 'Elige numero o escribe un modelo: ' >&2
+    printf 'Pick a number or type a model name: ' >&2
     read -r choice
     if [[ "$choice" =~ ^[0-9]+$ ]]; then
       idx=$((choice - 1))
@@ -130,7 +132,7 @@ EOF
   export ANTHROPIC_API_KEY=""
   export ANTHROPIC_BASE_URL="$endpoint"
   export OPENAI_API_KEY="ollama"
-  printf 'Variables escritas en %s\n' "$rc_file"
+  printf 'Env vars written to %s\n' "$rc_file"
 }
 
 remove_env_block() {
@@ -144,7 +146,7 @@ remove_env_block() {
   ' "$rc_file" > "$rc_file.tmp"
   mv "$rc_file.tmp" "$rc_file"
   unset ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_BASE_URL OPENAI_API_KEY
-  printf 'Bloque eliminado de %s\n' "$rc_file"
+  printf 'Block removed from %s\n' "$rc_file"
 }
 
 remove_toml_table() {
@@ -201,12 +203,12 @@ update_codex_config() {
   } > "$CODEX_CONFIG"
 
   rm -f "$tmp" "$tmp.2"
-  printf 'Codex configurado en %s\nBackup: %s\n' "$CODEX_CONFIG" "$backup"
+  printf 'Codex configured at %s\nBackup: %s\n' "$CODEX_CONFIG" "$backup"
 }
 
 disable_codex_config() {
   [ -f "$CODEX_CONFIG" ] || {
-    printf 'No existe config de Codex.\n'
+    printf 'No Codex config found.\n'
     return 0
   }
 
@@ -221,7 +223,7 @@ disable_codex_config() {
     { print }
   ' "$tmp.2" > "$CODEX_CONFIG"
   rm -f "$tmp" "$tmp.2"
-  printf 'Bloques de Codex eliminados. Backup: %s\n' "$backup"
+  printf 'Codex blocks removed. Backup: %s\n' "$backup"
 }
 
 update_opencode_config() {
@@ -231,7 +233,7 @@ update_opencode_config() {
   local backup=""
 
   command -v python3 >/dev/null 2>&1 || {
-    printf 'Python 3 es necesario para editar opencode.json sin romper JSON.\n' >&2
+    printf 'Python 3 is required to edit opencode.json without breaking JSON.\n' >&2
     return 1
   }
 
@@ -284,7 +286,7 @@ if make_default:
 path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 PY
 
-  printf 'OpenCode configurado en %s\n' "$OPENCODE_CONFIG"
+  printf 'OpenCode configured at %s\n' "$OPENCODE_CONFIG"
   if [ -n "$backup" ]; then
     printf 'Backup: %s\n' "$backup"
   fi
@@ -292,12 +294,12 @@ PY
 
 disable_opencode_config() {
   [ -f "$OPENCODE_CONFIG" ] || {
-    printf 'No existe config de OpenCode.\n'
+    printf 'No OpenCode config found.\n'
     return 0
   }
 
   command -v python3 >/dev/null 2>&1 || {
-    printf 'Python 3 es necesario para editar opencode.json sin romper JSON.\n' >&2
+    printf 'Python 3 is required to edit opencode.json without breaking JSON.\n' >&2
     return 1
   }
 
@@ -327,25 +329,25 @@ for key in ("model", "small_model"):
 path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 PY
 
-  printf 'Provider de OpenCode eliminado. Backup: %s\n' "$backup"
+  printf 'OpenCode provider removed. Backup: %s\n' "$backup"
 }
 
 enable_local_models() {
-  title "Endpoint Ollama"
-  endpoint="$(normalize_endpoint "$(read_default "Endpoint remoto" "http://192.168.1.50:11434")")"
+  title "Ollama endpoint"
+  endpoint="$(normalize_endpoint "$(read_default "Remote endpoint" "http://192.168.1.50:11434")")"
 
-  printf 'Probando %s ...\n' "$endpoint"
+  printf 'Probing %s ...\n' "$endpoint"
   mapfile -t models < <(detect_models "$endpoint" || true)
   if [ "${#models[@]}" -eq 0 ]; then
-    printf 'No se han detectado modelos. Revisa firewall, OLLAMA_HOST y /api/tags.\n'
+    printf 'No models detected. Check the firewall, OLLAMA_HOST, and /api/tags.\n'
   fi
 
   model="$(select_model "${models[@]}")"
 
-  title "Herramientas"
-  enable_claude="$(read_default "Configurar Claude Code? (s/n)" "s")"
-  enable_codex="$(read_default "Configurar Codex CLI? (s/n)" "s")"
-  enable_opencode="$(read_default "Configurar OpenCode? (s/n)" "s")"
+  title "Tools"
+  enable_claude="$(read_default "Configure Claude Code? (y/n)" "y")"
+  enable_codex="$(read_default "Configure Codex CLI? (y/n)" "y")"
+  enable_opencode="$(read_default "Configure OpenCode? (y/n)" "y")"
 
   if is_yes "$enable_claude"; then
     if [ "$SESSION_ONLY" = "1" ]; then
@@ -355,13 +357,13 @@ enable_local_models() {
     else
       write_env_block "$endpoint"
     fi
-    printf 'Claude Code configurado. Uso: claude --model %s\n' "$model"
+    printf 'Claude Code configured. Use: claude --model %s\n' "$model"
   fi
 
   if is_yes "$enable_codex"; then
     export OPENAI_API_KEY="ollama"
-    make_default="$(read_default "Hacer Ollama el default de Codex? Si dices no, usa codex -p $PROFILE_NAME (s/n)" "n")"
-    wire_api="$(read_default "Wire API para Codex: chat o responses" "chat")"
+    make_default="$(read_default "Make Ollama the default for Codex? If no, run codex -p $PROFILE_NAME (y/n)" "n")"
+    wire_api="$(read_default "Wire API for Codex: chat or responses" "chat")"
     case "$wire_api" in
       chat|responses) ;;
       *) wire_api="chat" ;;
@@ -371,25 +373,25 @@ enable_local_models() {
     else
       update_codex_config "$endpoint" "$model" "0" "$wire_api"
     fi
-    printf 'Uso recomendado: codex -p %s\n' "$PROFILE_NAME"
+    printf 'Recommended usage: codex -p %s\n' "$PROFILE_NAME"
   fi
 
   if is_yes "$enable_opencode"; then
-    make_default="$(read_default "Hacer Ollama el default de OpenCode? (s/n)" "s")"
+    make_default="$(read_default "Make Ollama the default for OpenCode? (y/n)" "y")"
     if is_yes "$make_default"; then
       update_opencode_config "$endpoint" "$model" "1"
     else
       update_opencode_config "$endpoint" "$model" "0"
     fi
-    printf 'Uso: opencode y luego /models si quieres cambiar modelo\n'
+    printf 'Use: opencode, then /models if you want to change the model\n'
   fi
 }
 
 disable_local_models() {
-  title "Deshabilitar"
-  disable_claude="$(read_default "Quitar variables de Claude Code? (s/n)" "s")"
-  disable_codex="$(read_default "Quitar provider/profile Ollama de Codex? (s/n)" "s")"
-  disable_opencode="$(read_default "Quitar provider Ollama de OpenCode? (s/n)" "s")"
+  title "Disable"
+  disable_claude="$(read_default "Remove Claude Code env vars? (y/n)" "y")"
+  disable_codex="$(read_default "Remove Ollama provider/profile from Codex? (y/n)" "y")"
+  disable_opencode="$(read_default "Remove Ollama provider from OpenCode? (y/n)" "y")"
 
   if is_yes "$disable_claude"; then
     remove_env_block
@@ -405,7 +407,7 @@ disable_local_models() {
 }
 
 show_status() {
-  title "Estado"
+  title "Status"
   printf 'ANTHROPIC_BASE_URL = %s\n' "${ANTHROPIC_BASE_URL:-}"
   printf 'ANTHROPIC_AUTH_TOKEN = %s\n' "${ANTHROPIC_AUTH_TOKEN:-}"
   if [ -n "${OPENAI_API_KEY:-}" ]; then
@@ -424,18 +426,18 @@ show_status() {
 }
 
 while true; do
-  title "Ollama remoto para Claude Code / Codex CLI"
-  printf '1. Habilitar/configurar\n'
-  printf '2. Deshabilitar\n'
-  printf '3. Estado\n'
-  printf '4. Salir\n'
-  read -r -p "Opcion: " choice
+  title "Remote Ollama for Claude Code / Codex CLI / OpenCode"
+  printf '1. Enable / configure\n'
+  printf '2. Disable\n'
+  printf '3. Status\n'
+  printf '4. Quit\n'
+  read -r -p "Option: " choice
 
   case "$choice" in
     1) enable_local_models ;;
     2) disable_local_models ;;
     3) show_status ;;
     4) exit 0 ;;
-    *) printf 'Opcion no valida\n' ;;
+    *) printf 'Invalid option\n' ;;
   esac
 done
