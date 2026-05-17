@@ -84,15 +84,38 @@ def main() -> int:
         return 3
     print(f"chrome:  {chrome}", flush=True)
 
+    # The systemd unit sets DISPLAY=:0 even when no real X server is
+    # listening there (typical on a headless Proxmox VM). So we
+    # actively probe before trusting the env — and fall back to Xvfb
+    # if the existing display doesn't answer.
     xvfb = None
-    if not os.environ.get("DISPLAY"):
-        print("→ no DISPLAY; spawning Xvfb...", flush=True)
+    cur = os.environ.get("DISPLAY", "")
+
+    def _display_works(disp: str) -> bool:
+        if not shutil.which("xdpyinfo"):
+            return False  # can't verify; spawn Xvfb to be safe
+        try:
+            return subprocess.call(["xdpyinfo", "-display", disp],
+                                   stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL,
+                                   timeout=3) == 0
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+
+    if cur and _display_works(cur):
+        print(f"DISPLAY: {cur} (reachable)", flush=True)
+    else:
+        if cur:
+            print(f"DISPLAY: {cur} (NOT reachable — spawning Xvfb)", flush=True)
+        else:
+            print("→ no DISPLAY; spawning Xvfb...", flush=True)
+        # Clear XAUTHORITY too so Chrome doesn't try to auth against
+        # the wrong cookie for our Xvfb display.
+        os.environ.pop("XAUTHORITY", None)
         xvfb = _start_xvfb()
         if not xvfb:
             print("WARN: couldn't spawn Xvfb — chrome will probably fail to start.",
                   flush=True)
-    else:
-        print(f"DISPLAY: {os.environ['DISPLAY']}", flush=True)
 
     try:
         # --dump-dom returns the rendered DOM and exits, no UI needed.

@@ -107,15 +107,18 @@ def _stop_xvfb() -> None:
         _xvfb_proc = None
 
 
-# When run as a systemd subprocess we may not inherit DISPLAY; pick
-# one that actually works (or spin up Xvfb if nothing is reachable).
+# When run as a systemd subprocess we may inherit a bogus DISPLAY
+# (the install.sh bakes DISPLAY=:0 into the unit even when :0 isn't
+# actually reachable). Trust-but-verify, then spin up Xvfb if needed.
 if not HEADLESS:
     cur = os.environ.get("DISPLAY", "")
     if not (cur and _display_works(cur)):
+        # Clear stale XAUTHORITY so it doesn't poison the new display.
+        os.environ.pop("XAUTHORITY", None)
         if _display_works(":0"):
             os.environ["DISPLAY"] = ":0"
             cand = os.path.join(os.path.expanduser("~"), ".Xauthority")
-            if os.path.exists(cand) and not os.environ.get("XAUTHORITY"):
+            if os.path.exists(cand):
                 os.environ["XAUTHORITY"] = cand
         else:
             d = _start_xvfb()

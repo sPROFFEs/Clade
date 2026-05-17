@@ -170,7 +170,8 @@ def _stop_xvfb() -> None:
 
 def _auto_display() -> None:
     """Decide what Chrome should attach to:
-       1. honour DISPLAY if it already points at a working X server,
+       1. honour DISPLAY only if it points at a *reachable* X server
+          (the systemd unit sets DISPLAY=:0 even when :0 isn't real),
        2. else try :0 + ~/.Xauthority (the desktop-session case),
        3. else fall back to spawning Xvfb (headless box, no GUI).
     Sets os.environ so the playwright child inherits it."""
@@ -179,13 +180,18 @@ def _auto_display() -> None:
 
     cur = os.environ.get("DISPLAY", "")
     if cur and _display_works(cur):
-        return
+        return  # the env was already correct
+
+    # Inherited DISPLAY is bogus (or missing). Clear XAUTHORITY too —
+    # otherwise Chrome tries to auth against the wrong cookie for
+    # whatever display we end up using.
+    os.environ.pop("XAUTHORITY", None)
 
     # Try the desktop-session default before bringing up Xvfb.
     if _display_works(":0"):
         os.environ["DISPLAY"] = ":0"
         cand = os.path.join(os.path.expanduser("~"), ".Xauthority")
-        if os.path.exists(cand) and not os.environ.get("XAUTHORITY"):
+        if os.path.exists(cand):
             os.environ["XAUTHORITY"] = cand
         return
 

@@ -1214,7 +1214,20 @@ def _register_chat_fallback() -> None:
         try:
             reply = _dispatch(text, _CHAT_TARGET, keep_history=True)
         except RuntimeError as e:
-            bot.reply_to(m, f"❌ {e}", parse_mode="Markdown")
+            # Send WITHOUT parse_mode — Nano/Ollama errors can contain
+            # backticks, asterisks, etc. that break Markdown parsing
+            # and would otherwise drop the message silently. Chunk
+            # long errors so we don't trip the 4096-byte cap either.
+            err = f"❌ {e}"
+            # If the user was talking to Nano and the service is
+            # permanently unavailable, nudge them to the working path.
+            if (_CHAT_TARGET == "nano"
+                    and "unavailable" in str(e).lower()):
+                err += ("\n\nChrome reports this device can't host the on-"
+                        "device-model. Switch to a local Ollama model "
+                        "instead:  /use llama3.1:8b   (or any model from "
+                        "/models)")
+            _send_long(err)
             return
         _send_long(reply, prefix="🤖 ")
 
