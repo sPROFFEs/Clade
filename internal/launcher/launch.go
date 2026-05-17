@@ -46,8 +46,27 @@ func PrepareSandbox(ws Workspace, agent Agent) error {
 		return fmt.Errorf("compile %s into sandbox: %w", agent.WpcTarget, err)
 	}
 
-	return writeSandboxReadme(ws, agent)
+	if err := writeSandboxReadme(ws, agent); err != nil {
+		return err
+	}
+
+	// Apply per-workspace decorations (language directive, memory
+	// staging, online-skill clone, chat-log dir). Errors here are
+	// surfaced via the LastDecorationNotes accessor — non-fatal so a
+	// flaky network fetch doesn't block the launch.
+	notes := applyDecorations(ws, agent)
+	if len(notes) > 0 {
+		LastDecorationNotes = notes
+	} else {
+		LastDecorationNotes = nil
+	}
+	return nil
 }
+
+// LastDecorationNotes is set by PrepareSandbox after each call so the TUI
+// can surface non-fatal warnings (online-skill clone failed, memory copy
+// failed, etc.) on the launching screen.
+var LastDecorationNotes []string
 
 // writeSandboxReadme drops an orientation file on first compile so the
 // user lands in something self-explanatory when they cd into the sandbox.
@@ -76,24 +95,57 @@ hand) and re-run the launcher to recompile.
 
 // LaunchPlan describes what the TUI hands off to the OS once Bubble Tea
 // has released the terminal: which binary to exec, with what args, in
-// which directory.
+// which directory, plus optional env overrides.
 type LaunchPlan struct {
 	Command string
 	Args    []string
 	Dir     string
+	// Env, if non-empty, is merged on top of os.Environ() when spawning
+	// the agent. Used for Claude + Ollama: ANTHROPIC_BASE_URL, etc.
+	Env map[string]string
 }
 
 // Plan builds the LaunchPlan but does not actually exec. The TUI layer
 // must run Plan first (so the workpath is compiled and any error
 // surfaces inside the UI), then quit the Bubble Tea program, then exec
 // the plan from main() while the terminal is no longer being driven.
+//
+// If the workspace has Ollama settings AND the picked agent is Claude,
+// Plan auto-injects the ANTHROPIC_* env vars so Claude routes to the
+// local endpoint instead of Anthropic. Codex and OpenCode get their
+// routing from their own config files (written via the Ollama screen);
+// the launcher doesn't override their env.
 func Plan(ws Workspace, agent Agent) (LaunchPlan, error) {
 	if err := PrepareSandbox(ws, agent); err != nil {
 		return LaunchPlan{}, err
 	}
-	return LaunchPlan{
+	plan := LaunchPlan{
 		Command: agent.Binary,
 		Args:    nil,
 		Dir:     ws.SandboxDir,
-	}, nil
+	}
+	if agent.ID == AgentClaude {
+		o := ws.Settings.Ollama
+		if o.Endpoint != "" && o.Model != "" {
+			plan.Env = map[string]string{
+				"ANTHROPIC_AUTH_TOKEN": "ollama",
+				"ANTHROPIC_API_KEY":    "",
+				"ANTHROPIC_BASE_URL":   o.Endpoint,
+				"OPENAI_API_KEY":       "ollama",
+			}
+		}
+	}
+	return plan, nil
+}
+
+// PlanWithEnv is Plan + env overrides — the launcher injects these when
+// it spawns the agent so users get e.g. Ollama routing without us
+// touching their shell rc.
+func PlanWithEnv(ws Workspace, agent Agent, env map[string]string) (LaunchPlan, error) {
+	plan, err := Plan(ws, agent)
+	if err != nil {
+		return LaunchPlan{}, err
+	}
+	plan.Env = env
+	return plan, nil
 }

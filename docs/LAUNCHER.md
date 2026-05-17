@@ -6,30 +6,44 @@ a sandbox with the workpath already compiled in.
 
 ## Status
 
-**Phase 1 (this version) — what works**
+**Phase 1 + Phase 2 ship in this version.** Phase 3 is the chat-transcript
+capture work that hooks into per-agent session storage; not started yet.
+
+**What works**
 
 - First-run wizard: prompts for a workspaces root, seeds the bundled
   samples (`reversing`, `code-review`).
-- Workspace list / select.
-- Minimal "new workspace" wizard (`name` + `description`).
+- Workspace list, select, refresh, **settings edit** (`s`).
+- **Rich create wizard** (5 steps): name → description → language →
+  memory toggle → online-skills list.
 - Per-workspace `sandbox/` auto-created, gitignored.
 - Agent CLI detection via `exec.LookPath` + `--version` probe.
 - `wpc compile --target <claude|codex>` into the sandbox before launch
   (called as a Go library — no shelling out to `wpc`).
+- **Install missing CLIs from inside the launcher** (`i`): per-OS catalog
+  with pnpm-first dependency handling, prereq checks, command shown
+  before execution, live output stream.
+- **Ollama config screen** (`o`): probes the endpoint, lists models,
+  configures any combination of Claude (per-workspace env injection),
+  Codex (writes `~/.codex/config.toml`), and OpenCode (writes
+  `~/.config/opencode/opencode.json`).
+- **Per-workspace language directive** prepended to compiled
+  `SKILL.md` / `AGENTS.md` so the agent replies in the right language.
+- **Persistent `MEMORY.md`** at the workspace root, copied into the
+  sandbox before launch and synced back after the agent exits.
+- **Online skills** cloned via git into `.claude/skills/<name>/` (or
+  `online-skills/<name>/` for codex/opencode) on every launch.
+- **Chat-log dir**: each launch records a `chats/<timestamp>-<agent>/
+  session.json` blob so past sessions are browseable.
 - Clean TTY hand-off: Bubble Tea quits, the agent inherits stdio.
 
-**Phase 2 (clearly deferred — UI shows this)**
+**Phase 3 (not started)**
 
-- Install missing CLIs from inside the launcher (currently greys them
-  out and points at `agent-cli-installer.sh`). Will be a TS-free port
-  with pnpm-first dep handling.
-- Local-model setup (currently the `ollama-local-ai-toggle.sh/.ps1`
-  scripts work standalone).
-- Rich creation wizard: memory file toggle, default language, online
-  skill picker (e.g. [caveman](https://github.com/juliusbrussee/caveman)).
-- Per-workspace chat-log retention (`chats/` dir is reserved).
-- Workspace settings edit screen (`workspace.json` is read but not yet
-  edited via the UI).
+- Actual transcript capture (each agent stores transcripts differently;
+  needs per-agent adapters).
+- Zip-archive online-skills support (currently git-only).
+- Per-workspace agent-CLI installation pin (use a specific version
+  per workspace).
 
 ## Install
 
@@ -97,10 +111,24 @@ support is on the roadmap.
 
 ## Keys
 
-| Key      | Effect                                               |
-|----------|------------------------------------------------------|
-| ↑/↓ or k/j | Move selection                                     |
-| enter    | Open / launch                                        |
-| esc      | Back to the previous screen                          |
-| r        | Refresh the workspace list                           |
-| ctrl-c   | Quit immediately                                     |
+### Workspaces screen
+| Key   | Effect                                |
+|-------|---------------------------------------|
+| ↑/↓ k/j | Move selection                      |
+| enter | Open workspace (or `+ new`)           |
+| s     | Settings for highlighted workspace    |
+| r     | Refresh list                          |
+
+### Agents screen
+| Key   | Effect                                            |
+|-------|---------------------------------------------------|
+| enter | Launch (if installed) or open installer (if not)  |
+| i     | Install / upgrade the highlighted agent           |
+| o     | Open the Ollama configuration screen              |
+| esc   | Back                                              |
+
+### Anywhere
+| Key   | Effect                  |
+|-------|-------------------------|
+| ctrl-c| Quit immediately        |
+| esc   | Step back one screen    |

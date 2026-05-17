@@ -27,13 +27,47 @@ type Workspace struct {
 	Settings    WorkspaceSettings // <Root>/workspace.json
 }
 
-// WorkspaceSettings are per-workspace knobs that the TUI exposes (or
-// will, in Phase 2). The Phase-1 launcher reads them but doesn't yet
-// offer an edit screen — modify workspace.json by hand to set them.
+// WorkspaceSettings are per-workspace knobs the TUI exposes.
 type WorkspaceSettings struct {
-	Language      string   `json:"language,omitempty"`
-	OnlineSkills  []string `json:"onlineSkills,omitempty"`
-	MemoryEnabled bool     `json:"memoryEnabled,omitempty"`
+	// Language, if set, gets prepended to the agent's initial context so
+	// it consistently replies in that language (e.g. "es", "ja", "Italian").
+	Language string `json:"language,omitempty"`
+	// OnlineSkills is a list of URLs (git repos or zip archives) the
+	// launcher fetches into the sandbox's .claude/skills/ on launch.
+	OnlineSkills []string `json:"onlineSkills,omitempty"`
+	// MemoryEnabled, when true, ensures the workspace has a MEMORY.md
+	// file the agent can read/write across sessions.
+	MemoryEnabled bool `json:"memoryEnabled,omitempty"`
+	// Ollama, when populated, makes the launcher inject per-launch env
+	// vars for Claude so it routes to the local Ollama endpoint instead
+	// of Anthropic. Stored here so the choice follows the workspace.
+	Ollama OllamaSettings `json:"ollama,omitempty"`
+}
+
+// OllamaSettings duplicates internal/ollama.Settings to avoid an import
+// cycle (ollama depends on this package's notion of a workspace via
+// callers in cmd/waifu; keeping these types separate keeps the
+// dependency graph one-way).
+type OllamaSettings struct {
+	Endpoint string `json:"endpoint,omitempty"`
+	Model    string `json:"model,omitempty"`
+	WireAPI  string `json:"wireApi,omitempty"`
+}
+
+// SaveWorkspaceSettings persists ws.Settings to <ws.Root>/workspace.json.
+// Atomic (tmp + rename).
+func SaveWorkspaceSettings(ws Workspace) error {
+	raw, err := json.MarshalIndent(ws.Settings, "", "  ")
+	if err != nil {
+		return err
+	}
+	raw = append(raw, '\n')
+	path := filepath.Join(ws.Root, "workspace.json")
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, raw, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 type workpathManifest struct {
