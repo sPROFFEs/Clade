@@ -75,10 +75,13 @@ list.
 | `/unload <name>`     | Flush from VRAM right away                                |
 | `/keepalive <dur>`   | `5m` `1h` `24h` `-1` (pin) `0` (unload). Applied to every currently-loaded model and used as the new default for `/load` |
 | **Nano bridge**      |                                                           |
+| `/nano_setup`        | One-time install: deps + Chromium + Nano model download   |
+| `/nano_update`       | Upgrade bridge deps + Chromium, re-prime Nano             |
+| `/nano_check`        | Report install state (no changes)                         |
 | `/nano_start`        | Spawn headless Chrome, expose HTTP bridge                 |
 | `/nano_stop`         | SIGTERM the bridge                                        |
 | `/nano_url`          | The exact endpoint URL to paste into code-launcher        |
-| `/nano_status`       | PID, uptime, log tail                                     |
+| `/nano_status`       | PID, uptime, log tail, prereq state                       |
 
 ---
 
@@ -90,42 +93,53 @@ expose** the model as a downloadable file or over HTTP; you can only
 reach it via a JavaScript API inside a browser tab. That's why a
 headless Chrome stays running for the duration of the bridge.
 
-**Before `/nano_start` will work, the chosen Chrome profile must have
-the Prompt API enabled and Gemini Nano downloaded.** Headless mode
-will not download the model from scratch. Do this once, manually:
+### Recommended path: run `/nano_setup` from Telegram
 
-### Prep Chrome for Nano
+The bot ships `nano_setup.py`, which handles the whole prep for you:
 
-1. Pick a profile path you can dedicate to the bridge. The
-   `config.example.env` suggests `~/.config/code-launcher-nano`.
-2. On the box where the bridge will run, open a **non-headless** Chrome
-   using that profile dir:
+1. Installs the bridge's Python deps (`playwright`, `aiohttp`) via
+   `pip install -r requirements-bridge.txt`.
+2. Runs `playwright install chromium` (downloads ~150 MB of Chromium
+   the first time; no-op on subsequent runs).
+3. Creates `NANO_CHROME_PROFILE` if it doesn't exist.
+4. Launches Chromium against that profile with
+   `--enable-features=OptimizationGuideOnDeviceModel,PromptAPIForGeminiNano`
+   — Chrome accepts those features via CLI, so **no manual
+   `chrome://flags` clicking required**.
+5. Calls `LanguageModel.create({monitor:…})` which triggers the Nano
+   download and emits `downloadprogress` events; the bot streams them
+   back as `↳ downloading Nano: 5% → 10% → … → 100%`.
+6. Confirms `LanguageModel.availability() === "available"` and exits.
 
+From Telegram:
+```
+/nano_setup
+```
+The bot edits a single message in place with the live output of every
+step. First run on a clean box: ~5–10 min (Chromium + Nano downloads).
+Subsequent runs: seconds.
+
+- `/nano_check` — same script in **report-only** mode. No changes.
+- `/nano_update` — upgrades the deps, re-runs `playwright install
+  chromium --force`, re-primes Nano. Use after a Chrome major bump.
+
+### Fallback: if `/nano_setup` can't trigger the download
+
+On some boxes Chrome's on-device-model service refuses to fetch
+headlessly (rare; reported when Chrome's policy gates trip). Manual
+flow:
+
+1. Open a **non-headless** Chrome with the profile dir:
    ```sh
    google-chrome --user-data-dir=/home/$USER/.config/code-launcher-nano
    ```
-
-   (Use `chromium` if that's what you have. On macOS:
-   `/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome
-   --user-data-dir=...`.)
-
-3. Inside that Chrome:
-   - Go to `chrome://flags/#prompt-api-for-gemini-nano` → set to
-     **Enabled**.
-   - Go to `chrome://flags/#optimization-guide-on-device-model` → set
-     to **Enabled BypassPerfRequirement**.
-   - Click **Relaunch** when prompted (this keeps the flags inside
-     the dedicated profile, not your daily one).
-4. Once relaunched, open `chrome://on-device-internals`. Check that
-   **Foundational Model Information** shows a model with non-zero
-   size. If it says "Downloading", leave Chrome open until it
-   finishes (can be 1.5–2 GB; takes minutes on a fast link).
-5. Optional sanity check: open DevTools console on any page, run
-   `await LanguageModel.availability()`. Should return `"available"`.
-6. Close Chrome.
-
-The profile is now ready. `/nano_start` from Telegram will launch
-headless Chrome pointed at it.
+2. `chrome://flags/#prompt-api-for-gemini-nano` → Enabled.
+3. `chrome://flags/#optimization-guide-on-device-model` → Enabled BypassPerfRequirement.
+4. Relaunch. `chrome://on-device-internals` → wait for the model to
+   finish (1.5–2 GB).
+5. Sanity check in DevTools: `await LanguageModel.availability()` →
+   `"available"`.
+6. Close Chrome. `/nano_start` will use that profile.
 
 ### What the bridge exposes
 

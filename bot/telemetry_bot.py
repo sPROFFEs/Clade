@@ -112,9 +112,13 @@ def nano_kb() -> InlineKeyboardMarkup:
     if bridge.running():
         kb.add(InlineKeyboardButton("⏹  stop bridge", callback_data="nano:stop"),
                InlineKeyboardButton("🔗 url", callback_data="nano:url"))
-    else:
+    elif _bridge_ready():
         kb.add(InlineKeyboardButton("▶️  start bridge", callback_data="nano:start"))
-    kb.add(InlineKeyboardButton("📋 status", callback_data="nano:status"))
+    else:
+        # Surface setup directly when prereqs missing — saves a hop.
+        kb.add(InlineKeyboardButton("⚙️  setup (one-time)", callback_data="nano:setup"))
+    kb.add(InlineKeyboardButton("📋 status", callback_data="nano:status"),
+           InlineKeyboardButton("⬆️  update", callback_data="nano:update"))
     return kb
 
 
@@ -293,6 +297,11 @@ class NanoBridgeController:
             return f"already running on {self.url()}"
         if not os.environ.get("NANO_CHROME_PROFILE"):
             return "❌ NANO_CHROME_PROFILE not set — see README 'Prep Chrome for Nano'"
+        if not _bridge_ready():
+            return ("❌ bridge prerequisites missing.\n"
+                    "Run `/nano_setup` first — it installs Playwright, downloads "
+                    "Chromium, and primes Gemini Nano (one-time, may take several "
+                    "minutes on first use).")
         script = Path(__file__).parent / "nano_bridge.py"
         if not script.exists():
             return f"❌ {script} missing"
@@ -357,6 +366,79 @@ def _tail(path: str, n: int) -> str:
 bridge = NanoBridgeController(NANO_PORT, NANO_LOG)
 
 
+# Quick check the bridge's Python deps + Chromium are usable without
+# importing playwright at the top of the bot (keeps the bot startable
+# on minimal hosts that haven't installed bridge deps yet).
+def _bridge_ready() -> bool:
+    try:
+        import playwright as _pw  # noqa: F401
+        import aiohttp as _ah     # noqa: F401
+    except ImportError:
+        return False
+    # Verify chromium artifact is present. We do this cheaply by
+    # asking the playwright CLI; importing sync_playwright would spin
+    # up a node child unnecessarily on every status check.
+    try:
+        rc = subprocess.call(
+            [sys.executable, "-c",
+             "from playwright.sync_api import sync_playwright;"
+             "import pathlib,sys;"
+             "exe = sync_playwright().__enter__().chromium.executable_path;"
+             "sys.exit(0 if exe and pathlib.Path(exe).exists() else 1)"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
+        return rc == 0
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+
+
+def _run_setup_streaming(message, mode: str) -> None:
+    """Spawn nano_setup.py with the given subcommand and stream its
+    stdout line-by-line into a single Telegram message (edited in
+    place so we don't spam)."""
+    script = Path(__file__).parent / "nano_setup.py"
+    if not script.exists():
+        bot.reply_to(message, f"❌ {script} missing")
+        return
+    placeholder = bot.reply_to(message, f"⚙️ running `nano_setup.py {mode}`...",
+                               parse_mode="Markdown")
+    buf: list[str] = [f"⚙️ `nano_setup.py {mode}`\n```"]
+
+    def _flush(force: bool = False) -> None:
+        # Telegram caps messages at 4096 chars; keep a tail window.
+        body = "\n".join(buf[-40:]) + "\n```"
+        try:
+            bot.edit_message_text(body, CHAT_ID, placeholder.message_id,
+                                  parse_mode="Markdown")
+        except Exception:
+            # Likely "message is not modified" — fine.
+            pass
+
+    try:
+        proc = subprocess.Popen(
+            [sys.executable, str(script), mode],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            bufsize=1)
+    except OSError as e:
+        bot.edit_message_text(f"❌ launch failed: {e}", CHAT_ID,
+                              placeholder.message_id)
+        return
+
+    last_edit = 0.0
+    assert proc.stdout
+    for line in proc.stdout:
+        buf.append(line.rstrip())
+        now = time.time()
+        if now - last_edit > 1.5:
+            _flush()
+            last_edit = now
+    proc.wait()
+    buf.append(f"\n_exit code: {proc.returncode}_")
+    _flush(force=True)
+
+
+# ---------- end controller helpers ----------
+
+
 # ---------- text / slash handlers ----------
 
 @bot.message_handler(commands=["start", "menu"])
@@ -382,10 +464,13 @@ def cmd_help(m):
         "  /unload <name>\n"
         "  /keepalive <duration> — `5m` `1h` `24h` `-1` (pin) `0` (unload)\n"
         "\n*nano bridge*\n"
+        "  /nano_setup — one-time: install Playwright + Chromium + download Nano\n"
+        "  /nano_update — upgrade bridge deps + Chromium + re-prime Nano\n"
+        "  /nano_check — report install state (no changes)\n"
         "  /nano_start — start headless chrome bridge\n"
         "  /nano_stop\n"
         "  /nano_url — paste-ready URL for code-launcher\n"
-        "  /nano_status\n"
+        "  /nano_status — running state + prereqs\n"
         "\n*danger*\n"
         "  💀 kill all — stop ollama + bridge, free VRAM\n"
     ), parse_mode="Markdown")
@@ -596,7 +681,27 @@ def cmd_nano_url(m):
 @bot.message_handler(commands=["nano_status"])
 @auth
 def cmd_nano_status(m):
-    bot.reply_to(m, bridge.status(), parse_mode="Markdown")
+    parts = [bridge.status()]
+    parts.append(f"\n*prereqs:* {'✓ ready' if _bridge_ready() else '❌ run /nano_setup'}")
+    bot.reply_to(m, "\n".join(parts), parse_mode="Markdown")
+
+
+@bot.message_handler(commands=["nano_setup"])
+@auth
+def cmd_nano_setup(m):
+    _run_setup_streaming(m, "install")
+
+
+@bot.message_handler(commands=["nano_update"])
+@auth
+def cmd_nano_update(m):
+    _run_setup_streaming(m, "update")
+
+
+@bot.message_handler(commands=["nano_check"])
+@auth
+def cmd_nano_check(m):
+    _run_setup_streaming(m, "check")
 
 
 # ---------- inline keyboard callbacks ----------
@@ -642,7 +747,12 @@ def on_cb(c):
             "*endpoint:* " + bridge.url() + "\n"
             "*model:* `gemini-nano`"), parse_mode="Markdown")
     elif c.data == "nano:status":
-        bot.send_message(CHAT_ID, bridge.status(), parse_mode="Markdown")
+        body = bridge.status() + f"\n*prereqs:* {'✓ ready' if _bridge_ready() else '❌ run /nano_setup'}"
+        bot.send_message(CHAT_ID, body, parse_mode="Markdown")
+    elif c.data == "nano:setup":
+        _run_setup_streaming(c.message, "install")
+    elif c.data == "nano:update":
+        _run_setup_streaming(c.message, "update")
     bot.answer_callback_query(c.id)
 
 
