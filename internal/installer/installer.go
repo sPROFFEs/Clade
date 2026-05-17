@@ -89,6 +89,7 @@ const (
 	AgentClaude   AgentID = "claude"
 	AgentCodex    AgentID = "codex"
 	AgentOpenCode AgentID = "opencode"
+	AgentGemini   AgentID = "gemini"
 )
 
 // Action is "install" or "update". Update reuses most install commands,
@@ -499,6 +500,24 @@ func allMethods(agent AgentID, action Action, current OS) []Method {
 				methods[0].Recommended = true
 			}
 			return methods
+		}
+
+	case AgentGemini:
+		switch current {
+		case OSMacOS:
+			return []Method{
+				{ID: "brew", Label: "Homebrew formula", Command: formulaCmd(action, "gemini-cli"), Recommended: true},
+				{ID: "pnpm", Label: "pnpm global package", Command: pnpmPkg("@google/gemini-cli"), Prereqs: []string{"node", "pnpm"}},
+			}
+		case OSLinux, OSWSL:
+			return []Method{
+				{ID: "pnpm", Label: "pnpm global package", Command: pnpmPkg("@google/gemini-cli"), Recommended: true, Prereqs: []string{"node", "pnpm"}},
+				{ID: "brew", Label: "Homebrew/Linuxbrew formula", Command: formulaCmd(action, "gemini-cli")},
+			}
+		case OSWindows:
+			return []Method{
+				{ID: "pnpm", Label: "pnpm global package", Command: pnpmPkg("@google/gemini-cli"), Recommended: true, Prereqs: []string{"node", "pnpm"}},
+			}
 		}
 	}
 	return nil

@@ -87,6 +87,13 @@ func (m templateListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.cursor < len(m.items) {
 				m.deleteAsk = true
 			}
+		case "f":
+			// Edit template workpath files (mission/playbook/rules etc.).
+			if m.cursor < len(m.items) {
+				t := m.items[m.cursor]
+				parent := newTemplateListModel(m.cfg)
+				return m, wrap(newFilesModel(m.cfg, t.WorkpathDir, "template "+t.Name, parent))
+			}
 		case "r":
 			return m, m.Init()
 		}
@@ -135,7 +142,7 @@ func (m templateListModel) View() string {
 	}
 
 	b.WriteString(helpStyle.Render(
-		"↑/↓ select · enter edit settings · n new · d delete · r refresh · esc back"))
+		"↑/↓ select · enter edit settings · f edit files · n new · d delete · r refresh · esc back"))
 	return b.String()
 }
 

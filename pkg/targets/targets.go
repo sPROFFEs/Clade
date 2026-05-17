@@ -65,5 +65,6 @@ func init() {
 	Register(&mikaTarget{})
 	Register(&cursorTarget{})
 	Register(&codexTarget{})
+	Register(&geminiTarget{})
 	Register(&genericTarget{})
 }

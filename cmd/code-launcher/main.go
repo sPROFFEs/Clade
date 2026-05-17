@@ -60,7 +60,10 @@ func main() {
 	}
 
 	root := &rootModel{screen: initial}
-	prog := tea.NewProgram(root)
+	// WithAltScreen takes over the terminal and restores the previous
+	// content on exit — matches what professional TUIs (lazygit, k9s,
+	// htop) do and keeps the user's shell scrollback clean.
+	prog := tea.NewProgram(root, tea.WithAltScreen())
 	if _, err := prog.Run(); err != nil {
 		die(err)
 	}

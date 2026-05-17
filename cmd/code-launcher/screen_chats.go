@@ -107,6 +107,14 @@ func (m chatListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				ws := c.AsWorkspace()
 				return m, wrap(newSettingsModel(m.cfg, ws))
 			}
+		case "f":
+			// Workpath file editor — mission.md / playbook.md / rules.md,
+			// or "open in file manager" for tools/agents/etc.
+			if m.cursor < len(m.items) {
+				c := m.items[m.cursor]
+				parent := newChatListModel(m.cfg)
+				return m, wrap(newFilesModel(m.cfg, c.WorkpathDir, "chat "+c.Label, parent))
+			}
 		case "a":
 			// Power-user escape hatch: open the agents picker for this
 			// chat (install / update / pick a different agent).
@@ -193,7 +201,7 @@ func (m chatListModel) View() string {
 	}
 
 	b.WriteString(helpStyle.Render(
-		"↑/↓ select · enter open · n new · e settings · o ollama · a agents · d delete · t templates · r refresh · ctrl-c quit"))
+		"↑/↓ select · enter open · n new · e settings · f files · o ollama · a agents · d delete · t templates · r refresh · ctrl-c quit"))
 	return b.String()
 }
 

@@ -17,6 +17,7 @@ const (
 	AgentClaude   AgentID = "claude"
 	AgentCodex    AgentID = "codex"
 	AgentOpenCode AgentID = "opencode"
+	AgentGemini   AgentID = "gemini"
 )
 
 // Agent describes one supported CLI agent. WpcTarget is the wpc target
@@ -67,6 +68,13 @@ func KnownAgents() []Agent {
 			Binary:      "opencode",
 			WpcTarget:   "codex",
 			InstallHint: "curl -fsSL https://opencode.ai/install | bash   |  pnpm add -g opencode-ai",
+		},
+		{
+			ID:          AgentGemini,
+			Label:       "Gemini CLI",
+			Binary:      "gemini",
+			WpcTarget:   "gemini",
+			InstallHint: "pnpm add -g @google/gemini-cli   (npm package; needs Node 20+)",
 		},
 	}
 }

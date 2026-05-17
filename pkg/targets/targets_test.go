@@ -32,7 +32,7 @@ func mustRead(t *testing.T, path string) string {
 }
 
 func TestRegistry_HasAllTargets(t *testing.T) {
-	want := []string{"claude", "codex", "cursor", "generic", "mika"}
+	want := []string{"claude", "codex", "cursor", "gemini", "generic", "mika"}
 	got := Names()
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("Names() = %v, want %v", got, want)
@@ -171,6 +171,28 @@ func TestCodex_EmitsAgentsMD(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(out, "AGENTS.assets", "agents", "helper.md")); err != nil {
 		t.Errorf("assets dir missing helper.md: %v", err)
+	}
+}
+
+func TestGemini_EmitsGeminiMD(t *testing.T) {
+	wp := loadByo(t)
+	out := t.TempDir()
+	tgt, err := Get("gemini")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tgt.Compile(wp, out); err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+	body := mustRead(t, filepath.Join(out, "GEMINI.md"))
+	if !strings.HasPrefix(body, "# byo\n") {
+		t.Error("GEMINI.md should open with workpath H1")
+	}
+	if !strings.Contains(body, "GEMINI.assets/tools/") {
+		t.Error("GEMINI.md should reference assets dir for tools")
+	}
+	if _, err := os.Stat(filepath.Join(out, "GEMINI.assets", "tools", "greet.sh")); err != nil {
+		t.Errorf("assets dir missing greet.sh: %v", err)
 	}
 }
 
