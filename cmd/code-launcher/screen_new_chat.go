@@ -79,40 +79,36 @@ func (m pickTemplateModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m pickTemplateModel) View() string {
 	var b strings.Builder
-	b.WriteString(header("New chat — pick a template"))
-	b.WriteString("\n")
+	title := "New chat · pick a template"
+	help := "↑/↓ select · enter pick · t manage templates · esc back"
 	if !m.loaded {
-		b.WriteString(hintStyle.Render("Loading templates...") + "\n")
-		return b.String()
+		b.WriteString(hintStyle.Render("Loading templates..."))
+		return renderChrome(title, b.String(), help)
 	}
 	if m.err != "" {
-		b.WriteString(errorStyle.Render("Error: "+m.err) + "\n\n")
+		b.WriteString(errorStyle.Render("✗ "+m.err) + "\n\n")
 	}
 	if len(m.items) == 0 {
-		b.WriteString(hintStyle.Render("No templates yet — create one to start chatting.") + "\n\n")
+		b.WriteString(hintStyle.Render("No templates yet — pick the '+ new template…' row below.") + "\n\n")
 	}
-	for i, t := range m.items {
+	for i, tpl := range m.items {
+		isSel := i == m.cursor
 		marker := "  "
-		render := listItemStyle.Render
-		if i == m.cursor {
+		if isSel {
 			marker = "› "
-			render = listItemSelectedStyle.Render
 		}
-		b.WriteString(render(marker+t.Name) + "\n")
-		if i == m.cursor && t.Description != "" {
-			b.WriteString(descStyle.Render(t.Description) + "\n")
+		b.WriteString(selectionRow(marker+tpl.Name, isSel) + "\n")
+		if isSel && tpl.Description != "" {
+			b.WriteString(descStyle.Render(tpl.Description) + "\n")
 		}
 	}
-	// "+ new template" pseudo-row
+	isSelNew := m.cursor == len(m.items)
 	marker := "  "
-	r := listItemStyle.Render
-	if m.cursor == len(m.items) {
+	if isSelNew {
 		marker = "› "
-		r = listItemSelectedStyle.Render
 	}
-	b.WriteString(r(marker+"+ new template…") + "\n")
-	b.WriteString(helpStyle.Render("↑/↓ select · enter pick · t manage templates · esc back"))
-	return b.String()
+	b.WriteString(selectionRow(marker+"+ new template…", isSelNew) + "\n")
+	return renderChrome(title, b.String(), help)
 }
 
 // --- step 2: name + pick agent -------------------------------------------
@@ -243,15 +239,15 @@ func (m newChatFromTemplateModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m newChatFromTemplateModel) View() string {
 	var b strings.Builder
-	b.WriteString(header(fmt.Sprintf("New chat from %q", m.template.Name)))
-	b.WriteString("\n")
-	if m.step >= 0 {
-		b.WriteString(subtitleStyle.Render("Template: ") + m.template.Name + "\n")
-		if m.template.Description != "" {
-			b.WriteString(descStyle.Render(m.template.Description) + "\n")
-		}
-		b.WriteString("\n")
+	title := fmt.Sprintf("New chat from %q", m.template.Name)
+	help := "enter to continue · esc back"
+
+	b.WriteString(subtitleStyle.Render("Template: ") + m.template.Name + "\n")
+	if m.template.Description != "" {
+		b.WriteString(descStyle.Render(m.template.Description) + "\n")
 	}
+	b.WriteString("\n")
+
 	switch m.step {
 	case 0:
 		b.WriteString(inputLabelStyle.Render("Chat name: "))
@@ -261,34 +257,33 @@ func (m newChatFromTemplateModel) View() string {
 				"shows in the home list.") + "\n")
 	case 1:
 		b.WriteString(subtitleStyle.Render("Name: ") + m.label.Value() + "\n\n")
-		b.WriteString(inputLabelStyle.Render("Agent (locked at chat creation):") + "\n")
+		b.WriteString(inputLabelStyle.Render("Agent (locked at chat creation):") + "\n\n")
 		if m.agents == nil {
-			b.WriteString(hintStyle.Render("Scanning PATH for agent CLIs...") + "\n")
+			b.WriteString(hintStyle.Render("Scanning PATH for agent CLIs..."))
+			break
 		}
 		for i, a := range m.agents {
+			isSel := i == m.cursor && a.Available
 			marker := "  "
-			r := listItemStyle.Render
 			if i == m.cursor {
 				marker = "› "
-				r = listItemSelectedStyle.Render
 			}
-			status := availableStyle.Render("available")
+			status := availableStyle.Render("● available")
 			if !a.Available {
-				status = missingStyle.Render("not installed")
+				status = missingStyle.Render("○ not installed")
 				if a.ProbeError != "" {
-					status = missingStyle.Render("broken install")
+					status = errorStyle.Render("✗ broken install")
 				}
 			}
-			line := marker + a.Label + " " + status
+			line := marker + a.Label + "   " + status
 			if a.Version != "" {
-				line += " " + versionStyle.Render("("+a.Version+")")
+				line += "  " + lipglossDimRender("("+a.Version+")", isSel)
 			}
-			b.WriteString(r(line) + "\n")
+			b.WriteString(selectionRow(line, isSel) + "\n")
 		}
 	}
 	if m.err != "" {
-		b.WriteString("\n" + errorStyle.Render("Error: "+m.err))
+		b.WriteString("\n" + errorStyle.Render("✗ "+m.err))
 	}
-	b.WriteString(helpStyle.Render("enter to continue · esc back"))
-	return b.String()
+	return renderChrome(title, b.String(), help)
 }

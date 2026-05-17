@@ -123,18 +123,18 @@ func (m filesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m filesModel) View() string {
 	var b strings.Builder
-	b.WriteString(header(fmt.Sprintf("Edit files · %s", m.label)))
-	b.WriteString("\n")
+	title := fmt.Sprintf("Edit files · %s", m.label)
+	help := "↑/↓ select · enter edit · esc back"
+
 	b.WriteString(subtitleStyle.Render("Workpath: ") + m.workpathDir + "\n\n")
 	for i, e := range m.entries {
+		isSel := i == m.cursor
 		marker := "  "
-		render := listItemStyle.Render
-		if i == m.cursor {
+		if isSel {
 			marker = "› "
-			render = listItemSelectedStyle.Render
 		}
-		b.WriteString(render(marker+e.label) + "\n")
-		if i == m.cursor && e.hint != "" {
+		b.WriteString(selectionRow(marker+e.label, isSel) + "\n")
+		if isSel && e.hint != "" {
 			b.WriteString(descStyle.Render(e.hint) + "\n")
 		}
 	}
@@ -143,12 +143,11 @@ func (m filesModel) View() string {
 		b.WriteString(okStyle.Render("✓ "+m.last) + "\n")
 	}
 	if m.err != "" {
-		b.WriteString(errorStyle.Render("Error: "+m.err) + "\n")
+		b.WriteString(errorStyle.Render("✗ "+m.err) + "\n")
 	}
 	editor, _ := editorCommand()
-	b.WriteString(hintStyle.Render("Editor: " + editor) + "\n")
-	b.WriteString(helpStyle.Render("↑/↓ select · enter edit · esc back"))
-	return b.String()
+	b.WriteString(hintStyle.Render("Editor: " + editor))
+	return renderChrome(title, b.String(), help)
 }
 
 // editorCommand returns the editor to spawn and any leading args.

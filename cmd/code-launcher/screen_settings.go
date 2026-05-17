@@ -143,8 +143,8 @@ func (m settingsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m settingsModel) View() string {
 	var b strings.Builder
-	b.WriteString(header(fmt.Sprintf("Settings · %s", m.ws.Name)))
-	b.WriteString("\n")
+	title := fmt.Sprintf("Settings · %s", m.ws.Name)
+	help := "enter to continue · esc to go back"
 
 	switch m.step {
 	case 0:
@@ -170,8 +170,7 @@ func (m settingsModel) View() string {
 	}
 
 	if m.err != "" {
-		b.WriteString("\n" + errorStyle.Render("Error: "+m.err))
+		b.WriteString("\n" + errorStyle.Render("✗ "+m.err))
 	}
-	b.WriteString(helpStyle.Render("enter to continue · esc to go back"))
-	return b.String()
+	return renderChrome(title, b.String(), help)
 }

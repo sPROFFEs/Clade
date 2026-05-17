@@ -102,6 +102,12 @@ func (m *rootModel) Init() tea.Cmd { return m.screen.Init() }
 
 func (m *rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		// Capture terminal size so chrome.go can compute body widths.
+		// We still forward the message to the active screen in case it
+		// wants to react too.
+		setTermSize(msg.Width, msg.Height)
+		// fall through to forward to inner screen below
 	case tea.KeyMsg:
 		// Global escape hatches.
 		switch msg.Type {

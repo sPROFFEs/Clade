@@ -288,8 +288,9 @@ func applyOllama(ws launcher.Workspace, s ollama.Settings, claude, codex, openco
 
 func (m ollamaModel) View() string {
 	var b strings.Builder
-	b.WriteString(header("Ollama — local model routing"))
-	b.WriteString("\n")
+	title := "Ollama · local model routing"
+	help := "enter probe · esc back"
+
 	b.WriteString(hintStyle.Render(
 		"Configure agents to route through an OpenAI-compatible Ollama endpoint.",
 	))
@@ -299,46 +300,40 @@ func (m ollamaModel) View() string {
 	case ollamaStepEndpoint:
 		b.WriteString(inputLabelStyle.Render("Endpoint: "))
 		b.WriteString(m.endpoint.View())
-		b.WriteString("\n")
 		if m.probing {
-			b.WriteString("\n" + hintStyle.Render("Probing /api/tags..."))
+			b.WriteString("\n\n" + hintStyle.Render("Probing /api/tags..."))
 		}
 		if m.probeErr != "" {
-			b.WriteString("\n" + errorStyle.Render("Probe failed: "+m.probeErr))
+			b.WriteString("\n\n" + errorStyle.Render("✗ Probe failed: "+m.probeErr))
 			b.WriteString("\n" + hintStyle.Render("You can still continue — manual model entry on next screen."))
 		}
-		b.WriteString("\n")
-		b.WriteString(helpStyle.Render("enter probe · esc back"))
 
 	case ollamaStepModel:
+		help = "enter to continue · esc back"
 		b.WriteString(subtitleStyle.Render("Endpoint: ") + m.endpoint.Value() + "\n")
 		if m.probeErr != "" {
-			b.WriteString(errorStyle.Render("Probe failed: "+m.probeErr) + "\n")
+			b.WriteString(errorStyle.Render("✗ Probe failed: "+m.probeErr) + "\n")
 			b.WriteString(hintStyle.Render("Endpoint unreachable — type a model name manually to continue, or esc to fix the URL.") + "\n")
 		}
 		b.WriteString("\n")
 		if len(m.probedModels) == 0 {
 			b.WriteString(inputLabelStyle.Render("Model: "))
 			b.WriteString(m.modelInput.View())
-			b.WriteString("\n")
-			b.WriteString(helpStyle.Render("enter to continue · esc back"))
 		} else {
+			help = "↑/↓ select · enter pick · esc back"
 			b.WriteString(hintStyle.Render(fmt.Sprintf("%d model(s) detected:", len(m.probedModels))) + "\n\n")
 			for i, name := range m.probedModels {
+				isSel := i == m.modelCursor
 				marker := "  "
-				r := listItemStyle.Render
-				if i == m.modelCursor {
+				if isSel {
 					marker = "› "
-					r = listItemSelectedStyle.Render
 				}
-				b.WriteString(r(marker + name))
-				b.WriteString("\n")
+				b.WriteString(selectionRow(marker+name, isSel) + "\n")
 			}
-			b.WriteString("\n")
-			b.WriteString(helpStyle.Render("↑/↓ select · enter pick · esc back"))
 		}
 
 	case ollamaStepAgents:
+		help = "↑/↓ select · space/x toggle · enter apply · esc back"
 		b.WriteString(subtitleStyle.Render("Endpoint: ") + m.endpoint.Value() + "\n")
 		b.WriteString(subtitleStyle.Render("Model: ") + m.modelInput.Value() + "\n\n")
 		b.WriteString(hintStyle.Render("Which agents to configure?") + "\n\n")
@@ -346,39 +341,35 @@ func (m ollamaModel) View() string {
 			label, hint string
 			picked      bool
 		}{
-			{"claude   (per-workspace env injection)", "ANTHROPIC_BASE_URL on next code-launcher launch", m.pickClaude},
-			{"codex    (writes ~/.codex/config.toml)", "creates [profiles.ollama_remote] — use: codex -p ollama_remote", m.pickCodex},
+			{"claude   (per-chat env injection)", "ANTHROPIC_BASE_URL + --model on next launch", m.pickClaude},
+			{"codex    (writes ~/.codex/config.toml)", "creates [profiles.ollama_remote] — launch via -p flag", m.pickCodex},
 			{"opencode (writes ~/.config/opencode/opencode.json)", "registers ollama_remote provider, sets default model", m.pickOpenCode},
 		}
 		for i, e := range entries {
+			isSel := i == m.agentCursor
 			marker := "  "
-			r := listItemStyle.Render
-			if i == m.agentCursor {
+			if isSel {
 				marker = "› "
-				r = listItemSelectedStyle.Render
 			}
 			check := "[ ]"
 			if e.picked {
 				check = availableStyle.Render("[x]")
 			}
-			b.WriteString(r(marker + check + " " + e.label))
-			b.WriteString("\n")
-			if i == m.agentCursor {
+			b.WriteString(selectionRow(marker+check+" "+e.label, isSel) + "\n")
+			if isSel {
 				b.WriteString(descStyle.Render(e.hint) + "\n")
 			}
 		}
-		b.WriteString("\n")
-		b.WriteString(helpStyle.Render("↑/↓ select · space/x toggle · enter apply · esc back"))
 
 	case ollamaStepApply:
+		help = "enter / esc to return"
 		if m.applying {
-			b.WriteString(hintStyle.Render("Applying...") + "\n")
+			b.WriteString(hintStyle.Render("Applying..."))
 		} else {
 			for _, line := range m.results {
 				b.WriteString("  " + line + "\n")
 			}
-			b.WriteString("\n" + helpStyle.Render("enter / esc to return to workspaces"))
 		}
 	}
-	return b.String()
+	return renderChrome(title, b.String(), help)
 }

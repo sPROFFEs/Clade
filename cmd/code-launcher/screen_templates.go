@@ -103,37 +103,36 @@ func (m templateListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m templateListModel) View() string {
 	var b strings.Builder
-	b.WriteString(header("Templates · reusable patterns for chats"))
-	b.WriteString("\n")
+	title := fmt.Sprintf("Templates (%d) · reusable patterns for chats", len(m.items))
+	help := "↑/↓ select · enter edit settings · f edit files · n new · d delete · r refresh · esc back"
+
 	if !m.loaded {
-		b.WriteString(hintStyle.Render("Loading templates...") + "\n")
-		return b.String()
+		b.WriteString(hintStyle.Render("Loading templates..."))
+		return renderChrome(title, b.String(), help)
 	}
 	if m.err != "" {
-		b.WriteString(errorStyle.Render("Error: "+m.err) + "\n\n")
+		b.WriteString(errorStyle.Render("✗ "+m.err) + "\n\n")
 	}
 	if len(m.items) == 0 {
-		b.WriteString(hintStyle.Render("No templates yet — create one to start cloning chats from it.") + "\n\n")
+		b.WriteString(hintStyle.Render("No templates yet — press n to create one.") + "\n\n")
 	}
-	for i, t := range m.items {
+	for i, tpl := range m.items {
+		isSel := i == m.cursor
 		marker := "  "
-		r := listItemStyle.Render
-		if i == m.cursor {
+		if isSel {
 			marker = "› "
-			r = listItemSelectedStyle.Render
 		}
-		b.WriteString(r(marker+t.Name) + "\n")
-		if i == m.cursor && t.Description != "" {
-			b.WriteString(descStyle.Render(t.Description) + "\n")
+		b.WriteString(selectionRow(marker+tpl.Name, isSel) + "\n")
+		if isSel && tpl.Description != "" {
+			b.WriteString(descStyle.Render(tpl.Description) + "\n")
 		}
 	}
+	isSelNew := m.cursor == len(m.items)
 	marker := "  "
-	r := listItemStyle.Render
-	if m.cursor == len(m.items) {
+	if isSelNew {
 		marker = "› "
-		r = listItemSelectedStyle.Render
 	}
-	b.WriteString(r(marker+"+ new template…") + "\n")
+	b.WriteString(selectionRow(marker+"+ new template…", isSelNew) + "\n")
 
 	if m.deleteAsk && m.cursor < len(m.items) {
 		b.WriteString("\n" + errorStyle.Render(
@@ -141,9 +140,7 @@ func (m templateListModel) View() string {
 				m.items[m.cursor].Name)) + "\n")
 	}
 
-	b.WriteString(helpStyle.Render(
-		"↑/↓ select · enter edit settings · f edit files · n new · d delete · r refresh · esc back"))
-	return b.String()
+	return renderChrome(title, b.String(), help)
 }
 
 // --- new template: the old NewWorkspace wizard, lightly renamed ---------
@@ -281,8 +278,8 @@ func (m newTemplateModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m newTemplateModel) View() string {
 	var b strings.Builder
-	b.WriteString(header(fmt.Sprintf("New template (step %d/5)", m.step+1)))
-	b.WriteString("\n")
+	title := fmt.Sprintf("New template (step %d/5)", m.step+1)
+	help := "enter to continue · esc to go back"
 	b.WriteString(hintStyle.Render("Name + description are required. Language / memory / online skills are optional defaults — each chat created from this template inherits them at creation."))
 	b.WriteString("\n\n")
 	if m.step >= 1 {
@@ -336,8 +333,7 @@ func (m newTemplateModel) View() string {
 		b.WriteString(hintStyle.Render("Scaffolding template...") + "\n")
 	}
 	if m.err != "" {
-		b.WriteString("\n" + errorStyle.Render("Error: "+m.err))
+		b.WriteString("\n" + errorStyle.Render("✗ "+m.err))
 	}
-	b.WriteString(helpStyle.Render("enter to continue · esc to go back · ctrl-c to abort"))
-	return b.String()
+	return renderChrome(title, b.String(), help)
 }

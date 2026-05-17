@@ -209,13 +209,14 @@ func (m *firstRunModel) finalize() tea.Cmd {
 
 func (m firstRunModel) View() string {
 	var b strings.Builder
-	b.WriteString(header("First run — set up your workspace"))
-	b.WriteString("\n")
 	dir, file, _ := launcher.ConfigPaths()
 	b.WriteString(versionStyle.Render(
 		fmt.Sprintf("Config will live at %s (in %s)", filepath.Base(file), dir),
 	))
 	b.WriteString("\n\n")
+
+	help := "enter to continue · ctrl-c to abort"
+	title := "First run · set up your workspace"
 
 	switch m.step {
 	case firstRunStepRoot:
@@ -225,10 +226,9 @@ func (m firstRunModel) View() string {
 		b.WriteString("\n\n")
 		b.WriteString(inputLabelStyle.Render("Workspaces root: "))
 		b.WriteString(m.input.View())
-		b.WriteString("\n")
-		b.WriteString(helpStyle.Render("enter to continue · ctrl-c to abort"))
 
 	case firstRunStepSeed:
+		help = "y / n to choose · space to toggle · enter to accept · esc back"
 		b.WriteString(subtitleStyle.Render("Workspaces root: ") + m.root + "\n\n")
 		mark := "[ ] No, leave it empty"
 		if m.seed {
@@ -248,17 +248,16 @@ func (m firstRunModel) View() string {
 		b.WriteString(hintStyle.Render(
 			"Either way you can add or remove templates later via 't' on the home screen.",
 		))
-		b.WriteString("\n")
-		b.WriteString(helpStyle.Render("y / n to choose · space to toggle · enter to accept · esc back"))
 
 	case firstRunStepWorking:
+		help = ""
 		b.WriteString(hintStyle.Render(m.status))
 	}
 
 	if m.err != "" {
-		b.WriteString("\n" + errorStyle.Render("Error: "+m.err))
+		b.WriteString("\n" + errorStyle.Render("✗ "+m.err))
 	}
-	return b.String()
+	return renderChrome(title, b.String(), help)
 }
 
 // --- agents screen -------------------------------------------------------
@@ -351,11 +350,12 @@ func (m agentsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m agentsModel) View() string {
 	var b strings.Builder
-	b.WriteString(header(fmt.Sprintf("Pick an agent for %q", m.ws.Name)))
-	b.WriteString("\n")
+	title := fmt.Sprintf("Pick an agent · %s", m.ws.Name)
+	help := "↑/↓ select · enter launch/install · i install · o ollama · esc back"
+
 	if m.loading {
-		b.WriteString(hintStyle.Render("Scanning PATH for agent CLIs...") + "\n")
-		return b.String()
+		b.WriteString(hintStyle.Render("Scanning PATH for agent CLIs..."))
+		return renderChrome(title, b.String(), help)
 	}
 
 	// Sort: available first, missing last (deterministic UX), but preserve
@@ -368,28 +368,24 @@ func (m agentsModel) View() string {
 		return false
 	})
 	for i, a := range items {
+		isSel := i == m.cursor && a.Available
 		marker := "  "
-		render := listItemStyle.Render
 		if i == m.cursor {
 			marker = "› "
-			render = listItemSelectedStyle.Render
 		}
 		label := a.Label
-		statusStyle := availableStyle
-		statusText := "available"
+		statusText := availableStyle.Render("● available")
 		if !a.Available {
-			statusStyle = missingStyle
-			statusText = "not installed"
+			statusText = missingStyle.Render("○ not installed")
 			if a.ProbeError != "" {
-				statusText = "broken install"
+				statusText = errorStyle.Render("✗ broken install")
 			}
-			render = listItemStyle.Render // never highlight a disabled row
 		}
-		line := fmt.Sprintf("%s%s %s", marker, label, statusStyle.Render("— "+statusText))
+		line := marker + label + "   " + statusText
 		if a.Version != "" {
-			line += " " + versionStyle.Render("("+a.Version+")")
+			line += "  " + lipglossDimRender("("+a.Version+")", isSel)
 		}
-		b.WriteString(render(line) + "\n")
+		b.WriteString(selectionRow(line, isSel) + "\n")
 		if i == m.cursor && !a.Available {
 			if a.ProbeError != "" {
 				b.WriteString(descStyle.Render(errorStyle.Render("--version failed: "+a.ProbeError)) + "\n")
@@ -404,9 +400,7 @@ func (m agentsModel) View() string {
 	b.WriteString(hintStyle.Render(
 		"Grey entries aren't on PATH — press enter (or i) to install them.",
 	))
-	b.WriteString("\n")
-	b.WriteString(helpStyle.Render("↑/↓ select · enter launch/install · i install · o ollama · esc back · ctrl-c quit"))
-	return b.String()
+	return renderChrome(title, b.String(), help)
 }
 
 // --- shared helpers ------------------------------------------------------

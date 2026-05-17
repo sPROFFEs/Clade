@@ -139,33 +139,30 @@ func (m chatListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m chatListModel) View() string {
 	var b strings.Builder
-	b.WriteString(header("Chats · " + m.cfg.WorkspacesRoot))
-	b.WriteString("\n")
 
 	if m.migrateNote != "" {
 		b.WriteString(hintStyle.Render(m.migrateNote) + "\n\n")
 	}
 	if m.err != "" {
-		b.WriteString(errorStyle.Render("Error: "+m.err) + "\n\n")
+		b.WriteString(errorStyle.Render("✗ "+m.err) + "\n\n")
 	}
 
 	if !m.loaded {
-		b.WriteString(hintStyle.Render("Loading chats...") + "\n")
-		return b.String()
+		b.WriteString(hintStyle.Render("Loading chats..."))
+		return renderChrome(chatListTitle(m), b.String(), chatListHelp())
 	}
 
 	if len(m.items) == 0 {
-		b.WriteString(hintStyle.Render("No chats yet — start one from a template.") + "\n\n")
+		b.WriteString(hintStyle.Render("No chats yet — press n (or Enter on '+ new chat') to start.") + "\n\n")
 	}
 
 	for i, c := range m.items {
 		marker := "  "
-		render := listItemStyle.Render
-		if i == m.cursor {
+		isSel := i == m.cursor
+		if isSel {
 			marker = "› "
-			render = listItemSelectedStyle.Render
 		}
-		line := fmt.Sprintf("%s%s", marker, c.Label)
+		line := marker + c.Label
 		meta := []string{}
 		if c.Template != "" {
 			meta = append(meta, c.Template)
@@ -174,25 +171,24 @@ func (m chatListModel) View() string {
 			meta = append(meta, string(c.AgentID))
 		}
 		if !c.LastUsed.IsZero() {
-			meta = append(meta, "last used "+humanAgo(c.LastUsed))
+			meta = append(meta, humanAgo(c.LastUsed))
 		}
 		if len(meta) > 0 {
-			line += " " + versionStyle.Render("("+strings.Join(meta, " · ")+")")
+			line += "  " + lipglossDimRender("("+strings.Join(meta, " · ")+")", isSel)
 		}
-		b.WriteString(render(line) + "\n")
-		if i == m.cursor && c.Description != "" {
+		b.WriteString(selectionRow(line, isSel) + "\n")
+		if isSel && c.Description != "" {
 			b.WriteString(descStyle.Render(c.Description) + "\n")
 		}
 	}
 
-	// "+ new chat" pseudo-row, always at the bottom.
+	// "+ new chat" pseudo-row.
+	isSelNew := m.cursor == len(m.items)
 	marker := "  "
-	render := listItemStyle.Render
-	if m.cursor == len(m.items) {
+	if isSelNew {
 		marker = "› "
-		render = listItemSelectedStyle.Render
 	}
-	b.WriteString(render(marker+"+ new chat…") + "\n")
+	b.WriteString(selectionRow(marker+"+ new chat…", isSelNew) + "\n")
 
 	if m.deleteAsk && m.cursor < len(m.items) {
 		b.WriteString("\n" + errorStyle.Render(
@@ -200,9 +196,36 @@ func (m chatListModel) View() string {
 				m.items[m.cursor].Label)) + "\n")
 	}
 
-	b.WriteString(helpStyle.Render(
-		"↑/↓ select · enter open · n new · e settings · f files · o ollama · a agents · d delete · t templates · r refresh · ctrl-c quit"))
-	return b.String()
+	return renderChrome(chatListTitle(m), b.String(), chatListHelp())
+}
+
+func chatListTitle(m chatListModel) string {
+	tag := fmt.Sprintf("Chats (%d)", len(m.items))
+	return tag + "  " + chromeContextSegment(m.cfg.WorkspacesRoot)
+}
+
+func chatListHelp() string {
+	return "↑/↓ select · enter open · n new · e settings · f files · o ollama · a agents · d delete · t templates · r refresh"
+}
+
+// chromeContextSegment renders a path/label dimly so the title bar can
+// carry secondary context (e.g. workspaces root) without dominating.
+func chromeContextSegment(s string) string {
+	return lipglossDim(s)
+}
+
+func lipglossDim(s string) string {
+	return subtitleStyle.Render(s)
+}
+
+// lipglossDimRender renders s in the "dim/muted" colour, but uses the
+// selected-bg-friendly palette when the surrounding row is selected so
+// the text stays readable on the violet highlight.
+func lipglossDimRender(s string, selected bool) string {
+	if selected {
+		return subtitleStyle.Render(s)
+	}
+	return versionStyle.Render(s)
 }
 
 // humanAgo formats a time as "5m ago" / "2h ago" / "3d ago" / etc.

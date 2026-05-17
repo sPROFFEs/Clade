@@ -180,35 +180,31 @@ func tickInstall() tea.Cmd {
 
 func (m installModel) View() string {
 	var b strings.Builder
-	b.WriteString(header(fmt.Sprintf("Install %s", m.agentID)))
-	b.WriteString("\n")
+	title := fmt.Sprintf("Install · %s", m.agentID)
+	help := "↑/↓ select · enter run · esc back"
 
 	if len(m.methods) == 0 {
-		b.WriteString(errorStyle.Render("No install method available on this OS for "+string(m.agentID)) + "\n")
-		b.WriteString(hintStyle.Render("Open https://github.com/anthropics/claude-code (or vendor docs) and install manually.") + "\n")
-		b.WriteString(helpStyle.Render("esc to go back"))
-		return b.String()
+		b.WriteString(errorStyle.Render("✗ No install method available on this OS for "+string(m.agentID)) + "\n")
+		b.WriteString(hintStyle.Render("Check the agent's vendor docs and install manually."))
+		return renderChrome(title, b.String(), "esc to go back")
 	}
 
 	if !m.running {
 		b.WriteString(hintStyle.Render("Pick a method. Recommended is marked. " +
 			"You'll see the exact command before it runs.") + "\n\n")
 		for i, mth := range m.methods {
+			isSel := i == m.cursor
 			marker := "  "
-			render := listItemStyle.Render
-			if i == m.cursor {
+			if isSel {
 				marker = "› "
-				render = listItemSelectedStyle.Render
 			}
 			label := mth.Label
 			if mth.Recommended {
-				label += " " + availableStyle.Render("[recommended]")
+				label += "   " + availableStyle.Render("[recommended]")
 			}
-			b.WriteString(render(marker + label))
-			b.WriteString("\n")
-			b.WriteString(descStyle.Render("$ " + mth.Command))
-			b.WriteString("\n")
-			if i == m.cursor && len(mth.Prereqs) > 0 {
+			b.WriteString(selectionRow(marker+label, isSel) + "\n")
+			b.WriteString(descStyle.Render("$ "+mth.Command) + "\n")
+			if isSel && len(mth.Prereqs) > 0 {
 				missing := installer.PrereqsMissing(mth)
 				if len(missing) == 0 {
 					b.WriteString(descStyle.Render("prereqs ok: "+strings.Join(mth.Prereqs, ", ")) + "\n")
@@ -216,25 +212,22 @@ func (m installModel) View() string {
 					unfix := installer.UnfixableMissing(missing)
 					fixable := installer.AutoFixable(missing)
 					if len(unfix) > 0 {
-						b.WriteString(descStyle.Render(
-							errorStyle.Render("you must install: "+strings.Join(unfix, ", "))) + "\n")
+						b.WriteString(descStyle.Render(errorStyle.Render("you must install: "+strings.Join(unfix, ", "))) + "\n")
 					}
 					if len(fixable) > 0 {
-						b.WriteString(descStyle.Render(
-							availableStyle.Render("will auto-fix: "+strings.Join(fixable, ", ")+
-								" (corepack + pnpm setup)")) + "\n")
+						b.WriteString(descStyle.Render(availableStyle.Render("will auto-fix: "+strings.Join(fixable, ", ")+" (corepack + pnpm setup)")) + "\n")
 					}
 				}
 			}
 		}
 		if m.prereqWarn != "" {
-			b.WriteString("\n" + errorStyle.Render(m.prereqWarn) + "\n")
+			b.WriteString("\n" + errorStyle.Render("✗ "+m.prereqWarn))
 		}
-		b.WriteString(helpStyle.Render("↑/↓ select · enter run · esc back"))
-		return b.String()
+		return renderChrome(title, b.String(), help)
 	}
 
 	// Running / done view.
+	help = "enter / esc to continue"
 	b.WriteString(hintStyle.Render("Running...") + "\n\n")
 	lines := m.output.snapshot()
 	for _, l := range lines {
@@ -243,11 +236,10 @@ func (m installModel) View() string {
 	if m.exitDone {
 		b.WriteString("\n")
 		if m.exitErr != nil {
-			b.WriteString(errorStyle.Render("Failed: "+m.exitErr.Error()) + "\n")
+			b.WriteString(errorStyle.Render("✗ Failed: " + m.exitErr.Error()))
 		} else {
-			b.WriteString(okStyle.Render("Done — re-detecting agents...") + "\n")
+			b.WriteString(okStyle.Render("✓ Done — re-detecting agents..."))
 		}
-		b.WriteString(helpStyle.Render("enter / esc to continue"))
 	}
-	return b.String()
+	return renderChrome(title, b.String(), help)
 }

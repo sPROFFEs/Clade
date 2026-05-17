@@ -99,21 +99,21 @@ func (m launchingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m launchingModel) View() string {
 	var b strings.Builder
-	b.WriteString(header(fmt.Sprintf("Launching %q", m.chat.Label)))
-	b.WriteString("\n")
+	title := fmt.Sprintf("Launching · %s", m.chat.Label)
+	help := "ctrl-c quit"
+
 	if m.planErr != nil {
-		b.WriteString(errorStyle.Render("Failed: "+m.planErr.Error()) + "\n")
-		b.WriteString(helpStyle.Render("esc to go back"))
-		return b.String()
+		b.WriteString(errorStyle.Render("✗ Failed: " + m.planErr.Error()))
+		return renderChrome(title, b.String(), "esc to go back")
 	}
 
 	spin := titleStyle.Render(spinnerFrames[m.frame])
 	b.WriteString(spin + " " + hintStyle.Render(m.step) + "\n\n")
-	b.WriteString(descStyle.Render("Template: ") + m.chat.Template + "\n")
-	b.WriteString(descStyle.Render("Agent:    ") + string(m.chat.AgentID) + "\n")
-	b.WriteString(descStyle.Render("Sandbox:  ") + m.chat.SandboxDir + "\n\n")
+	b.WriteString(subtitleStyle.Render("Template: ") + m.chat.Template + "\n")
+	b.WriteString(subtitleStyle.Render("Agent:    ") + string(m.chat.AgentID) + "\n")
+	b.WriteString(subtitleStyle.Render("Sandbox:  ") + m.chat.SandboxDir + "\n\n")
 	b.WriteString(hintStyle.Render(
 		"Compiling workpath into sandbox, staging MEMORY.md, " +
 			"cloning online skills, recording session metadata..."))
-	return b.String()
+	return renderChrome(title, b.String(), help)
 }
