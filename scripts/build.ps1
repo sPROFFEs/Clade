@@ -18,7 +18,6 @@ param(
         "darwin-amd64",
         "darwin-arm64"
     ),
-    [string] $Version = "0.1.0",
     [string] $LdFlags = "-s -w",
     [switch] $NoArchive
 )
@@ -65,7 +64,7 @@ function Build-One($triplet) {
     Copy-Item "scripts/install.sh","scripts/install.ps1" $scriptsOut
 
     if (-not $NoArchive) {
-        $archiveBase = "clade-$Version-$triplet"
+        $archiveBase = "clade-$triplet"
         if ($goos -eq "windows") {
             $zip = Join-Path "dist" "$archiveBase.zip"
             if (Test-Path $zip) { Remove-Item $zip }

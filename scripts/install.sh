@@ -9,31 +9,36 @@
 #   curl -fsSL https://… | bash -s -- --user        # ~/.local/bin
 #   curl -fsSL https://… | bash -s -- --system      # /usr/local/bin
 #   curl -fsSL https://… | bash -s -- --yes         # auto-yes all prompts
-#   curl -fsSL https://… | bash -s -- --version v0.1.0
 #
 # Or run locally (from inside an extracted release archive or a repo checkout):
 #   ./scripts/install.sh
 #
 # Flags:
-#   --binary           grab a prebuilt release tarball (default in one-liner mode)
+#   --binary           grab the prebuilt release tarball (default in one-liner mode)
 #   --source           git clone + go build (installs Go if missing, asking first)
-#   --version <tag>    pin a release tag instead of "latest"
 #   --user             install to ~/.local/bin (no sudo)
 #   --system           install to /usr/local/bin (sudo when needed)
 #   --prefix <dir>     custom install dir
 #   --yes              auto-confirm prompts (CI / scripted use)
 #   -h, --help         show this
+#
+# The binary path always pulls from the GitHub release tagged
+# RELEASE_TAG (default: "release"). Override with RELEASE_TAG=<tag>
+# in the environment if you ever need to point at a different one.
 
 set -euo pipefail
 
 REPO="sPROFFEs/Clade"
 RAW_REPO_URL="https://github.com/sPROFFEs/Clade"
 SOURCE_BRANCH="main"
+# Single moving release tag we always download from. The user updates
+# the version label / release notes / attached assets on GitHub by
+# hand; the installer doesn't care what's printed there.
+RELEASE_TAG="${RELEASE_TAG:-release}"
 
 MODE=""          # binary | source (empty = ask, default binary in non-tty)
 PREFIX_MODE=""   # user | system (empty = auto)
 PREFIX=""        # explicit
-VERSION=""       # tag pin
 YES=0
 
 # ---------- arg parsing ----------
@@ -45,8 +50,6 @@ while [[ $# -gt 0 ]]; do
     --system)    PREFIX_MODE="system" ; shift ;;
     --prefix)    PREFIX="$2"   ; shift 2 ;;
     --prefix=*)  PREFIX="${1#--prefix=}" ; shift ;;
-    --version)   VERSION="$2"  ; shift 2 ;;
-    --version=*) VERSION="${1#--version=}" ; shift ;;
     --yes|-y)    YES=1 ; shift ;;
     -h|--help)
       sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'
@@ -219,32 +222,14 @@ fetch() {
   fi
 }
 
-resolve_latest_tag() {
-  local api="https://api.github.com/repos/$REPO/releases/latest"
-  local tag
-  tag="$(fetch "$api" /dev/stdout 2>/dev/null \
-        | grep -m1 '"tag_name"' \
-        | sed -E 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/' || true)"
-  printf '%s' "$tag"
-}
-
 install_from_release() {
   step "Resolving release"
-  local tag="$VERSION"
-  if [[ -z "$tag" ]]; then
-    tag="$(resolve_latest_tag)"
-  fi
-  if [[ -z "$tag" ]]; then
-    c_red "couldn't resolve a release tag (no releases yet?)."
-    c_red "Try --source to build from source instead."
-    exit 1
-  fi
-  # Tag may be "v0.1.0" or "0.1.0"; the build-script archive names use
-  # the bare version, so strip a leading "v".
-  local bare="${tag#v}"
-  local fname="clade-${bare}-${TRIPLET}.tar.gz"
-  local url="https://github.com/$REPO/releases/download/${tag}/${fname}"
-  c_dim "  tag:     $tag"
+  # Asset names are version-less so the operator can re-upload new
+  # builds onto the same "release" tag without breaking the URL the
+  # installer hits.
+  local fname="clade-${TRIPLET}.tar.gz"
+  local url="https://github.com/$REPO/releases/download/${RELEASE_TAG}/${fname}"
+  c_dim "  tag:     $RELEASE_TAG"
   c_dim "  asset:   $fname"
   c_dim "  url:     $url"
 

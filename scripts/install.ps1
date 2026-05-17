@@ -12,16 +12,18 @@
 #
 # Parameters:
 #   -Mode Binary | Source       what to install (prompts if omitted)
-#   -Version <tag>              pin a release tag instead of "latest"
 #   -Prefix <dir>               install dir (default: %LOCALAPPDATA%\Programs\Clade)
 #   -AllUsers                   install to %ProgramFiles%\Clade (needs admin)
 #   -Yes                        auto-confirm prompts
+#
+# The binary path always pulls from the GitHub release tagged
+# $env:RELEASE_TAG (default: "release"). Override that env var if
+# you ever need to point at a different tag.
 
 [CmdletBinding()]
 param(
     [ValidateSet("Binary","Source","")]
     [string]$Mode = "",
-    [string]$Version = "",
     [string]$Prefix = "",
     [switch]$AllUsers,
     [switch]$Yes
@@ -31,6 +33,10 @@ $ErrorActionPreference = "Stop"
 
 $Repo = "sPROFFEs/Clade"
 $SourceBranch = "main"
+# Single moving release tag we always download from. The operator
+# updates the release notes / attached assets on GitHub by hand; the
+# installer doesn't care what the release is labelled as.
+$ReleaseTag = if ($env:RELEASE_TAG) { $env:RELEASE_TAG } else { "release" }
 
 # ---------- pretty ----------
 function Step($Text) { Write-Host ""; Write-Host "==> $Text" -ForegroundColor Green }
@@ -139,27 +145,13 @@ if ($AllUsers -and -not (Test-IsAdmin)) {
 }
 
 # ---------- binary path: GitHub release ----------
-function Resolve-LatestTag {
-    $api = "https://api.github.com/repos/$Repo/releases/latest"
-    try {
-        $r = Invoke-RestMethod -Uri $api -UseBasicParsing -ErrorAction Stop
-        return $r.tag_name
-    } catch {
-        return ""
-    }
-}
-
 function Install-Binary {
     Step "Resolving release"
-    $tag = $Version
-    if (-not $tag) { $tag = Resolve-LatestTag }
-    if (-not $tag) {
-        Fail "couldn't resolve a release tag (no releases yet?). Try -Mode Source."
-    }
-    $bare  = $tag -replace '^v',''
-    $fname = "clade-$bare-$Triplet.zip"
-    $url   = "https://github.com/$Repo/releases/download/$tag/$fname"
-    Info "tag:   $tag"
+    # Asset names are version-less so the operator can re-upload new
+    # builds onto the same "release" tag without changing this URL.
+    $fname = "clade-$Triplet.zip"
+    $url   = "https://github.com/$Repo/releases/download/$ReleaseTag/$fname"
+    Info "tag:   $ReleaseTag"
     Info "asset: $fname"
     Info "url:   $url"
 

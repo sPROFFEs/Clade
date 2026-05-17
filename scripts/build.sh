@@ -14,7 +14,6 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-VERSION="${VERSION:-0.1.0}"
 LDFLAGS="${LDFLAGS:--s -w}"  # strip symbols by default — tiny binaries
 ARCHIVE=1
 TARGETS=()
@@ -77,9 +76,9 @@ build_one() {
     case "$goos" in
       windows)
         if command -v zip >/dev/null 2>&1; then
-          ( cd dist && zip -qr "clade-$VERSION-$triplet.zip" "$triplet" )
+          ( cd dist && zip -qr "clade-$triplet.zip" "$triplet" )
         elif command -v tar >/dev/null 2>&1; then
-          ( cd dist && tar -czf "clade-$VERSION-$triplet.tar.gz" "$triplet" )
+          ( cd dist && tar -czf "clade-$triplet.tar.gz" "$triplet" )
           echo "  (no zip on PATH; built tar.gz instead)" >&2
         else
           echo "  (no zip or tar on PATH; skipping archive)" >&2
@@ -87,7 +86,7 @@ build_one() {
         ;;
       *)
         if command -v tar >/dev/null 2>&1; then
-          ( cd dist && tar -czf "clade-$VERSION-$triplet.tar.gz" "$triplet" )
+          ( cd dist && tar -czf "clade-$triplet.tar.gz" "$triplet" )
         else
           echo "  (no tar on PATH; skipping archive)" >&2
         fi

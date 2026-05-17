@@ -108,9 +108,13 @@ iwr -useb https://raw.githubusercontent.com/sPROFFEs/Clade/main/scripts/install.
 
 Both installers ask you to pick between:
 
-1. **Download a prebuilt release** — grabs the latest tagged tarball
-   /zip from GitHub Releases, extracts it, drops `clade` + `wpc`
-   into the right per-OS install dir, and updates `PATH`.
+1. **Download a prebuilt release** — grabs the archive attached to
+   the [`release` tag](https://github.com/sPROFFEs/Clade/releases/tag/release)
+   on GitHub (`clade-<os>-<arch>.{tar.gz,zip}`), extracts it, drops
+   `clade` + `wpc` into the right per-OS install dir, and updates
+   `PATH`. Asset names are version-less so the maintainer can swap
+   the binaries on that single release without breaking the URL
+   anyone runs.
 2. **Build from source** — git-clones the repo to a temp dir and
    runs `go build`. If Go isn't installed the script offers to
    install it via the system package manager (`apt`, `dnf`,
@@ -136,9 +140,6 @@ Common flags (POSIX form; the PS variants drop the leading `--`):
 # Skip the prompt, force source build, install to ~/.local/bin:
 curl -fsSL https://… | bash -s -- --source --user --yes
 
-# Pin a specific release tag:
-curl -fsSL https://… | bash -s -- --version v0.1.0
-
 # Custom install dir:
 curl -fsSL https://… | bash -s -- --prefix /opt/clade/bin
 ```
@@ -147,14 +148,14 @@ curl -fsSL https://… | bash -s -- --prefix /opt/clade/bin
 
 ```sh
 # Linux / macOS
-tar -xzf clade-0.1.0-linux-amd64.tar.gz
+tar -xzf clade-linux-amd64.tar.gz
 cd linux-amd64
 ./scripts/install.sh        # auto-detects local binaries, skips download
 ```
 
 ```powershell
 # Windows
-Expand-Archive clade-0.1.0-windows-amd64.zip
+Expand-Archive clade-windows-amd64.zip
 cd windows-amd64
 .\scripts\install.ps1       # same — uses the bundled binaries
 ```
