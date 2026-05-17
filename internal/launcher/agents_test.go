@@ -34,9 +34,16 @@ func TestDetectAgents_BrokenBinaryNotMarkedAvailable(t *testing.T) {
 
 	// Point PATH at ONLY our fake bin dir so the real claude (if any) isn't found.
 	t.Setenv("PATH", binDir)
-	// On Windows, exec.LookPath honors PATHEXT — make sure .bat is included.
 	if runtime.GOOS == "windows" {
 		t.Setenv("PATHEXT", ".BAT;.CMD;.EXE")
+	}
+	// Also isolate HOME so knownInstallPaths can't find the real claude
+	// in ~/.local/bin or ~/.claude/local on the dev box.
+	tmpHome := t.TempDir()
+	if runtime.GOOS == "windows" {
+		t.Setenv("USERPROFILE", tmpHome)
+	} else {
+		t.Setenv("HOME", tmpHome)
 	}
 
 	agents := DetectAgents(context.Background())
@@ -55,6 +62,62 @@ func TestDetectAgents_BrokenBinaryNotMarkedAvailable(t *testing.T) {
 	}
 	if claude.ProbeError == "" {
 		t.Error("ProbeError should be populated for broken --version")
+	}
+}
+
+// TestDetectAgents_FallsBackWhenPathBinaryIsBroken: the exact user case —
+// pnpm's opencode shim is on PATH but its bundled binary crashes; the
+// curl-installed opencode at ~/.opencode/bin works. We should pick the
+// working one.
+func TestDetectAgents_FallsBackWhenPathBinaryIsBroken(t *testing.T) {
+	tmpHome := t.TempDir()
+	if runtime.GOOS == "windows" {
+		t.Setenv("USERPROFILE", tmpHome)
+	} else {
+		t.Setenv("HOME", tmpHome)
+	}
+
+	// Broken binary on PATH.
+	pathDir := t.TempDir()
+	t.Setenv("PATH", pathDir)
+	if runtime.GOOS == "windows" {
+		t.Setenv("PATHEXT", ".BAT;.CMD;.EXE")
+	}
+	binName := "opencode"
+	brokenBody := "#!/bin/sh\nexit 1\n"
+	if runtime.GOOS == "windows" {
+		binName = "opencode.bat"
+		brokenBody = "@echo off\r\nexit /b 1\r\n"
+	}
+	must(t, os.WriteFile(filepath.Join(pathDir, binName), []byte(brokenBody), 0o755))
+
+	// Working binary in the OpenCode fallback dir.
+	fallback := filepath.Join(tmpHome, ".opencode", "bin")
+	must(t, os.MkdirAll(fallback, 0o755))
+	workingBody := "#!/bin/sh\necho ok-opencode 9.9.9\n"
+	if runtime.GOOS == "windows" {
+		workingBody = "@echo off\r\necho ok-opencode 9.9.9\r\n"
+	}
+	must(t, os.WriteFile(filepath.Join(fallback, binName), []byte(workingBody), 0o755))
+
+	agents := DetectAgents(context.Background())
+	var oc *Agent
+	for i := range agents {
+		if agents[i].ID == AgentOpenCode {
+			oc = &agents[i]
+		}
+	}
+	if oc == nil {
+		t.Fatal("OpenCode missing from catalog")
+	}
+	if !oc.Available {
+		t.Errorf("expected fallback to win when PATH binary is broken; got %+v", oc)
+	}
+	if !strings.Contains(oc.Binary, ".opencode") {
+		t.Errorf("expected Binary to point at the fallback path; got %q", oc.Binary)
+	}
+	if !strings.Contains(oc.Version, "ok-opencode 9.9.9") {
+		t.Errorf("Version = %q; expected the working binary's output", oc.Version)
 	}
 }
 

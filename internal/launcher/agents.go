@@ -71,10 +71,18 @@ func KnownAgents() []Agent {
 	}
 }
 
-// DetectAgents probes PATH for each known agent and returns a fresh slice
-// with Available/Version/ProbeError populated. When exec.LookPath fails,
-// known per-agent install dirs are checked as a fallback (some installers
-// only touch ~/.bashrc, which Windows native processes never see).
+// DetectAgents probes a prioritized list of candidate paths for each
+// agent and picks the first one whose `--version` actually exits 0.
+// The order is:
+//
+//   1. exec.LookPath (whatever's on PATH first)
+//   2. known per-agent install dirs (~/.opencode/bin, ~/.claude/local, ...)
+//
+// Trying every candidate matters because a broken binary can be on PATH
+// while a working one sits in a known install dir — the real user case:
+// pnpm's opencode.ps1 shim on %PATH% wraps a Windows-incompatible binary,
+// but the official curl installer dropped a working native binary at
+// ~/.opencode/bin/opencode.exe. We pick the second one.
 //
 // On success, Agent.Binary is rewritten to the absolute path of the
 // resolved binary so the launcher can exec it directly even if the dir
@@ -82,33 +90,42 @@ func KnownAgents() []Agent {
 func DetectAgents(ctx context.Context) []Agent {
 	agents := KnownAgents()
 	for i := range agents {
-		path, err := exec.LookPath(agents[i].Binary)
-		if err != nil {
-			// Try well-known install dirs that bypass shell-rc PATH updates.
-			for _, candidate := range knownInstallPaths(agents[i].ID, agents[i].Binary) {
-				if st, statErr := os.Stat(candidate); statErr == nil && !st.IsDir() {
-					path = candidate
-					break
-				}
-			}
-			if path == "" {
+		candidates := candidatePaths(agents[i].ID, agents[i].Binary)
+		var lastErr error
+		for _, candidate := range candidates {
+			if st, err := os.Stat(candidate); err != nil || st.IsDir() {
 				continue
 			}
+			version, perr := probeVersion(ctx, candidate)
+			if perr != nil {
+				if lastErr == nil {
+					lastErr = perr
+				}
+				continue
+			}
+			agents[i].Available = true
+			agents[i].Version = version
+			agents[i].Binary = candidate
+			break
 		}
-		version, perr := probeVersion(ctx, path)
-		if perr != nil {
-			// Binary exists but `--version` failed — likely an incompatible
-			// or broken install. Don't mark available; surface the reason.
-			agents[i].ProbeError = trimErr(perr)
-			continue
+		if !agents[i].Available && lastErr != nil {
+			agents[i].ProbeError = trimErr(lastErr)
 		}
-		agents[i].Available = true
-		agents[i].Version = version
-		// Cache the resolved path so exec doesn't depend on PATH being
-		// updated in the current process.
-		agents[i].Binary = path
 	}
 	return agents
+}
+
+// candidatePaths returns the ordered list of full paths to try when
+// detecting an agent: PATH first, then known install dirs as fallback.
+func candidatePaths(id AgentID, binary string) []string {
+	var paths []string
+	if p, err := exec.LookPath(binary); err == nil {
+		paths = append(paths, p)
+	}
+	for _, p := range knownInstallPaths(id, binary) {
+		paths = append(paths, p)
+	}
+	return paths
 }
 
 // knownInstallPaths returns common per-agent locations to probe when

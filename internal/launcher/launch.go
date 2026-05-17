@@ -124,16 +124,31 @@ func Plan(ws Workspace, agent Agent) (LaunchPlan, error) {
 		Args:    nil,
 		Dir:     ws.SandboxDir,
 	}
-	if agent.ID == AgentClaude {
-		o := ws.Settings.Ollama
-		if o.Endpoint != "" && o.Model != "" {
+	o := ws.Settings.Ollama
+	ollamaConfigured := o.Endpoint != "" && o.Model != ""
+
+	switch agent.ID {
+	case AgentClaude:
+		if ollamaConfigured {
 			plan.Env = map[string]string{
 				"ANTHROPIC_AUTH_TOKEN": "ollama",
 				"ANTHROPIC_API_KEY":    "",
 				"ANTHROPIC_BASE_URL":   o.Endpoint,
 				"OPENAI_API_KEY":       "ollama",
 			}
+			// Without --model Claude sends its default model name to
+			// the Ollama proxy, which doesn't have it → request fails.
+			plan.Args = []string{"--model", o.Model}
 		}
+	case AgentCodex:
+		if ollamaConfigured {
+			// The Ollama screen wrote [profiles.ollama_remote] into
+			// ~/.codex/config.toml; tell codex to actually use it.
+			plan.Args = []string{"-p", "ollama_remote"}
+		}
+	case AgentOpenCode:
+		// OpenCode picks up routing from opencode.json's model/provider
+		// fields, set by the Ollama screen — nothing to inject here.
 	}
 	return plan, nil
 }

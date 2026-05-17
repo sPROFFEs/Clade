@@ -69,6 +69,70 @@ func TestPrepareSandbox_CompilesClaudeTarget(t *testing.T) {
 	}
 }
 
+func TestPlan_AppendsModelArgForClaudeWhenOllamaConfigured(t *testing.T) {
+	chat := chatFromSeededReversing(t)
+	chat.Settings = WorkspaceSettings{
+		Ollama: OllamaSettings{Endpoint: "http://10.0.0.1:11434", Model: "qwen3"},
+	}
+	if err := SaveChatSettings(chat); err != nil {
+		t.Fatal(err)
+	}
+	loaded, _ := LoadChat(filepath.Dir(filepath.Dir(chat.Root)), chat.ID)
+	ws := loaded.AsWorkspace()
+	agent := Agent{ID: AgentClaude, Binary: "claude", WpcTarget: "claude", Available: true}
+	plan, err := Plan(ws, agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"--model", "qwen3"}
+	if !equalStrings(plan.Args, want) {
+		t.Errorf("Args = %v, want %v", plan.Args, want)
+	}
+	if plan.Env["ANTHROPIC_BASE_URL"] != "http://10.0.0.1:11434" {
+		t.Errorf("ANTHROPIC_BASE_URL = %q", plan.Env["ANTHROPIC_BASE_URL"])
+	}
+}
+
+func TestPlan_AppendsProfileArgForCodexWhenOllamaConfigured(t *testing.T) {
+	chat := chatFromSeededReversing(t)
+	chat.Settings = WorkspaceSettings{
+		Ollama: OllamaSettings{Endpoint: "http://10.0.0.1:11434", Model: "qwen3"},
+	}
+	_ = SaveChatSettings(chat)
+	loaded, _ := LoadChat(filepath.Dir(filepath.Dir(chat.Root)), chat.ID)
+	ws := loaded.AsWorkspace()
+	agent := Agent{ID: AgentCodex, Binary: "codex", WpcTarget: "codex", Available: true}
+	plan, err := Plan(ws, agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"-p", "ollama_remote"}
+	if !equalStrings(plan.Args, want) {
+		t.Errorf("Args = %v, want %v", plan.Args, want)
+	}
+	// Codex routes via config.toml, not env — Plan should NOT inject ANTHROPIC_*.
+	if plan.Env["ANTHROPIC_BASE_URL"] != "" {
+		t.Errorf("Codex shouldn't get ANTHROPIC_BASE_URL env injection; got %q", plan.Env["ANTHROPIC_BASE_URL"])
+	}
+}
+
+func TestPlan_NoExtraArgsWhenOllamaNotConfigured(t *testing.T) {
+	chat := chatFromSeededReversing(t)
+	ws := chat.AsWorkspace()
+	for _, agent := range []Agent{
+		{ID: AgentClaude, Binary: "claude", WpcTarget: "claude", Available: true},
+		{ID: AgentCodex, Binary: "codex", WpcTarget: "codex", Available: true},
+	} {
+		plan, err := Plan(ws, agent)
+		if err != nil {
+			t.Fatalf("Plan(%s): %v", agent.ID, err)
+		}
+		if len(plan.Args) != 0 {
+			t.Errorf("%s without ollama should have no Args; got %v", agent.ID, plan.Args)
+		}
+	}
+}
+
 func TestPrepareSandbox_RefusesUnavailableAgent(t *testing.T) {
 	root := t.TempDir()
 	tpl, err := CreateTemplate(root, "empty", "x")
