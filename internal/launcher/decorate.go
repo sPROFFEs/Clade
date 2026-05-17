@@ -20,7 +20,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sdksdk/code-launcher/internal/skills"
+	"github.com/sPROFFEs/Clade/internal/skills"
 )
 
 // applyDecorations runs every per-workspace post-compile concern. Called

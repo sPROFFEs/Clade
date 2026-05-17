@@ -1,10 +1,10 @@
-// code-launcher is the TUI launcher for agent CLIs (Claude Code, Codex CLI,
+// clade is the TUI launcher for agent CLIs (Claude Code, Codex CLI,
 // OpenCode) layered on top of wpc workpaths.
 //
 // Usage:
 //
-//	code-launcher                  (interactive)
-//	code-launcher -version
+//	clade                  (interactive)
+//	clade -version
 //
 // The launcher detects first run (no config), walks the user through
 // picking a workspaces root, lists / creates workspaces, detects which
@@ -22,16 +22,16 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/sdksdk/code-launcher/internal/installer"
-	"github.com/sdksdk/code-launcher/internal/launcher"
-	"github.com/sdksdk/code-launcher/internal/ollama"
+	"github.com/sPROFFEs/Clade/internal/installer"
+	"github.com/sPROFFEs/Clade/internal/launcher"
+	"github.com/sPROFFEs/Clade/internal/ollama"
 )
 
 func main() {
 	versionFlag := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
 	if *versionFlag {
-		fmt.Printf("code-launcher 0.1.0 %s/%s\n", runtime.GOOS, runtime.GOARCH)
+		fmt.Printf("clade 0.1.0 %s/%s\n", runtime.GOOS, runtime.GOARCH)
 		return
 	}
 
@@ -162,13 +162,13 @@ func execAgent(plan launcher.LaunchPlan) int {
 		if ee, ok := err.(*exec.ExitError); ok {
 			return ee.ExitCode()
 		}
-		fmt.Fprintf(os.Stderr, "code-launcher: launch %s: %v\n", plan.Command, err)
+		fmt.Fprintf(os.Stderr, "clade: launch %s: %v\n", plan.Command, err)
 		return 1
 	}
 	return 0
 }
 
 func die(err error) {
-	fmt.Fprintf(os.Stderr, "code-launcher: %v\n", err)
+	fmt.Fprintf(os.Stderr, "clade: %v\n", err)
 	os.Exit(1)
 }

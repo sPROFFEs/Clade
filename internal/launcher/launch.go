@@ -7,8 +7,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/sdksdk/code-launcher/pkg/targets"
-	"github.com/sdksdk/code-launcher/pkg/workpath"
+	"github.com/sPROFFEs/Clade/pkg/targets"
+	"github.com/sPROFFEs/Clade/pkg/workpath"
 )
 
 // PrepareSandbox loads the workpath, validates it, and compiles it into

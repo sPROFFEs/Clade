@@ -6,8 +6,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/sdksdk/code-launcher/internal/installer"
-	"github.com/sdksdk/code-launcher/internal/launcher"
+	"github.com/sPROFFEs/Clade/internal/installer"
+	"github.com/sPROFFEs/Clade/internal/launcher"
 )
 
 // TestInstall_AutoFixableOnly_DoesNotBlock verifies the user bug report:

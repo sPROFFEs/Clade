@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sdksdk/code-launcher/pkg/workpath"
+	"github.com/sPROFFEs/Clade/pkg/workpath"
 )
 
 // mikaTarget emits a mika-code workpath, the layout described in

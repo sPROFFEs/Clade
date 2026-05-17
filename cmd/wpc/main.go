@@ -18,8 +18,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sdksdk/code-launcher/pkg/targets"
-	"github.com/sdksdk/code-launcher/pkg/workpath"
+	"github.com/sPROFFEs/Clade/pkg/targets"
+	"github.com/sPROFFEs/Clade/pkg/workpath"
 )
 
 func main() {

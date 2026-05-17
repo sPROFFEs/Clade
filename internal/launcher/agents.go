@@ -138,7 +138,7 @@ func candidatePaths(id AgentID, binary string) []string {
 
 // knownInstallPaths returns common per-agent locations to probe when
 // exec.LookPath returns nothing. The official install scripts for these
-// agents update the user shell rc; a Windows-native code-launcher
+// agents update the user shell rc; a Windows-native Clade
 // process never sees that PATH change.
 func knownInstallPaths(id AgentID, binary string) []string {
 	home, err := os.UserHomeDir()

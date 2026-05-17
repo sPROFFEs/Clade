@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sdksdk/code-launcher/pkg/workpath"
+	"github.com/sPROFFEs/Clade/pkg/workpath"
 )
 
 // codexTarget emits an AGENTS.md at the out-dir root, the file Codex CLI and

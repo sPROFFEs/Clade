@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sdksdk/code-launcher/pkg/workpath"
+	"github.com/sPROFFEs/Clade/pkg/workpath"
 )
 
 // genericTarget emits a single self-contained markdown file with every part

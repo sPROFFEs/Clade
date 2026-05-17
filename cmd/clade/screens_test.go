@@ -14,10 +14,10 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/sdksdk/code-launcher/internal/launcher"
+	"github.com/sPROFFEs/Clade/internal/launcher"
 )
 
-// repoRoot is two dirs above the package dir (cmd/code-launcher).
+// repoRoot is two dirs above the package dir (cmd/clade).
 func repoRoot(t *testing.T) string {
 	t.Helper()
 	_, file, _, ok := runtime.Caller(0)

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sdksdk/code-launcher/pkg/workpath"
+	"github.com/sPROFFEs/Clade/pkg/workpath"
 )
 
 // geminiTarget emits a GEMINI.md at the out-dir root — the file Gemini CLI

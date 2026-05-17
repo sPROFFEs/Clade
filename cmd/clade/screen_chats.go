@@ -11,7 +11,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/sdksdk/code-launcher/internal/launcher"
+	"github.com/sPROFFEs/Clade/internal/launcher"
 )
 
 type chatListModel struct {

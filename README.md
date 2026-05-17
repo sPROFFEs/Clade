@@ -1,4 +1,4 @@
-# code-launcher
+# Clade
 
 A terminal launcher for agent CLIs (**Claude Code**, **Codex CLI**,
 **OpenCode**) that pairs each session with a self-contained *template* —
@@ -96,23 +96,23 @@ want to survive even if the agent's session store is wiped.
 
 ```sh
 # Linux / macOS
-tar -xzf code-launcher-0.1.0-linux-amd64.tar.gz
-cd linux-amd64 && ./code-launcher
+tar -xzf clade-0.1.0-linux-amd64.tar.gz
+cd linux-amd64 && ./clade
 ```
 
 ```powershell
 # Windows
-Expand-Archive code-launcher-0.1.0-windows-amd64.zip
-.\windows-amd64\code-launcher.exe
+Expand-Archive clade-0.1.0-windows-amd64.zip
+.\windows-amd64\clade.exe
 ```
 
 ### From source (Go ≥ 1.21)
 
 ```sh
-git clone https://github.com/sdksdk/code-launcher.git
-cd code-launcher
-go build -o code-launcher ./cmd/code-launcher
-./code-launcher
+git clone https://github.com/sPROFFEs/Clade.git
+cd Clade
+go build -o clade ./cmd/clade
+./clade
 ```
 
 Optional `wpc` binary (the workpath compiler — useful for authoring
@@ -126,14 +126,14 @@ wpc --help
 ## Quick start
 
 ```sh
-./code-launcher
+./clade
 ```
 
 First run is two short prompts (and only happens once — after that
 the launcher jumps straight to your chat list):
 
 1. **Workspaces root** — where everything lives. Default
-   `~/code-launcher-workspaces`.
+   `~/clade-workspaces`.
 2. **Seed bundled templates? (y/n, default yes)** — the launcher ships
    with two example templates (`reversing`, `code-review`). Pick `y`
    to copy them into `<root>/templates/` so you have something to chat
@@ -184,9 +184,9 @@ Next time:
 
 | Path                                                | Holds                                                   |
 |-----------------------------------------------------|---------------------------------------------------------|
-| `~/.config/code-launcher/config.json` (Linux/XDG)   | `workspacesRoot`, `lastAgent`                           |
-| `~/Library/Application Support/code-launcher/…` (macOS) | same                                                |
-| `%AppData%\code-launcher\config.json` (Windows)     | same                                                    |
+| `~/.config/clade/config.json` (Linux/XDG)   | `workspacesRoot`, `lastAgent`                           |
+| `~/Library/Application Support/clade/…` (macOS) | same                                                |
+| `%AppData%\clade\config.json` (Windows)             | same                                                    |
 | `<root>/templates/<name>/workpath/`                 | wpc source: `mission.md`, `playbook.md`, `rules.md`, `tools/`, `agents/` |
 | `<root>/templates/<name>/template.json`             | default settings inherited by new chats                 |
 | `<root>/chats/<chat-id>/workpath/`                  | cloned from template at chat creation                   |
@@ -277,9 +277,9 @@ See [`docs/SCHEMA.md`](docs/SCHEMA.md), [`docs/TARGETS.md`](docs/TARGETS.md),
 ## Repository layout
 
 ```
-code-launcher/
+Clade/
 ├── cmd/
-│   ├── code-launcher/      The Bubble Tea TUI (main binary)
+│   ├── Clade/      The Bubble Tea TUI (main binary)
 │   └── wpc/                The compiler CLI (optional, for direct use)
 ├── internal/
 │   ├── launcher/           Templates, chats, config, agents, launch, decorate, migrate
@@ -318,7 +318,7 @@ scripts/build.sh --no-archive    # skip tar.gz/zip
 
 Produces statically linked binaries under `dist/<os>-<arch>/` for
 `windows-amd64`, `linux-amd64`, `linux-arm64`, `darwin-amd64`,
-`darwin-arm64`. Each bundle ships both binaries (`code-launcher`,
+`darwin-arm64`. Each bundle ships both binaries (`clade`,
 `wpc`), the `samples/` tree, the docs, and a tar.gz/zip archive.
 
 ## Tests
@@ -382,7 +382,7 @@ Not yet implemented; PRs welcome:
 CLI coding agents have converged on similar primitives — instruction
 files (skill / rule / `AGENTS.md`), shell tools, named subagents — but
 each names them differently and stores them in a different place.
-**code-launcher** lets you write the instructions once as a template,
+**Clade** lets you write the instructions once as a template,
 clone a fresh chat from it every time you start a new task, and route
 that chat through whichever agent you have on PATH today and whichever
 model endpoint you have today — without forking `.claude/`, `.cursor/`,

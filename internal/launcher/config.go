@@ -1,4 +1,4 @@
-// Package launcher holds the non-UI logic the code-launcher TUI calls into:
+// Package launcher holds the non-UI logic the Clade TUI calls into:
 // user config, workspace discovery, agent CLI detection, and the
 // compile-then-spawn sequence. The split exists so the logic is testable
 // and reusable without dragging in Bubble Tea.
@@ -25,15 +25,15 @@ type Config struct {
 }
 
 // ConfigPaths returns the directory and file used for persistent config.
-// On Linux this is $XDG_CONFIG_HOME/code-launcher/config.json (or ~/.config/...);
-// on macOS, ~/Library/Application Support/code-launcher/...; on Windows,
-// %AppData%/code-launcher/... — courtesy of os.UserConfigDir().
+// On Linux this is $XDG_CONFIG_HOME/clade/config.json (or ~/.config/...);
+// on macOS, ~/Library/Application Support/clade/...; on Windows,
+// %AppData%/clade/... — courtesy of os.UserConfigDir().
 func ConfigPaths() (dir, file string, err error) {
 	base, err := os.UserConfigDir()
 	if err != nil {
 		return "", "", fmt.Errorf("locate user config dir: %w", err)
 	}
-	dir = filepath.Join(base, "code-launcher")
+	dir = filepath.Join(base, "clade")
 	file = filepath.Join(dir, "config.json")
 	return dir, file, nil
 }

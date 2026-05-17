@@ -46,7 +46,7 @@ type WorkspaceSettings struct {
 
 // OllamaSettings duplicates internal/ollama.Settings to avoid an import
 // cycle (ollama depends on this package's notion of a workspace via
-// callers in cmd/code-launcher; keeping these types separate keeps the
+// callers in cmd/clade; keeping these types separate keeps the
 // dependency graph one-way).
 type OllamaSettings struct {
 	Endpoint string `json:"endpoint,omitempty"`
@@ -397,6 +397,6 @@ func SampleCandidates(execDir string) []string {
 		filepath.Join(execDir, "samples", "workpaths"),
 		filepath.Join(execDir, "..", "samples", "workpaths"),
 		filepath.Join(execDir, "..", "..", "samples", "workpaths"),
-		filepath.Join(execDir, "..", "share", "code-launcher", "samples", "workpaths"),
+		filepath.Join(execDir, "..", "share", "clade", "samples", "workpaths"),
 	}
 }

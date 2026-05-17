@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Cross-compile wpc + code-launcher for every supported OS/arch and stage them
+# Cross-compile wpc + clade for every supported OS/arch and stage them
 # under dist/<os>-<arch>/ ready for distribution. Run from the repo root or
 # from anywhere — we cd to the script's parent automatically.
 #
@@ -56,7 +56,7 @@ build_one() {
   GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 \
     go build -trimpath -ldflags "$LDFLAGS" -o "$out/wpc$ext" ./cmd/wpc
   GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 \
-    go build -trimpath -ldflags "$LDFLAGS" -o "$out/code-launcher$ext" ./cmd/code-launcher
+    go build -trimpath -ldflags "$LDFLAGS" -o "$out/clade$ext" ./cmd/clade
 
   # Ship samples + activation docs next to the binaries so the bundle is
   # self-contained — first-run can seed from the same directory.
@@ -69,9 +69,9 @@ build_one() {
     case "$goos" in
       windows)
         if command -v zip >/dev/null 2>&1; then
-          ( cd dist && zip -qr "code-launcher-$VERSION-$triplet.zip" "$triplet" )
+          ( cd dist && zip -qr "clade-$VERSION-$triplet.zip" "$triplet" )
         elif command -v tar >/dev/null 2>&1; then
-          ( cd dist && tar -czf "code-launcher-$VERSION-$triplet.tar.gz" "$triplet" )
+          ( cd dist && tar -czf "clade-$VERSION-$triplet.tar.gz" "$triplet" )
           echo "  (no zip on PATH; built tar.gz instead)" >&2
         else
           echo "  (no zip or tar on PATH; skipping archive)" >&2
@@ -79,7 +79,7 @@ build_one() {
         ;;
       *)
         if command -v tar >/dev/null 2>&1; then
-          ( cd dist && tar -czf "code-launcher-$VERSION-$triplet.tar.gz" "$triplet" )
+          ( cd dist && tar -czf "clade-$VERSION-$triplet.tar.gz" "$triplet" )
         else
           echo "  (no tar on PATH; skipping archive)" >&2
         fi

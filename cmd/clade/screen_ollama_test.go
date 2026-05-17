@@ -12,8 +12,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/sdksdk/code-launcher/internal/launcher"
-	"github.com/sdksdk/code-launcher/internal/ollama"
+	"github.com/sPROFFEs/Clade/internal/launcher"
+	"github.com/sPROFFEs/Clade/internal/ollama"
 )
 
 // TestOllamaFlow_FullWizardWritesPerChatClaudeSettings: drives every step

@@ -80,7 +80,7 @@ func renderChrome(title, body, help string) string {
 }
 
 func renderTitleBar(title string, w int) string {
-	app := titleStyle.Render("code-launcher")
+	app := titleStyle.Render("clade")
 	sep := lipgloss.NewStyle().Foreground(t.Border).Render(" │ ")
 	titleStyled := lipgloss.NewStyle().Foreground(t.Accent).Bold(true).Render(title)
 

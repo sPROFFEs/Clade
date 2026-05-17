@@ -13,8 +13,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/sdksdk/code-launcher/internal/installer"
-	"github.com/sdksdk/code-launcher/internal/launcher"
+	"github.com/sPROFFEs/Clade/internal/installer"
+	"github.com/sPROFFEs/Clade/internal/launcher"
 )
 
 // tickDuration paces the polling tick that refreshes streaming-output

@@ -1,4 +1,4 @@
-module github.com/sdksdk/code-launcher
+module github.com/sPROFFEs/Clade
 
 go 1.26.1
 

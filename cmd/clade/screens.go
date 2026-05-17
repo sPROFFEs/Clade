@@ -12,7 +12,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/sdksdk/code-launcher/internal/launcher"
+	"github.com/sPROFFEs/Clade/internal/launcher"
 )
 
 // Each screen is its own model type. The root model delegates Update/View
@@ -86,9 +86,9 @@ func newFirstRun() firstRunModel {
 func defaultWorkspacesRoot() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "code-launcher-workspaces"
+		return "clade-workspaces"
 	}
-	return filepath.Join(home, "code-launcher-workspaces")
+	return filepath.Join(home, "clade-workspaces")
 }
 
 func (m firstRunModel) Init() tea.Cmd { return textinput.Blink }
@@ -406,5 +406,5 @@ func (m agentsModel) View() string {
 // --- shared helpers ------------------------------------------------------
 
 func wpcVersionString() string {
-	return fmt.Sprintf("code-launcher / %s %s/%s", "v0.1", runtime.GOOS, runtime.GOARCH)
+	return fmt.Sprintf("clade / %s %s/%s", "v0.1", runtime.GOOS, runtime.GOARCH)
 }

@@ -1,4 +1,4 @@
-# `code-launcher` — full reference
+# `clade` — full reference
 
 For an overview, see the [top-level README](../README.md).
 
