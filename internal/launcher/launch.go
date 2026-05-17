@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/sdksdk/code-launcher/pkg/targets"
 	"github.com/sdksdk/code-launcher/pkg/workpath"
@@ -149,6 +150,18 @@ func Plan(ws Workspace, agent Agent) (LaunchPlan, error) {
 	case AgentOpenCode:
 		// OpenCode picks up routing from opencode.json's model/provider
 		// fields, set by the Ollama screen — nothing to inject here.
+
+	case AgentGemini:
+		if ollamaConfigured {
+			// Gemini CLI honors OPENAI_API_KEY / OPENAI_BASE_URL as the
+			// OpenAI-compatible mode override. Any non-empty key works
+			// for Ollama (it doesn't enforce auth).
+			plan.Env = map[string]string{
+				"OPENAI_API_KEY":  "ollama",
+				"OPENAI_BASE_URL": strings.TrimRight(o.Endpoint, "/") + "/v1",
+			}
+			plan.Args = []string{"--model", o.Model}
+		}
 	}
 	return plan, nil
 }

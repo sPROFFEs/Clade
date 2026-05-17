@@ -93,6 +93,35 @@ func TestPlan_AppendsModelArgForClaudeWhenOllamaConfigured(t *testing.T) {
 	}
 }
 
+func TestPlan_AppendsOpenAIEnvAndModelArgForGeminiWhenOllamaConfigured(t *testing.T) {
+	chat := chatFromSeededReversing(t)
+	chat.Settings = WorkspaceSettings{
+		Ollama: OllamaSettings{Endpoint: "http://10.0.0.1:11434", Model: "qwen3"},
+	}
+	_ = SaveChatSettings(chat)
+	loaded, _ := LoadChat(filepath.Dir(filepath.Dir(chat.Root)), chat.ID)
+	ws := loaded.AsWorkspace()
+	agent := Agent{ID: AgentGemini, Binary: "gemini", WpcTarget: "gemini", Available: true}
+	plan, err := Plan(ws, agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"--model", "qwen3"}
+	if !equalStrings(plan.Args, want) {
+		t.Errorf("Args = %v, want %v", plan.Args, want)
+	}
+	if plan.Env["OPENAI_BASE_URL"] != "http://10.0.0.1:11434/v1" {
+		t.Errorf("OPENAI_BASE_URL = %q, want http://10.0.0.1:11434/v1", plan.Env["OPENAI_BASE_URL"])
+	}
+	if plan.Env["OPENAI_API_KEY"] != "ollama" {
+		t.Errorf("OPENAI_API_KEY = %q", plan.Env["OPENAI_API_KEY"])
+	}
+	// Gemini routing is OpenAI-style; no ANTHROPIC_* env vars should leak.
+	if plan.Env["ANTHROPIC_BASE_URL"] != "" {
+		t.Errorf("Gemini plan shouldn't carry ANTHROPIC_BASE_URL; got %q", plan.Env["ANTHROPIC_BASE_URL"])
+	}
+}
+
 func TestPlan_AppendsProfileArgForCodexWhenOllamaConfigured(t *testing.T) {
 	chat := chatFromSeededReversing(t)
 	chat.Settings = WorkspaceSettings{
@@ -122,6 +151,7 @@ func TestPlan_NoExtraArgsWhenOllamaNotConfigured(t *testing.T) {
 	for _, agent := range []Agent{
 		{ID: AgentClaude, Binary: "claude", WpcTarget: "claude", Available: true},
 		{ID: AgentCodex, Binary: "codex", WpcTarget: "codex", Available: true},
+		{ID: AgentGemini, Binary: "gemini", WpcTarget: "gemini", Available: true},
 	} {
 		plan, err := Plan(ws, agent)
 		if err != nil {
