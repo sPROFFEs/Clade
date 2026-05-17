@@ -41,10 +41,32 @@ func wrapLaunch(p launcher.LaunchPlan, c *launcher.Config) tea.Cmd {
 
 // --- first-run screen ----------------------------------------------------
 
+// First-run wizard is two short steps:
+//
+//   0. text input for the workspaces-root path
+//   1. y/n: copy the bundled example templates? (default yes)
+//
+// The seeding step is only ever shown on first run — once config.json
+// exists the launcher jumps straight to the chat list. If the user
+// declines seeding here, they can still add templates later via
+// `t` → `+ new template`, or by copying files into <root>/templates/
+// manually.
+type firstRunStep int
+
+const (
+	firstRunStepRoot firstRunStep = iota
+	firstRunStepSeed
+	firstRunStepWorking
+)
+
 type firstRunModel struct {
-	input  textinput.Model
-	err    string
-	status string
+	input    textinput.Model
+	step     firstRunStep
+	seed     bool // user's choice on step 1 (default true)
+	root     string
+	err      string
+	status   string
+	bundled  []string // names of templates that would be seeded
 }
 
 func newFirstRun() firstRunModel {
@@ -54,7 +76,11 @@ func newFirstRun() firstRunModel {
 	ti.Focus()
 	ti.CharLimit = 4096
 	ti.Width = 60
-	return firstRunModel{input: ti}
+	return firstRunModel{
+		input: ti,
+		step:  firstRunStepRoot,
+		seed:  true, // recommended default
+	}
 }
 
 func defaultWorkspacesRoot() string {
@@ -67,67 +93,171 @@ func defaultWorkspacesRoot() string {
 
 func (m firstRunModel) Init() tea.Cmd { return textinput.Blink }
 
+// sampleCandidatesFromCwd returns the same candidate locations the
+// seed-and-save Cmd uses, exposed here so step 1 can preview the list
+// of bundled templates the user would get.
+func sampleCandidatesFromCwd() []string {
+	execDir, _ := os.Executable()
+	if execDir != "" {
+		execDir = filepath.Dir(execDir)
+	}
+	candidates := launcher.SampleCandidates(execDir)
+	if cwd, err := os.Getwd(); err == nil {
+		candidates = append(candidates, filepath.Join(cwd, "samples", "workpaths"))
+	}
+	return candidates
+}
+
+// bundledTemplateNames peeks at the first sample dir that exists and
+// returns the subdir names. Pure read-only — does not seed anything.
+func bundledTemplateNames() []string {
+	for _, c := range sampleCandidatesFromCwd() {
+		entries, err := os.ReadDir(c)
+		if err != nil {
+			continue
+		}
+		var names []string
+		for _, e := range entries {
+			if e.IsDir() {
+				names = append(names, e.Name())
+			}
+		}
+		if len(names) > 0 {
+			return names
+		}
+	}
+	return nil
+}
+
 func (m firstRunModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		switch msg.Type {
-		case tea.KeyEnter:
-			root, err := filepath.Abs(strings.TrimSpace(m.input.Value()))
-			if err != nil {
-				m.err = err.Error()
+		switch m.step {
+		case firstRunStepRoot:
+			if msg.Type == tea.KeyEnter {
+				root, err := filepath.Abs(strings.TrimSpace(m.input.Value()))
+				if err != nil {
+					m.err = err.Error()
+					return m, nil
+				}
+				m.root = root
+				m.bundled = bundledTemplateNames()
+				m.step = firstRunStepSeed
 				return m, nil
 			}
-			m.status = "Seeding samples..."
-			return m, func() tea.Msg {
-				execDir, _ := os.Executable()
-				if execDir != "" {
-					execDir = filepath.Dir(execDir)
-				}
-				candidates := launcher.SampleCandidates(execDir)
-				// Also try cwd-relative — useful in `go run .` from the repo root.
-				if cwd, err := os.Getwd(); err == nil {
-					candidates = append(candidates, filepath.Join(cwd, "samples", "workpaths"))
-				}
-				_, err := launcher.SeedSamples(root, candidates)
-				if err != nil {
-					return errMsg{err: fmt.Errorf("seed samples: %w", err)}
-				}
-				cfg := &launcher.Config{WorkspacesRoot: root}
-				if err := launcher.SaveConfig(cfg); err != nil {
-					return errMsg{err: fmt.Errorf("save config: %w", err)}
-				}
-				return screenDoneMsg{next: newChatListModel(cfg)}
+			var cmd tea.Cmd
+			m.input, cmd = m.input.Update(msg)
+			return m, cmd
+
+		case firstRunStepSeed:
+			switch msg.String() {
+			case "y", "Y":
+				m.seed = true
+				return m, m.finalize()
+			case "n", "N":
+				m.seed = false
+				return m, m.finalize()
+			case " ":
+				m.seed = !m.seed
+				return m, nil
+			case "enter":
+				// Accept whatever the toggle is currently showing.
+				return m, m.finalize()
+			case "esc":
+				m.step = firstRunStepRoot
+				m.input.Focus()
+				return m, textinput.Blink
 			}
 		}
 	}
-	var cmd tea.Cmd
-	m.input, cmd = m.input.Update(msg)
-	return m, cmd
+	return m, nil
+}
+
+// finalize seeds (if requested) and saves config, then advances to the
+// chat list. Always called from step 1.
+func (m *firstRunModel) finalize() tea.Cmd {
+	root := m.root
+	seed := m.seed
+	m.step = firstRunStepWorking
+	if seed {
+		m.status = "Seeding bundled templates..."
+	} else {
+		m.status = "Skipping seed — you can add templates later via 't'."
+	}
+	return func() tea.Msg {
+		if seed {
+			if _, err := launcher.SeedSamples(root, sampleCandidatesFromCwd()); err != nil {
+				return errMsg{err: fmt.Errorf("seed samples: %w", err)}
+			}
+		} else {
+			// Make sure the templates/ + chats/ dirs exist so later
+			// list operations don't choke.
+			if err := os.MkdirAll(filepath.Join(root, launcher.TemplatesDir), 0o755); err != nil {
+				return errMsg{err: fmt.Errorf("mkdir templates: %w", err)}
+			}
+			if err := os.MkdirAll(filepath.Join(root, launcher.ChatsDir), 0o755); err != nil {
+				return errMsg{err: fmt.Errorf("mkdir chats: %w", err)}
+			}
+		}
+		cfg := &launcher.Config{WorkspacesRoot: root}
+		if err := launcher.SaveConfig(cfg); err != nil {
+			return errMsg{err: fmt.Errorf("save config: %w", err)}
+		}
+		return screenDoneMsg{next: newChatListModel(cfg)}
+	}
 }
 
 func (m firstRunModel) View() string {
 	var b strings.Builder
-	b.WriteString(header("First run — pick a home for your workspaces"))
-	b.WriteString("\n")
-	b.WriteString(subtitleStyle.Render(
-		"Each workspace bundles a workpath (knowledge base) and a sandbox (agent cwd).",
-	))
+	b.WriteString(header("First run — set up your workspace"))
 	b.WriteString("\n")
 	dir, file, _ := launcher.ConfigPaths()
 	b.WriteString(versionStyle.Render(
 		fmt.Sprintf("Config will live at %s (in %s)", filepath.Base(file), dir),
 	))
 	b.WriteString("\n\n")
-	b.WriteString(inputLabelStyle.Render("Workspaces root: "))
-	b.WriteString(m.input.View())
-	b.WriteString("\n")
-	if m.status != "" {
-		b.WriteString("\n" + hintStyle.Render(m.status))
+
+	switch m.step {
+	case firstRunStepRoot:
+		b.WriteString(subtitleStyle.Render(
+			"Each workspace bundles a workpath (knowledge base) and a sandbox (agent cwd).",
+		))
+		b.WriteString("\n\n")
+		b.WriteString(inputLabelStyle.Render("Workspaces root: "))
+		b.WriteString(m.input.View())
+		b.WriteString("\n")
+		b.WriteString(helpStyle.Render("enter to continue · ctrl-c to abort"))
+
+	case firstRunStepSeed:
+		b.WriteString(subtitleStyle.Render("Workspaces root: ") + m.root + "\n\n")
+		mark := "[ ] No, leave it empty"
+		if m.seed {
+			mark = availableStyle.Render("[x] Yes, copy the bundled templates (recommended)")
+		}
+		b.WriteString(inputLabelStyle.Render("Seed example templates? ") + mark + "\n\n")
+		if len(m.bundled) > 0 {
+			b.WriteString(descStyle.Render("Bundled templates:") + "\n")
+			for _, name := range m.bundled {
+				b.WriteString(descStyle.Render("  • "+name) + "\n")
+			}
+		} else {
+			b.WriteString(hintStyle.Render(
+				"(No bundled templates found near the launcher binary — nothing to seed.)") + "\n")
+		}
+		b.WriteString("\n")
+		b.WriteString(hintStyle.Render(
+			"Either way you can add or remove templates later via 't' on the home screen.",
+		))
+		b.WriteString("\n")
+		b.WriteString(helpStyle.Render("y / n to choose · space to toggle · enter to accept · esc back"))
+
+	case firstRunStepWorking:
+		b.WriteString(hintStyle.Render(m.status))
 	}
+
 	if m.err != "" {
 		b.WriteString("\n" + errorStyle.Render("Error: "+m.err))
 	}
-	b.WriteString(helpStyle.Render("enter to continue · ctrl-c to abort"))
 	return b.String()
 }
 

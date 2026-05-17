@@ -6,6 +6,7 @@ package main
 // chatListModel, new chats clone from templates via newPickTemplateModel.
 
 import (
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -56,7 +57,7 @@ func seededRoot(t *testing.T) string {
 	return tmp
 }
 
-func TestFirstRun_EnterSeedsTemplatesAndAdvances(t *testing.T) {
+func TestFirstRun_YesSeedsTemplatesAndAdvances(t *testing.T) {
 	tmp := t.TempDir()
 	wsRoot := filepath.Join(tmp, "ws")
 	redirectConfig(t, filepath.Join(tmp, "cfg"))
@@ -65,20 +66,23 @@ func TestFirstRun_EnterSeedsTemplatesAndAdvances(t *testing.T) {
 	m := newFirstRun()
 	m.input.SetValue(wsRoot)
 
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if cmd == nil {
-		t.Fatal("firstRun Enter should return a Cmd")
+	// step 0 → 1: Enter advances from path input to the seed prompt.
+	nx, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = nx.(firstRunModel)
+	if m.step != firstRunStepSeed {
+		t.Fatalf("step = %d, want %d (seed)", m.step, firstRunStepSeed)
 	}
-	if !strings.Contains(next.View(), "Seeding samples") {
-		t.Errorf("expected status line; got: %s", next.View())
+	if !strings.Contains(m.View(), "Seed example templates") {
+		t.Errorf("step 1 view missing seed prompt:\n%s", m.View())
 	}
 
-	msg := runCmd(t, cmd)
-	done, ok := msg.(screenDoneMsg)
-	if !ok {
-		t.Fatalf("expected screenDoneMsg, got %T", msg)
+	// step 1 → done: 'y' seeds + saves config + transitions.
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	if cmd == nil {
+		t.Fatal("'y' should produce a finalize Cmd")
 	}
-	if _, isChatList := done.next.(chatListModel); !isChatList {
+	done := runCmd(t, cmd).(screenDoneMsg)
+	if _, ok := done.next.(chatListModel); !ok {
 		t.Errorf("expected chatListModel, got %T", done.next)
 	}
 
@@ -88,6 +92,57 @@ func TestFirstRun_EnterSeedsTemplatesAndAdvances(t *testing.T) {
 	}
 	if len(tpls) < 2 {
 		t.Errorf("expected at least 2 seeded templates, got %d", len(tpls))
+	}
+}
+
+func TestFirstRun_NoSkipsSeedingAndCreatesEmptyDirs(t *testing.T) {
+	tmp := t.TempDir()
+	wsRoot := filepath.Join(tmp, "ws")
+	redirectConfig(t, filepath.Join(tmp, "cfg"))
+	t.Chdir(repoRoot(t))
+
+	m := newFirstRun()
+	m.input.SetValue(wsRoot)
+	nx, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = nx.(firstRunModel)
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	if cmd == nil {
+		t.Fatal("'n' should also produce a finalize Cmd")
+	}
+	done := runCmd(t, cmd).(screenDoneMsg)
+	if _, ok := done.next.(chatListModel); !ok {
+		t.Errorf("expected chatListModel, got %T", done.next)
+	}
+
+	// Templates dir exists but empty.
+	tpls, err := launcher.ListTemplates(wsRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tpls) != 0 {
+		t.Errorf("expected 0 templates when 'n' is chosen, got %d", len(tpls))
+	}
+	// chats/ dir also exists so ListChats doesn't error later.
+	if _, err := os.Stat(filepath.Join(wsRoot, launcher.ChatsDir)); err != nil {
+		t.Errorf("chats dir not created when seeding was skipped: %v", err)
+	}
+}
+
+func TestFirstRun_SpaceTogglesSeedChoice(t *testing.T) {
+	tmp := t.TempDir()
+	redirectConfig(t, filepath.Join(tmp, "cfg"))
+
+	m := newFirstRun()
+	m.input.SetValue(filepath.Join(tmp, "ws"))
+	nx, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = nx.(firstRunModel)
+	if !m.seed {
+		t.Fatal("seed should default to true (recommended)")
+	}
+	nx, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	m = nx.(firstRunModel)
+	if m.seed {
+		t.Error("space should toggle seed off")
 	}
 }
 

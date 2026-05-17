@@ -129,11 +129,21 @@ wpc --help
 ./code-launcher
 ```
 
-First run:
-1. Pick a workspaces root (default `~/code-launcher-workspaces`).
-2. Bundled sample templates are seeded into `templates/`.
-3. Home screen shows an empty chat list → press `n` (or Enter on `+ new
-   chat`) → pick `reversing` → name the chat → pick `Claude Code`.
+First run is two short prompts (and only happens once — after that
+the launcher jumps straight to your chat list):
+
+1. **Workspaces root** — where everything lives. Default
+   `~/code-launcher-workspaces`.
+2. **Seed bundled templates? (y/n, default yes)** — the launcher ships
+   with two example templates (`reversing`, `code-review`). Pick `y`
+   to copy them into `<root>/templates/` so you have something to chat
+   against immediately; pick `n` to start with an empty workspace.
+   You can add or remove templates later via `t` on the home screen.
+
+Then:
+
+3. Home screen → press `n` (or Enter on `+ new chat`) → pick a
+   template → name the chat → pick an agent.
 4. The chat is created, the workpath is compiled into its sandbox, the
    agent launches.
 
