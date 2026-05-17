@@ -227,6 +227,42 @@ window.__nanoDiag = () => {
   };
 };
 
+// Re-runnable warmup: tries N times to kick the on-device-model
+// service, keeps the resulting session alive as window.__nanoPrimer
+// so the service doesn't idle out. Returns { ok, availability,
+// error } so the caller can decide whether to fail or soldier on.
+window.__nanoWarmup = async function(attempts) {
+  const max = attempts || 8;
+  let avail = await LanguageModel.availability();
+  console.log("NANO availability before warmup: " + avail);
+  if (avail === "no") {
+    return { ok: false, availability: avail,
+             error: "availability='no' — model unsupported on this device." };
+  }
+  let lastErr = null;
+  for (let i = 1; i <= max; i++) {
+    try {
+      const primer = await LanguageModel.create({
+        monitor(m) {
+          m.addEventListener("downloadprogress", (e) => {
+            const pct = Math.floor(e.loaded * 100);
+            console.log("NANO_PROGRESS " + pct);
+          });
+        },
+      });
+      window.__nanoPrimer = primer;
+      avail = await LanguageModel.availability();
+      console.log("NANO ready (attempt " + i + "), availability=" + avail);
+      return { ok: true, availability: avail };
+    } catch (e) {
+      lastErr = (e && e.message) || String(e);
+      console.log("NANO warmup attempt " + i + " failed: " + lastErr);
+      await new Promise(r => setTimeout(r, 1500 * i));
+    }
+  }
+  return { ok: false, availability: avail, error: lastErr };
+};
+
 window.__nanoReady = (async () => {
   if (!('LanguageModel' in self)) {
     const diag = window.__nanoDiag();
@@ -239,57 +275,29 @@ window.__nanoReady = (async () => {
       "  service stays disabled. Try Chrome Dev (apt install\n" +
       "  google-chrome-unstable) or use Ollama from Telegram.");
   }
-
-  // Availability is one of: "no" | "downloadable" | "downloading" |
-  // "available". Even when it says "available", the on-device-model
-  // service may not be warm yet — a cold create() then 502s with
-  // "service is not running". So we ALWAYS do a real create() here,
-  // with a downloadprogress monitor; that both forces the model
-  // weights to download (if not present) and warms up the service.
-  let avail = await LanguageModel.availability();
-  if (avail === "no") {
-    throw new Error("LanguageModel.availability() returned 'no' — model not usable on this device.");
-  }
-
-  // Kick the service. Retry a few times because Chrome sometimes
-  // returns "service is not running" once during the bring-up.
-  let primer = null;
-  let lastErr = null;
-  for (let attempt = 1; attempt <= 5; attempt++) {
-    try {
-      primer = await LanguageModel.create({
-        monitor(m) {
-          m.addEventListener("downloadprogress", (e) => {
-            const pct = Math.floor(e.loaded * 100);
-            console.log("NANO_PROGRESS " + pct);
-          });
-        },
-      });
-      break;
-    } catch (e) {
-      lastErr = e;
-      console.log("NANO warmup attempt " + attempt + " failed: " + (e && e.message));
-      // Back off; the service can take several seconds to come up.
-      await new Promise(r => setTimeout(r, 2000 * attempt));
-    }
-  }
-  if (!primer) {
-    throw new Error("model warmup failed after retries: " + (lastErr && lastErr.message));
-  }
-  // Keep the primer session around — destroying it lets the service
-  // idle out and the next prompt then re-trips "not running".
-  window.__nanoPrimer = primer;
-  avail = await LanguageModel.availability();
-  console.log("NANO ready, availability=" + avail);
-  return avail;
+  // Soft-warmup: return the result either way so bridge.start can
+  // decide to soldier on. A "not running" failure here doesn't mean
+  // prompts are doomed — sometimes the service comes up later, and
+  // each prompt re-tries the warmup.
+  return await window.__nanoWarmup(5);
 })();
 
 window.__nanoPrompt = async function(systemPrompt, history, userText) {
-  // Each request gets its own session so system+history live for this
-  // turn only. Cheap because Nano is local. We also keep the primer
-  // session alive (created in __nanoReady) so the on-device-model
-  // service doesn't idle out between requests.
-  await window.__nanoReady;
+  // If start-up warmup never succeeded, run a fresh full warmup now
+  // (8 attempts, more aggressive than the start-up's 5). Many setups
+  // need a manual chrome://on-device-internals visit before the
+  // service comes online — once it does, prompts stick.
+  if (!window.__nanoPrimer) {
+    const w = await window.__nanoWarmup(8);
+    if (!w.ok) {
+      throw new Error(
+        "on-device-model service not running. availability='" + w.availability +
+        "', last error: " + w.error + ". The model probably needs to be " +
+        "downloaded via chrome://on-device-internals first — see " +
+        "/nano_download in Telegram, or run google-chrome-unstable " +
+        "--user-data-dir=<profile> chrome://on-device-internals manually.");
+    }
+  }
   const opts = {};
   if (systemPrompt) {
     opts.initialPrompts = [{ role: "system", content: systemPrompt }];
@@ -297,22 +305,21 @@ window.__nanoPrompt = async function(systemPrompt, history, userText) {
   if (Array.isArray(history) && history.length) {
     opts.initialPrompts = (opts.initialPrompts || []).concat(history);
   }
-  // Retry once on "service is not running" — usually a transient.
   let session;
-  for (let attempt = 1; attempt <= 2; attempt++) {
+  for (let attempt = 1; attempt <= 3; attempt++) {
     try {
       session = await LanguageModel.create(opts);
       break;
     } catch (e) {
       const msg = (e && e.message) || "";
-      if (attempt === 2 || !/not running|NotSupportedError/i.test(msg)) {
+      if (attempt === 3 || !/not running|NotSupportedError/i.test(msg)) {
         throw e;
       }
-      // Re-warm by re-creating the primer.
-      try {
-        window.__nanoPrimer && window.__nanoPrimer.destroy && window.__nanoPrimer.destroy();
-      } catch (_) {}
-      window.__nanoPrimer = await LanguageModel.create({});
+      console.log("NANO prompt create retry " + attempt + ": " + msg);
+      // Reset the primer and re-warm; the service may have idled.
+      window.__nanoPrimer = null;
+      const w = await window.__nanoWarmup(3);
+      if (!w.ok) throw new Error("re-warmup failed: " + w.error);
     }
   }
   try {
@@ -503,29 +510,35 @@ class Bridge:
             # below will explain what's exposed there.
             log.warning("could not load https://example.com — falling back to about:blank")
             await self.page.goto("about:blank")
-        # Inject the driver and surface availability so a bad profile
-        # blows up here, not on the first user prompt.
+        # Inject the driver. We DO surface the warmup result but no
+        # longer kill the bridge if the on-device-model service isn't
+        # warm yet — the per-prompt warmup will retry, and many setups
+        # only get the service online after a chrome://on-device-internals
+        # visit, which the user can do via /nano_download.
         await self.page.add_script_tag(content=DRIVER_JS)
         try:
-            avail = await self.page.evaluate("window.__nanoReady")
-            log.info("LanguageModel.availability = %s", avail)
+            warm = await self.page.evaluate("window.__nanoReady")
         except Exception as e:
             await self.stop()
             raise RuntimeError(
-                "Nano not usable in this profile.\n"
+                "Nano API not exposed.\n"
                 f"  underlying error: {e}\n"
-                "  things to try (in order):\n"
-                "    1. /nano_setup so Local State is re-seeded with the flags.\n"
-                "    2. Run Chrome non-headless once on this profile so it can\n"
-                "       finish the on-device-model download:\n"
-                "         google-chrome --user-data-dir=" + PROFILE_DIR + " \\\n"
-                "           chrome://on-device-internals\n"
-                "       Wait for the model to reach 'Available', close Chrome,\n"
-                "       then /nano_start.\n"
-                "    3. If your box has no GPU (typical VPS) Chrome's on-device\n"
-                "       model service may refuse no matter what. In that case\n"
-                "       use Ollama models from Telegram instead: /use <model>"
+                "  This means Chrome itself isn't registering the Prompt API\n"
+                "  in this profile/context. Use /use <ollama-model> as an\n"
+                "  alternative — Ollama from Telegram already works end-to-end."
             ) from e
+        if isinstance(warm, dict) and warm.get("ok"):
+            log.info("LanguageModel.availability = %s", warm.get("availability"))
+        else:
+            err = (warm or {}).get("error", "(no error reported)")
+            avail = (warm or {}).get("availability", "?")
+            log.warning(
+                "warmup didn't fully succeed at startup "
+                "(availability=%s, last error=%s). Bridge is up; prompts "
+                "will retry the warmup. If they keep failing, run "
+                "/nano_download to open chrome://on-device-internals and "
+                "trigger the model download manually.",
+                avail, err)
 
     async def stop(self) -> None:
         try:

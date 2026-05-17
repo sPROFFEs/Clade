@@ -891,6 +891,59 @@ def cmd_nano_check(m):
     _run_setup_streaming(m, "check")
 
 
+@bot.message_handler(commands=["nano_download"])
+@auth
+def cmd_nano_download(m):
+    """Open chrome://on-device-internals in a real-Chrome session
+    (under Xvfb when no display) and dump what Chrome says about
+    the model state. Side effect: the page visit usually wakes up
+    the on-device-model service."""
+    script = Path(__file__).parent / "nano_download.py"
+    if not script.exists():
+        bot.reply_to(m, f"❌ {script} missing")
+        return
+    placeholder = bot.reply_to(m,
+                               "🔎 opening chrome://on-device-internals to "
+                               "check + wake the model service...",
+                               parse_mode="Markdown")
+    buf: list[str] = ["🔎 `nano_download.py`\n```"]
+
+    def _flush() -> None:
+        body = "\n".join(buf[-40:]) + "\n```"
+        try:
+            bot.edit_message_text(body, CHAT_ID, placeholder.message_id,
+                                  parse_mode="Markdown")
+        except Exception:
+            pass
+
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
+    try:
+        proc = subprocess.Popen(
+            [sys.executable, "-u", str(script)],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            bufsize=1, env=env)
+    except OSError as e:
+        bot.edit_message_text(f"❌ launch failed: {e}", CHAT_ID,
+                              placeholder.message_id)
+        return
+    last_edit = 0.0
+    assert proc.stdout
+    for line in proc.stdout:
+        buf.append(line.rstrip())
+        now = time.time()
+        if now - last_edit > 1.5:
+            _flush()
+            last_edit = now
+    proc.wait()
+    body = "\n".join(buf[-80:] + [f"\n_exit code: {proc.returncode}_"]) + "\n```"
+    try:
+        bot.edit_message_text(body, CHAT_ID, placeholder.message_id,
+                              parse_mode="Markdown")
+    except Exception:
+        bot.send_message(CHAT_ID, body, parse_mode="Markdown")
+
+
 @bot.message_handler(commands=["install_chrome"])
 @auth
 def cmd_install_chrome(m):
@@ -1434,6 +1487,7 @@ SLASH_COMMANDS = [
     BotCommand("nano_setup",    "first-time Nano bridge setup"),
     BotCommand("nano_update",   "update Nano bridge"),
     BotCommand("nano_check",    "report Nano prereq state"),
+    BotCommand("nano_download", "open chrome://on-device-internals + wake model service"),
     BotCommand("nano_start",    "start headless-Chrome bridge"),
     BotCommand("nano_stop",     "stop bridge"),
     BotCommand("nano_url",      "show bridge URL (paste into code-launcher)"),
