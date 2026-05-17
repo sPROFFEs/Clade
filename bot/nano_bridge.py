@@ -206,11 +206,38 @@ _auto_display()
 # requests call window.__nanoPrompt(...) which manages a single
 # long-lived LanguageModel session for the lifetime of the bridge.
 DRIVER_JS = r"""
+window.__nanoDiag = () => {
+  // Snapshot every AI entrypoint Chrome might expose so we can tell
+  // (a) which Chrome channel + version we're on, (b) whether the
+  // feature flag took effect at all, (c) what failure mode we're in.
+  const ua = navigator.userAgent;
+  const ver = (navigator.userAgentData && navigator.userAgentData.brands || [])
+    .map(b => b.brand + " " + b.version).join(", ");
+  const has = (k) => typeof self[k] !== "undefined";
+  return {
+    userAgent: ua,
+    brands: ver,
+    LanguageModel: has("LanguageModel"),
+    ai: has("ai"),
+    chromeAi: !!(self.chrome && self.chrome.ai),
+    chromeAiOriginTrial: !!(self.chrome && self.chrome.aiOriginTrial),
+    Writer: has("Writer"),
+    Summarizer: has("Summarizer"),
+    Translator: has("Translator"),
+  };
+};
+
 window.__nanoReady = (async () => {
   if (!('LanguageModel' in self)) {
-    throw new Error("Chrome LanguageModel API not available in this profile. " +
-                    "Enable chrome://flags/#prompt-api-for-gemini-nano and let " +
-                    "Gemini Nano finish downloading (chrome://on-device-internals).");
+    const diag = window.__nanoDiag();
+    throw new Error(
+      "Chrome LanguageModel API not exposed.\n" +
+      "  diagnostic: " + JSON.stringify(diag, null, 2) + "\n" +
+      "  meaning: Chrome launched fine but refused to register the\n" +
+      "  Prompt API in this context. Common cause on VMs without GPU\n" +
+      "  passthrough: Chrome's perf-check fails so the on-device-model\n" +
+      "  service stays disabled. Try Chrome Dev (apt install\n" +
+      "  google-chrome-unstable) or use Ollama from Telegram.");
   }
   const avail = await LanguageModel.availability();
   if (avail === "no") {

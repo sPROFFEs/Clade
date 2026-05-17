@@ -13,17 +13,35 @@
 
 set -euo pipefail
 
+# Channel: stable | beta | unstable. Dev (= unstable) is the channel
+# most likely to expose new AI APIs on Linux without origin trials.
+CHANNEL="${1:-${CHANNEL:-stable}}"
+case "$CHANNEL" in
+  stable|beta|unstable) ;;
+  dev) CHANNEL=unstable ;;  # let "dev" alias the official package name
+  *)
+    echo "unknown channel: $CHANNEL  (use: stable | beta | unstable)" >&2
+    exit 1 ;;
+esac
+PKG="google-chrome-${CHANNEL}"
+
 if [[ $EUID -ne 0 ]]; then
-  echo "needs root — re-run with:  sudo $0" >&2
+  echo "needs root — re-run with:  sudo $0 [stable|beta|unstable]" >&2
   exit 1
 fi
 
 # Already installed?
-if command -v google-chrome >/dev/null 2>&1; then
-  loc="$(command -v google-chrome)"
+if command -v "google-chrome-${CHANNEL}" >/dev/null 2>&1 \
+   || ([[ "$CHANNEL" == "stable" ]] && command -v google-chrome >/dev/null 2>&1); then
+  loc="$(command -v google-chrome-${CHANNEL} 2>/dev/null || command -v google-chrome)"
   ver="$("$loc" --version 2>/dev/null || true)"
-  echo "✓ google-chrome already installed: $loc"
+  echo "✓ ${PKG} already installed: $loc"
   echo "  $ver"
+  # Still ensure xvfb is around — that's a separate package.
+  if ! dpkg -s xvfb >/dev/null 2>&1; then
+    echo "→ installing xvfb (virtual display for headless VMs)"
+    apt-get update -qq && apt-get install -y xvfb
+  fi
   exit 0
 fi
 
@@ -60,16 +78,16 @@ if [[ ! -f "$LIST" ]]; then
     > "$LIST"
 fi
 
-echo "→ apt-get update (Google source) + install google-chrome-stable + xvfb"
+echo "→ apt-get update (Google source) + install ${PKG} + xvfb"
 apt-get update -qq
 # xvfb provides a virtual display so non-headless Chrome can attach
 # even on a Proxmox VM / true server with no real X session.
-apt-get install -y google-chrome-stable xvfb
+apt-get install -y "${PKG}" xvfb
 
 # Confirm the binary the bridge will auto-detect.
-loc="$(command -v google-chrome || true)"
+loc="$(command -v google-chrome-${CHANNEL} 2>/dev/null || command -v google-chrome || true)"
 if [[ -z "$loc" ]]; then
-  echo "✗ install reported success but google-chrome is not on PATH." >&2
+  echo "✗ install reported success but ${PKG} is not on PATH." >&2
   exit 3
 fi
 echo
@@ -80,3 +98,9 @@ echo "next steps (from Telegram):"
 echo "  /nano_check       # should now say 'real Google Chrome — Nano supported'"
 echo "  /nano_setup       # downloads Gemini Nano (~1.5 GB, first time only)"
 echo "  /nano_start       # spawn the bridge"
+if [[ "$CHANNEL" == "stable" ]]; then
+  echo
+  echo "if Nano still refuses to expose, try the Dev channel — it's"
+  echo "more permissive about new AI APIs on Linux:"
+  echo "    sudo $0 unstable"
+fi
