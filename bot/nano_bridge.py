@@ -239,18 +239,56 @@ window.__nanoReady = (async () => {
       "  service stays disabled. Try Chrome Dev (apt install\n" +
       "  google-chrome-unstable) or use Ollama from Telegram.");
   }
-  const avail = await LanguageModel.availability();
+
+  // Availability is one of: "no" | "downloadable" | "downloading" |
+  // "available". Even when it says "available", the on-device-model
+  // service may not be warm yet — a cold create() then 502s with
+  // "service is not running". So we ALWAYS do a real create() here,
+  // with a downloadprogress monitor; that both forces the model
+  // weights to download (if not present) and warms up the service.
+  let avail = await LanguageModel.availability();
   if (avail === "no") {
     throw new Error("LanguageModel.availability() returned 'no' — model not usable on this device.");
   }
-  // "downloadable" / "downloading" / "available"; the model may
-  // still be fetching on first run.
+
+  // Kick the service. Retry a few times because Chrome sometimes
+  // returns "service is not running" once during the bring-up.
+  let primer = null;
+  let lastErr = null;
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    try {
+      primer = await LanguageModel.create({
+        monitor(m) {
+          m.addEventListener("downloadprogress", (e) => {
+            const pct = Math.floor(e.loaded * 100);
+            console.log("NANO_PROGRESS " + pct);
+          });
+        },
+      });
+      break;
+    } catch (e) {
+      lastErr = e;
+      console.log("NANO warmup attempt " + attempt + " failed: " + (e && e.message));
+      // Back off; the service can take several seconds to come up.
+      await new Promise(r => setTimeout(r, 2000 * attempt));
+    }
+  }
+  if (!primer) {
+    throw new Error("model warmup failed after retries: " + (lastErr && lastErr.message));
+  }
+  // Keep the primer session around — destroying it lets the service
+  // idle out and the next prompt then re-trips "not running".
+  window.__nanoPrimer = primer;
+  avail = await LanguageModel.availability();
+  console.log("NANO ready, availability=" + avail);
   return avail;
 })();
 
 window.__nanoPrompt = async function(systemPrompt, history, userText) {
   // Each request gets its own session so system+history live for this
-  // turn only. Cheap because Nano is local.
+  // turn only. Cheap because Nano is local. We also keep the primer
+  // session alive (created in __nanoReady) so the on-device-model
+  // service doesn't idle out between requests.
   await window.__nanoReady;
   const opts = {};
   if (systemPrompt) {
@@ -259,7 +297,24 @@ window.__nanoPrompt = async function(systemPrompt, history, userText) {
   if (Array.isArray(history) && history.length) {
     opts.initialPrompts = (opts.initialPrompts || []).concat(history);
   }
-  const session = await LanguageModel.create(opts);
+  // Retry once on "service is not running" — usually a transient.
+  let session;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      session = await LanguageModel.create(opts);
+      break;
+    } catch (e) {
+      const msg = (e && e.message) || "";
+      if (attempt === 2 || !/not running|NotSupportedError/i.test(msg)) {
+        throw e;
+      }
+      // Re-warm by re-creating the primer.
+      try {
+        window.__nanoPrimer && window.__nanoPrimer.destroy && window.__nanoPrimer.destroy();
+      } catch (_) {}
+      window.__nanoPrimer = await LanguageModel.create({});
+    }
+  }
   try {
     const result = await session.prompt(userText);
     return { ok: true, text: result };
@@ -422,6 +477,20 @@ class Bridge:
         log.info("chromium context up")
 
         self.page = await self.ctx.new_page()
+
+        # Pipe page console.log to our log so NANO_PROGRESS / warmup
+        # messages from DRIVER_JS show up in the bridge log and the
+        # 📜 logs button in Telegram.
+        def _on_console(msg):
+            try:
+                t = msg.text or ""
+            except Exception:
+                return
+            if t.startswith("NANO"):
+                log.info("page: %s", t)
+
+        self.page.on("console", _on_console)
+
         # Some Chrome AI APIs refuse to register on about:blank because
         # it's an opaque origin. A real https:// page gives us a
         # secure context with a stable origin string. We pick a

@@ -412,9 +412,11 @@ class NanoBridgeController:
             start_new_session=True,
         )
         self._started_at = time.time()
-        # Wait up to 20s for the bridge to print "listening on ..."
-        # (first launch downloads Nano if not present — can take a while).
-        for _ in range(20):
+        # Wait up to 60s for the bridge to print "listening on ..."
+        # (first launch downloads Nano + warms the model service if
+        # not present — can take a while; subsequent launches are
+        # ~2s).
+        for _ in range(60):
             time.sleep(1)
             if self.proc.poll() is not None:
                 tail = _tail(self.log_file, 30)
