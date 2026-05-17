@@ -360,6 +360,11 @@ func (m ollamaModel) View() string {
 				b.WriteString(descStyle.Render(e.hint) + "\n")
 			}
 		}
+		b.WriteString("\n" + hintStyle.Render(
+			"Gemini CLI isn't listed: it doesn't currently expose an "+
+				"OpenAI-compatible-endpoint override. To route Gemini through "+
+				"a local model, run a proxy like litellm and point Gemini at "+
+				"it via Vertex AI config — outside the scope of this screen."))
 
 	case ollamaStepApply:
 		help = "enter / esc to return"

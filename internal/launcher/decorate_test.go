@@ -166,6 +166,73 @@ func TestDecorate_OnlineSkillsClonedIntoClaudeSkillsDir(t *testing.T) {
 	}
 }
 
+func TestDecorate_MemoryDirectiveInjectedIntoAgentInstructions(t *testing.T) {
+	// User report: MEMORY.md was staged in the sandbox but the agent
+	// never knew about it. After this fix the compiled SKILL.md /
+	// AGENTS.md / GEMINI.md each carry an explicit "Persistent memory"
+	// section pointing the agent at MEMORY.md.
+	cases := []struct {
+		name        string
+		agent       Agent
+		wantSection string // path under sandbox containing the directive
+	}{
+		{
+			name: "claude",
+			agent: Agent{
+				ID: AgentClaude, Binary: "claude", WpcTarget: "claude", Available: true,
+			},
+			wantSection: filepath.Join(".claude", "skills", "reversing", "SKILL.md"),
+		},
+		{
+			name: "codex",
+			agent: Agent{
+				ID: AgentCodex, Binary: "codex", WpcTarget: "codex", Available: true,
+			},
+			wantSection: "AGENTS.md",
+		},
+		{
+			name: "gemini",
+			agent: Agent{
+				ID: AgentGemini, Binary: "gemini", WpcTarget: "gemini", Available: true,
+			},
+			wantSection: "GEMINI.md",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ws := freshWorkspace(t, WorkspaceSettings{MemoryEnabled: true})
+			if err := PrepareSandbox(ws, tc.agent); err != nil {
+				t.Fatalf("PrepareSandbox: %v", err)
+			}
+			body, err := os.ReadFile(filepath.Join(ws.SandboxDir, tc.wantSection))
+			if err != nil {
+				t.Fatalf("read %s: %v", tc.wantSection, err)
+			}
+			if !strings.Contains(string(body), "Persistent memory across sessions") {
+				t.Errorf("expected memory directive in %s; got:\n%s", tc.wantSection, body)
+			}
+			if !strings.Contains(string(body), "MEMORY.md") {
+				t.Errorf("memory directive must mention MEMORY.md literally")
+			}
+		})
+	}
+}
+
+func TestDecorate_MemoryDirectiveIdempotent(t *testing.T) {
+	ws := freshWorkspace(t, WorkspaceSettings{MemoryEnabled: true})
+	agent := Agent{ID: AgentClaude, Binary: "claude", WpcTarget: "claude", Available: true}
+	if err := PrepareSandbox(ws, agent); err != nil {
+		t.Fatal(err)
+	}
+	if err := PrepareSandbox(ws, agent); err != nil {
+		t.Fatal(err)
+	}
+	body, _ := os.ReadFile(filepath.Join(ws.SandboxDir, ".claude", "skills", "reversing", "SKILL.md"))
+	if count := strings.Count(string(body), "## Persistent memory across sessions"); count != 1 {
+		t.Errorf("memory directive appended %d times, want exactly 1", count)
+	}
+}
+
 func TestDecorate_FailedOnlineSkillIsNonFatal(t *testing.T) {
 	ws := freshWorkspace(t, WorkspaceSettings{OnlineSkills: []string{"/nonexistent/repo"}})
 	claude := Agent{ID: AgentClaude, Binary: "claude", WpcTarget: "claude", Available: true}

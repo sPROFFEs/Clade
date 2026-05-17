@@ -40,6 +40,13 @@ func applyDecorations(ws Workspace, agent Agent) []string {
 		if err := stageMemory(ws); err != nil {
 			notes = append(notes, "memory: "+err.Error())
 		}
+		// Tell the agent about the file it just got. Without this the
+		// MEMORY.md sits in the sandbox unread — the agent doesn't read
+		// arbitrary files in its cwd unless its instructions point at
+		// them.
+		if err := appendMemoryDirective(ws, agent); err != nil {
+			notes = append(notes, "memory directive: "+err.Error())
+		}
 	}
 
 	if len(ws.Settings.OnlineSkills) > 0 {
@@ -60,15 +67,24 @@ func applyDecorations(ws Workspace, agent Agent) []string {
 	return notes
 }
 
-func prependLanguage(ws Workspace, agent Agent, lang string) error {
-	// Prepend to the file the agent actually reads.
-	var path string
+// agentInstructionsPath returns the path of the compiled instruction
+// file the agent reads on startup (SKILL.md / AGENTS.md / GEMINI.md),
+// or "" if the target doesn't have one we know how to decorate.
+func agentInstructionsPath(ws Workspace, agent Agent) string {
 	switch agent.WpcTarget {
 	case "claude":
-		path = filepath.Join(ws.SandboxDir, ".claude", "skills", ws.Name, "SKILL.md")
+		return filepath.Join(ws.SandboxDir, ".claude", "skills", ws.Name, "SKILL.md")
 	case "codex":
-		path = filepath.Join(ws.SandboxDir, "AGENTS.md")
-	default:
+		return filepath.Join(ws.SandboxDir, "AGENTS.md")
+	case "gemini":
+		return filepath.Join(ws.SandboxDir, "GEMINI.md")
+	}
+	return ""
+}
+
+func prependLanguage(ws Workspace, agent Agent, lang string) error {
+	path := agentInstructionsPath(ws, agent)
+	if path == "" {
 		return nil
 	}
 	raw, err := os.ReadFile(path)
@@ -88,6 +104,50 @@ func prependLanguage(ws Workspace, agent Agent, lang string) error {
 	} else {
 		body = directive + "\n" + body
 	}
+	return os.WriteFile(path, []byte(body), 0o644)
+}
+
+// memoryDirectiveSection is the text appended to the compiled
+// instructions when MemoryEnabled is true. The exact wording matters —
+// it's the only signal the agent gets that MEMORY.md exists.
+const memoryDirectiveSection = `
+## Persistent memory across sessions
+
+This chat has a ` + "`MEMORY.md`" + ` file at the root of your current working
+directory. It carries notes from prior sessions of THIS chat and is
+synced back to durable storage when you exit, so anything written there
+survives a restart.
+
+On startup, **read ` + "`MEMORY.md`" + `** to recall context the user established
+in earlier sessions (their preferences, in-flight tasks, conventions,
+prior decisions).
+
+When the user asks you to "remember" something, or when you uncover a
+non-obvious fact worth keeping (a build invariant, a key path, a
+gotcha), **append a clearly-labelled section to ` + "`MEMORY.md`" + `** with the
+date so future sessions can find it.
+
+Do not modify any other file in the chat root unless explicitly asked.
+`
+
+// appendMemoryDirective tacks the persistent-memory section onto the
+// end of the compiled instructions so the agent learns MEMORY.md exists
+// and how to use it. No-op for targets we don't know how to decorate.
+func appendMemoryDirective(ws Workspace, agent Agent) error {
+	path := agentInstructionsPath(ws, agent)
+	if path == "" {
+		return nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	body := string(raw)
+	// Idempotency: don't append twice if applyDecorations runs again.
+	if strings.Contains(body, "## Persistent memory across sessions") {
+		return nil
+	}
+	body = strings.TrimRight(body, "\n") + "\n" + memoryDirectiveSection
 	return os.WriteFile(path, []byte(body), 0o644)
 }
 
