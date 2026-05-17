@@ -17,6 +17,7 @@ import (
 type templateListModel struct {
 	cfg       *launcher.Config
 	items     []launcher.Template
+	skipped   []launcher.SkippedTemplate
 	cursor    int
 	loaded    bool
 	err       string
@@ -30,8 +31,8 @@ func newTemplateListModel(cfg *launcher.Config) templateListModel {
 func (m templateListModel) Init() tea.Cmd {
 	cfg := m.cfg
 	return func() tea.Msg {
-		items, err := launcher.ListTemplates(cfg.WorkspacesRoot)
-		return templatesLoadedMsg{items: items, err: err}
+		items, skipped, err := launcher.ListTemplatesAndSkipped(cfg.WorkspacesRoot)
+		return templatesLoadedMsg{items: items, skipped: skipped, err: err}
 	}
 }
 
@@ -40,6 +41,7 @@ func (m templateListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case templatesLoadedMsg:
 		m.loaded = true
 		m.items = msg.items
+		m.skipped = msg.skipped
 		if msg.err != nil {
 			m.err = msg.err.Error()
 		}
@@ -104,17 +106,27 @@ func (m templateListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m templateListModel) View() string {
 	var b strings.Builder
 	title := fmt.Sprintf("Templates (%d) · reusable patterns for chats", len(m.items))
-	help := "↑/↓ select · enter edit settings · f edit files · n new · d delete · r refresh · esc back"
 
 	if !m.loaded {
 		b.WriteString(hintStyle.Render("Loading templates..."))
-		return renderChrome(title, b.String(), help)
+		return renderChrome(title, b.String(), templateListHelp(m))
 	}
 	if m.err != "" {
 		b.WriteString(errorStyle.Render("✗ "+m.err) + "\n\n")
 	}
+	// Surface dirs we had to skip (typically: user dropped files into
+	// <root>/templates/foo/ without nesting them inside workpath/, or
+	// without a mission.md at all).
+	if len(m.skipped) > 0 {
+		b.WriteString(errorStyle.Render(fmt.Sprintf(
+			"Skipped %d dir(s) under templates/ — fix or remove them:", len(m.skipped))) + "\n")
+		for _, s := range m.skipped {
+			b.WriteString(descStyle.Render(fmt.Sprintf("  • %s — %s", s.Name, s.Reason)) + "\n")
+		}
+		b.WriteString("\n")
+	}
 	if len(m.items) == 0 {
-		b.WriteString(hintStyle.Render("No templates yet — press n to create one.") + "\n\n")
+		b.WriteString(hintStyle.Render("No templates yet — press n to create one, or drop a workpath dir under templates/.") + "\n\n")
 	}
 	for i, tpl := range m.items {
 		isSel := i == m.cursor
@@ -140,7 +152,22 @@ func (m templateListModel) View() string {
 				m.items[m.cursor].Name)) + "\n")
 	}
 
-	return renderChrome(title, b.String(), help)
+	return renderChrome(title, b.String(), templateListHelp(m))
+}
+
+// templateListHelp omits the per-template keys when no template is
+// highlighted, so users on an empty list aren't told about d/f/enter.
+func templateListHelp(m templateListModel) string {
+	parts := []string{"↑/↓ select"}
+	if m.cursor < len(m.items) {
+		parts = append(parts, "enter edit settings", "f edit files", "d delete")
+	} else if len(m.items) == 0 {
+		// nothing — just "+ new template" is selectable; Enter is enough.
+	} else {
+		parts = append(parts, "enter new template")
+	}
+	parts = append(parts, "n new", "r refresh", "esc back")
+	return strings.Join(parts, " · ")
 }
 
 // --- new template: the old NewWorkspace wizard, lightly renamed ---------

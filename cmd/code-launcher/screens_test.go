@@ -183,6 +183,66 @@ func TestChatListModel_EnterOnNewOpensTemplatePicker(t *testing.T) {
 	}
 }
 
+func TestChatListModel_ManageTemplatesRowIsVisibleAndOpensList(t *testing.T) {
+	// Empty root → cursor 0 = "+ new chat", cursor 1 = "Manage templates".
+	tmp := seededRoot(t)
+	redirectConfig(t, t.TempDir())
+	cfg := &launcher.Config{WorkspacesRoot: tmp}
+	m := newChatListModel(cfg)
+	next, _ := m.Update(runCmd(t, m.Init()))
+	m = next.(chatListModel)
+	if !strings.Contains(m.View(), "Manage templates") {
+		t.Errorf("home should always show 'Manage templates' row:\n%s", m.View())
+	}
+
+	// down → cursor on Manage templates → enter → templateListModel.
+	nx, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = nx.(chatListModel)
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("Enter on Manage templates should produce a Cmd")
+	}
+	done := runCmd(t, cmd).(screenDoneMsg)
+	if _, ok := done.next.(templateListModel); !ok {
+		t.Errorf("expected templateListModel, got %T", done.next)
+	}
+}
+
+func TestChatListModel_HelpAdaptsToCursor(t *testing.T) {
+	tmp := seededRoot(t)
+	redirectConfig(t, t.TempDir())
+	cfg := &launcher.Config{WorkspacesRoot: tmp}
+	tpl, _ := launcher.LoadTemplate(tmp, "reversing")
+	_, _ = launcher.CreateChat(tmp, *tpl, "ctxhelp", launcher.AgentClaude)
+
+	m := newChatListModel(cfg)
+	next, _ := m.Update(runCmd(t, m.Init()))
+	m = next.(chatListModel)
+
+	// Cursor on a real chat → e/f/o/a/d should appear.
+	help := chatListHelp(m)
+	for _, key := range []string{"e settings", "d delete", "o ollama", "f files"} {
+		if !strings.Contains(help, key) {
+			t.Errorf("on a real chat the help should mention %q; got:\n%s", key, help)
+		}
+	}
+
+	// Move to "Manage templates" row → chat-only keys should disappear.
+	for i := 0; i < 2; i++ {
+		nx, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		m = nx.(chatListModel)
+	}
+	help = chatListHelp(m)
+	for _, key := range []string{"e settings", "d delete", "o ollama", "f files"} {
+		if strings.Contains(help, key) {
+			t.Errorf("on extra row the help should NOT mention %q; got:\n%s", key, help)
+		}
+	}
+	if !strings.Contains(help, "enter manage templates") {
+		t.Errorf("on Manage templates row, help should explain Enter's effect:\n%s", help)
+	}
+}
+
 func TestChatListModel_TKeyOpensTemplateList(t *testing.T) {
 	tmp := seededRoot(t)
 	redirectConfig(t, t.TempDir())

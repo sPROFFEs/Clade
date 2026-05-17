@@ -222,6 +222,57 @@ func TestOpenChat_EmptyAgentIDErrors(t *testing.T) {
 	}
 }
 
+func TestLoadTemplate_FlatLayoutWithoutWorkpathSubdir(t *testing.T) {
+	// User dropped a workpath dir directly under templates/ (mission.md
+	// at the top of the dir, no workpath/ wrapper). The launcher should
+	// still pick it up — that's the lenient layout fix.
+	root := t.TempDir()
+	flat := filepath.Join(root, TemplatesDir, "flat-tpl")
+	if err := os.MkdirAll(flat, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(flat, "mission.md"),
+		[]byte("# flat\n\nA flat-layout template the user dropped in.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tpl, err := LoadTemplate(root, "flat-tpl")
+	if err != nil || tpl == nil {
+		t.Fatalf("LoadTemplate(flat-tpl) = %v, %v — should accept flat layout", tpl, err)
+	}
+	if tpl.WorkpathDir != flat {
+		t.Errorf("WorkpathDir = %q, want %q (the dir itself for flat layout)", tpl.WorkpathDir, flat)
+	}
+}
+
+func TestListTemplatesAndSkipped_ReportsBadDirs(t *testing.T) {
+	root := t.TempDir()
+	// A well-formed canonical template.
+	good := filepath.Join(root, TemplatesDir, "good")
+	must(t, os.MkdirAll(filepath.Join(good, "workpath"), 0o755))
+	must(t, os.WriteFile(filepath.Join(good, "workpath", "mission.md"), []byte("# good\n"), 0o644))
+	// A flat-layout template — also fine.
+	must(t, os.MkdirAll(filepath.Join(root, TemplatesDir, "flat"), 0o755))
+	must(t, os.WriteFile(filepath.Join(root, TemplatesDir, "flat", "mission.md"), []byte("# flat\n"), 0o644))
+	// A dir with no mission.md anywhere — must be skipped + reported.
+	must(t, os.MkdirAll(filepath.Join(root, TemplatesDir, "broken"), 0o755))
+	must(t, os.WriteFile(filepath.Join(root, TemplatesDir, "broken", "README.md"), []byte("not a workpath\n"), 0o644))
+
+	items, skipped, err := ListTemplatesAndSkipped(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 {
+		t.Errorf("got %d templates, want 2", len(items))
+	}
+	if len(skipped) != 1 || skipped[0].Name != "broken" {
+		t.Errorf("expected exactly 'broken' to be skipped, got %+v", skipped)
+	}
+	if !strings.Contains(skipped[0].Reason, "mission.md") {
+		t.Errorf("reason should mention mission.md, got %q", skipped[0].Reason)
+	}
+}
+
 func TestSaveWorkspaceLikeSettings_RoutesByPath(t *testing.T) {
 	root := t.TempDir()
 	tpl, _ := CreateTemplate(root, "router", "x")

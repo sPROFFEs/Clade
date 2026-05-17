@@ -15,14 +15,23 @@ import (
 )
 
 type chatListModel struct {
-	cfg          *launcher.Config
-	items        []launcher.Chat
-	cursor       int
-	loaded       bool
-	err          string
-	migrateNote  string
-	deleteAsk    bool // showing "really delete?" prompt
+	cfg         *launcher.Config
+	items       []launcher.Chat
+	cursor      int
+	loaded      bool
+	err         string
+	migrateNote string
+	deleteAsk   bool // showing "really delete?" prompt
 }
+
+// chatListExtra are the persistent rows at the bottom of the list that
+// aren't real chats but still take a cursor position. Order matters —
+// they line up with index offsets in Update/View.
+const (
+	chatListExtraNew = iota // "+ new chat…"
+	chatListExtraTpl        // "Manage templates →"
+	chatListExtraCount
+)
 
 func newChatListModel(cfg *launcher.Config) chatListModel {
 	return chatListModel{cfg: cfg}
@@ -75,24 +84,28 @@ func (m chatListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		maxCursor := len(m.items) + chatListExtraCount - 1
 		switch msg.String() {
 		case "up", "k":
 			if m.cursor > 0 {
 				m.cursor--
 			}
 		case "down", "j":
-			if m.cursor < len(m.items) {
+			if m.cursor < maxCursor {
 				m.cursor++
 			}
 		case "enter":
-			if m.cursor == len(m.items) {
+			// Real chats live at indices [0..len-1]. The extra rows
+			// (+ new chat, manage templates) come after.
+			switch {
+			case m.cursor == len(m.items)+chatListExtraNew:
 				return m, wrap(newPickTemplateModel(m.cfg))
+			case m.cursor == len(m.items)+chatListExtraTpl:
+				return m, wrap(newTemplateListModel(m.cfg))
+			default:
+				c := m.items[m.cursor]
+				return m, wrap(newLaunchingModel(m.cfg, c))
 			}
-			c := m.items[m.cursor]
-			// Transition to the launching screen so the user gets
-			// continuous feedback (spinner + phase line) during the
-			// compile+decorate work, rather than a frozen chat list.
-			return m, wrap(newLaunchingModel(m.cfg, c))
 		case "n":
 			return m, wrap(newPickTemplateModel(m.cfg))
 		case "d":
@@ -149,7 +162,7 @@ func (m chatListModel) View() string {
 
 	if !m.loaded {
 		b.WriteString(hintStyle.Render("Loading chats..."))
-		return renderChrome(chatListTitle(m), b.String(), chatListHelp())
+		return renderChrome(chatListTitle(m), b.String(), chatListHelp(m))
 	}
 
 	if len(m.items) == 0 {
@@ -182,13 +195,19 @@ func (m chatListModel) View() string {
 		}
 	}
 
-	// "+ new chat" pseudo-row.
-	isSelNew := m.cursor == len(m.items)
-	marker := "  "
-	if isSelNew {
-		marker = "› "
+	// Persistent extra rows below the chat list.
+	extras := []string{
+		"+ new chat…",
+		"Manage templates →",
 	}
-	b.WriteString(selectionRow(marker+"+ new chat…", isSelNew) + "\n")
+	for i, label := range extras {
+		isSel := m.cursor == len(m.items)+i
+		marker := "  "
+		if isSel {
+			marker = "› "
+		}
+		b.WriteString(selectionRow(marker+label, isSel) + "\n")
+	}
 
 	if m.deleteAsk && m.cursor < len(m.items) {
 		b.WriteString("\n" + errorStyle.Render(
@@ -196,7 +215,7 @@ func (m chatListModel) View() string {
 				m.items[m.cursor].Label)) + "\n")
 	}
 
-	return renderChrome(chatListTitle(m), b.String(), chatListHelp())
+	return renderChrome(chatListTitle(m), b.String(), chatListHelp(m))
 }
 
 func chatListTitle(m chatListModel) string {
@@ -204,8 +223,33 @@ func chatListTitle(m chatListModel) string {
 	return tag + "  " + chromeContextSegment(m.cfg.WorkspacesRoot)
 }
 
-func chatListHelp() string {
-	return "↑/↓ select · enter open · n new · e settings · f files · o ollama · a agents · d delete · t templates · r refresh"
+// chatListHelp builds the help line from only the keys that apply to
+// the current cursor position. When "+ new chat" or "Manage templates"
+// is highlighted, chat-action keys (e/f/o/a/d) are hidden so the user
+// isn't told about actions that would no-op.
+func chatListHelp(m chatListModel) string {
+	parts := []string{"↑/↓ select"}
+	chatSelected := m.cursor < len(m.items)
+	if chatSelected {
+		parts = append(parts,
+			"enter open",
+			"e settings",
+			"f files",
+			"o ollama",
+			"a agents",
+			"d delete",
+		)
+	} else {
+		// Make Enter's effect explicit for the highlighted extra row.
+		switch m.cursor {
+		case len(m.items) + chatListExtraNew:
+			parts = append(parts, "enter new chat")
+		case len(m.items) + chatListExtraTpl:
+			parts = append(parts, "enter manage templates")
+		}
+	}
+	parts = append(parts, "n new", "t templates", "r refresh")
+	return strings.Join(parts, " · ")
 }
 
 // chromeContextSegment renders a path/label dimly so the title bar can

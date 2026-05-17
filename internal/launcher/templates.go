@@ -29,46 +29,96 @@ type Template struct {
 	Settings    WorkspaceSettings
 }
 
+// SkippedTemplate records a top-level templates/ subdir that didn't load
+// — used by the TUI to tell the user why their newly-dropped dir wasn't
+// picked up. (Typical cause: missing mission.md.)
+type SkippedTemplate struct {
+	Name   string
+	Reason string
+}
+
 // ListTemplates returns every template under <root>/templates/, sorted.
 func ListTemplates(root string) ([]Template, error) {
+	out, _, err := ListTemplatesAndSkipped(root)
+	return out, err
+}
+
+// ListTemplatesAndSkipped is the diagnostic variant: alongside the loaded
+// templates it returns a list of directories it had to skip and why.
+// The TUI surfaces those so users know what's wrong with a folder they
+// dropped in.
+func ListTemplatesAndSkipped(root string) ([]Template, []SkippedTemplate, error) {
 	dir := filepath.Join(root, TemplatesDir)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return nil, nil
+			return nil, nil, nil
 		}
-		return nil, err
+		return nil, nil, err
 	}
 	var out []Template
+	var skipped []SkippedTemplate
 	for _, e := range entries {
-		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") {
+		name := e.Name()
+		if !e.IsDir() || strings.HasPrefix(name, ".") {
 			continue
 		}
-		t, err := LoadTemplate(root, e.Name())
-		if err != nil || t == nil {
+		t, err := LoadTemplate(root, name)
+		if err != nil {
+			skipped = append(skipped, SkippedTemplate{Name: name, Reason: err.Error()})
+			continue
+		}
+		if t == nil {
+			skipped = append(skipped, SkippedTemplate{
+				Name:   name,
+				Reason: "no mission.md (expected at <name>/mission.md or <name>/workpath/mission.md)",
+			})
 			continue
 		}
 		out = append(out, *t)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out, nil
+	return out, skipped, nil
 }
 
-// LoadTemplate returns nil (no error) when the dir exists but isn't a
-// well-formed template (no workpath subdir).
+// LoadTemplate accepts two layouts:
+//
+//   <root>/templates/<name>/workpath/mission.md   (canonical, written
+//                                                  by CreateTemplate)
+//   <root>/templates/<name>/mission.md            (flat — user dropped
+//                                                  a workpath dir
+//                                                  directly under
+//                                                  templates/)
+//
+// Returns (nil, nil) when the dir exists but has neither layout — the
+// caller treats that as "skip".
 func LoadTemplate(root, name string) (*Template, error) {
 	tRoot := filepath.Join(root, TemplatesDir, name)
-	wpDir := filepath.Join(tRoot, "workpath")
-	info, err := os.Stat(wpDir)
+	st, err := os.Stat(tRoot)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil, nil
 		}
 		return nil, err
 	}
-	if !info.IsDir() {
+	if !st.IsDir() {
 		return nil, nil
 	}
+
+	// Prefer the canonical workpath/ subdir; fall back to using tRoot
+	// itself as the workpath if there's a mission.md sitting at its root.
+	wpDir := filepath.Join(tRoot, "workpath")
+	if _, err := os.Stat(wpDir); err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			return nil, err
+		}
+		// No workpath/ subdir — check for flat layout.
+		if _, err := os.Stat(filepath.Join(tRoot, "mission.md")); err != nil {
+			return nil, nil // not a template
+		}
+		wpDir = tRoot
+	}
+
 	manifest, _ := readManifest(filepath.Join(wpDir, "workpath.json"))
 	settings, _ := readSettings(filepath.Join(tRoot, "template.json"))
 	desc := manifest.Description

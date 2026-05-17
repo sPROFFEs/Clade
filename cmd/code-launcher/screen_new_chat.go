@@ -29,8 +29,9 @@ func newPickTemplateModel(cfg *launcher.Config) pickTemplateModel {
 }
 
 type templatesLoadedMsg struct {
-	items []launcher.Template
-	err   error
+	items   []launcher.Template
+	skipped []launcher.SkippedTemplate
+	err     error
 }
 
 func (m pickTemplateModel) Init() tea.Cmd {
