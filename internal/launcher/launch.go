@@ -6,7 +6,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/sdksdk/code-launcher/pkg/targets"
 	"github.com/sdksdk/code-launcher/pkg/workpath"
@@ -152,16 +151,17 @@ func Plan(ws Workspace, agent Agent) (LaunchPlan, error) {
 		// fields, set by the Ollama screen — nothing to inject here.
 
 	case AgentGemini:
-		if ollamaConfigured {
-			// Gemini CLI honors OPENAI_API_KEY / OPENAI_BASE_URL as the
-			// OpenAI-compatible mode override. Any non-empty key works
-			// for Ollama (it doesn't enforce auth).
-			plan.Env = map[string]string{
-				"OPENAI_API_KEY":  "ollama",
-				"OPENAI_BASE_URL": strings.TrimRight(o.Endpoint, "/") + "/v1",
-			}
-			plan.Args = []string{"--model", o.Model}
-		}
+		// Intentionally no Ollama handling here. Tried OPENAI_* env
+		// vars (the convention that works for Codex/OpenCode) — Gemini
+		// CLI 0.42+ continues to hit Google's API via cached OAuth and
+		// rejects the Ollama model name with "Model ... was not found".
+		// The real switch happens through ~/.gemini/settings.json
+		// (selectedAuthType + provider section), whose schema isn't
+		// stable across CLI versions. Until we can match the installed
+		// version's schema reliably, we leave Gemini launching with
+		// its default Google auth — and refuse to pass --model with
+		// the Ollama model name, which would just produce the same
+		// "not found" error you'd otherwise get.
 	}
 	return plan, nil
 }

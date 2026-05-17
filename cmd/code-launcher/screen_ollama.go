@@ -47,8 +47,7 @@ type ollamaModel struct {
 	pickClaude   bool
 	pickCodex    bool
 	pickOpenCode bool
-	pickGemini   bool
-	agentCursor  int // 0..3
+	agentCursor  int // 0..2
 
 	// apply results
 	applying bool
@@ -225,7 +224,7 @@ func (m ollamaModel) updateAgents(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.agentCursor--
 		}
 	case "down", "j":
-		if m.agentCursor < 3 {
+		if m.agentCursor < 2 {
 			m.agentCursor++
 		}
 	case " ", "x":
@@ -236,8 +235,6 @@ func (m ollamaModel) updateAgents(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.pickCodex = !m.pickCodex
 		case 2:
 			m.pickOpenCode = !m.pickOpenCode
-		case 3:
-			m.pickGemini = !m.pickGemini
 		}
 	case "enter":
 		settings := ollama.Settings{
@@ -245,13 +242,12 @@ func (m ollamaModel) updateAgents(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			Model:    strings.TrimSpace(m.modelInput.Value()),
 		}
 		ws := m.ws
-		pickClaude, pickCodex, pickOpenCode, pickGemini :=
-			m.pickClaude, m.pickCodex, m.pickOpenCode, m.pickGemini
+		pickClaude, pickCodex, pickOpenCode := m.pickClaude, m.pickCodex, m.pickOpenCode
 		m.step = ollamaStepApply
 		m.applying = true
 		return m, func() tea.Msg {
 			return ollamaApplyDoneMsg{
-				results: applyOllama(ws, settings, pickClaude, pickCodex, pickOpenCode, pickGemini),
+				results: applyOllama(ws, settings, pickClaude, pickCodex, pickOpenCode),
 			}
 		}
 	}
@@ -260,24 +256,16 @@ func (m ollamaModel) updateAgents(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // applyOllama performs the actual writes and returns a per-line result
 // log the screen renders.
-func applyOllama(ws launcher.Workspace, s ollama.Settings, claude, codex, opencode, gemini bool) []string {
+func applyOllama(ws launcher.Workspace, s ollama.Settings, claude, codex, opencode bool) []string {
 	var out []string
-	// claude + gemini share the same per-chat workspace.Ollama settings —
-	// Plan() picks the right env vars per agent at launch time, so a
-	// single save covers both checkboxes when set together.
-	if claude || gemini {
+	if claude {
 		ws.Settings.Ollama = launcher.OllamaSettings{
 			Endpoint: s.Endpoint, Model: s.Model, WireAPI: s.WireAPI,
 		}
 		if err := launcher.SaveWorkspaceLikeSettings(ws); err != nil {
-			out = append(out, "✗ chat settings: "+err.Error())
+			out = append(out, "✗ claude (chat settings): "+err.Error())
 		} else {
-			if claude {
-				out = append(out, "✓ claude: per-chat ANTHROPIC_BASE_URL + --model on next launch")
-			}
-			if gemini {
-				out = append(out, "✓ gemini: per-chat OPENAI_BASE_URL + --model on next launch")
-			}
+			out = append(out, "✓ claude: per-chat ANTHROPIC_BASE_URL + --model on next launch")
 		}
 	}
 	if codex {
@@ -294,7 +282,7 @@ func applyOllama(ws launcher.Workspace, s ollama.Settings, claude, codex, openco
 			out = append(out, "✓ opencode: "+path)
 		}
 	}
-	if !claude && !codex && !opencode && !gemini {
+	if !claude && !codex && !opencode {
 		out = append(out, "(nothing selected — pressed apply with no agents checked)")
 	}
 	return out
@@ -358,7 +346,6 @@ func (m ollamaModel) View() string {
 			{"claude   (per-chat env injection)", "ANTHROPIC_BASE_URL + --model on next launch", m.pickClaude},
 			{"codex    (writes ~/.codex/config.toml)", "creates [profiles.ollama_remote] — launch via -p flag", m.pickCodex},
 			{"opencode (writes ~/.config/opencode/opencode.json)", "registers ollama_remote provider, sets default model", m.pickOpenCode},
-			{"gemini   (per-chat env injection)", "OPENAI_BASE_URL + OPENAI_API_KEY + --model on next launch", m.pickGemini},
 		}
 		for i, e := range entries {
 			isSel := i == m.agentCursor
@@ -376,9 +363,11 @@ func (m ollamaModel) View() string {
 			}
 		}
 		b.WriteString("\n" + hintStyle.Render(
-			"Claude and Gemini share the same per-chat Ollama settings — at launch "+
-				"the launcher injects the agent-specific env vars (ANTHROPIC_* vs "+
-				"OPENAI_*). Codex and OpenCode write user-level config files."))
+			"Gemini CLI isn't here. We tried OPENAI_* env injection (worked for Codex / "+
+				"OpenCode) but Gemini 0.42+ ignores it and keeps hitting Google via cached "+
+				"OAuth — the real switch is ~/.gemini/settings.json's selectedAuthType, "+
+				"whose schema isn't stable across CLI versions. Configure it by hand or "+
+				"run a proxy (litellm)."))
 
 	case ollamaStepApply:
 		help = "enter / esc to return"

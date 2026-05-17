@@ -93,7 +93,14 @@ func TestPlan_AppendsModelArgForClaudeWhenOllamaConfigured(t *testing.T) {
 	}
 }
 
-func TestPlan_AppendsOpenAIEnvAndModelArgForGeminiWhenOllamaConfigured(t *testing.T) {
+// TestPlan_GeminiIgnoresOllamaSettings codifies the intentional
+// behaviour after the rollback: Gemini CLI 0.42 ignored our OPENAI_*
+// env injection and stayed on Google OAuth, then errored with "Model X
+// not found". Until we can write a matching ~/.gemini/settings.json
+// per-version, Gemini launches plain — no env, no --model — so the
+// user sees a working Gemini and clear breadcrumbs from the Ollama
+// screen on how to wire it up by hand.
+func TestPlan_GeminiIgnoresOllamaSettings(t *testing.T) {
 	chat := chatFromSeededReversing(t)
 	chat.Settings = WorkspaceSettings{
 		Ollama: OllamaSettings{Endpoint: "http://10.0.0.1:11434", Model: "qwen3"},
@@ -106,19 +113,11 @@ func TestPlan_AppendsOpenAIEnvAndModelArgForGeminiWhenOllamaConfigured(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"--model", "qwen3"}
-	if !equalStrings(plan.Args, want) {
-		t.Errorf("Args = %v, want %v", plan.Args, want)
+	if len(plan.Args) != 0 {
+		t.Errorf("Gemini plan should have no Args (we don't pass --model with an Ollama name); got %v", plan.Args)
 	}
-	if plan.Env["OPENAI_BASE_URL"] != "http://10.0.0.1:11434/v1" {
-		t.Errorf("OPENAI_BASE_URL = %q, want http://10.0.0.1:11434/v1", plan.Env["OPENAI_BASE_URL"])
-	}
-	if plan.Env["OPENAI_API_KEY"] != "ollama" {
-		t.Errorf("OPENAI_API_KEY = %q", plan.Env["OPENAI_API_KEY"])
-	}
-	// Gemini routing is OpenAI-style; no ANTHROPIC_* env vars should leak.
-	if plan.Env["ANTHROPIC_BASE_URL"] != "" {
-		t.Errorf("Gemini plan shouldn't carry ANTHROPIC_BASE_URL; got %q", plan.Env["ANTHROPIC_BASE_URL"])
+	if len(plan.Env) != 0 {
+		t.Errorf("Gemini plan should have no Env (OPENAI_* injection doesn't work); got %v", plan.Env)
 	}
 }
 
