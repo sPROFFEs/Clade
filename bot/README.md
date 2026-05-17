@@ -224,33 +224,42 @@ Alert fires, then sleeps 5 min before checking again to avoid spam.
 
 ## Running as a systemd service
 
-```ini
-# /etc/systemd/system/telemetry-bot.service
-[Unit]
-Description=Telegram telemetry bot for ollama + nano bridge
-After=network.target ollama.service
-
-[Service]
-Type=simple
-User=youruser
-WorkingDirectory=/home/youruser/code-launcher/skills-project/bot
-EnvironmentFile=/home/youruser/code-launcher/skills-project/bot/.env
-ExecStart=/home/youruser/code-launcher/skills-project/bot/.venv/bin/python telemetry_bot.py
-Restart=on-failure
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
-```
+Use the bundled installer — it's idempotent, so re-run any time to
+change env vars, point at a new venv, or pick up the latest unit
+template:
 
 ```sh
-sudo systemctl daemon-reload
-sudo systemctl enable --now telemetry-bot
-journalctl -u telemetry-bot -f
+sudo ./install.sh
 ```
 
-`/nano_start` from Telegram will spawn the bridge as a child of the
-bot, so `systemctl stop telemetry-bot` cleans up both.
+What it does:
+
+1. **Detects an existing `vm-telemetry.service`** (override with
+   `sudo SERVICE=my-bot ./install.sh`). If found, it reads the unit's
+   current `EnvironmentFile` so every prompt pre-fills with the value
+   that's running today — press Enter to keep, type to change.
+2. Prompts for `TELEGRAM_TOKEN` (masked), `TELEGRAM_CHAT_ID`,
+   `OLLAMA_URL`, keep-alive, the three alert thresholds, and the Nano
+   bridge knobs.
+3. Creates `.venv/` next to the bot, installs `requirements.txt`, and
+   optionally `requirements-bridge.txt` + `playwright install chromium`
+   for Gemini Nano (`BRIDGE=1` to force on, `BRIDGE=0` to skip).
+4. Writes `bot/.env` with `chmod 600`.
+5. Installs `/etc/systemd/system/vm-telemetry.service`,
+   `daemon-reload`, `enable --now`, prints `status` + log location.
+
+Useful follow-ups:
+
+```sh
+journalctl -u vm-telemetry -f                 # live logs
+sudo systemctl restart vm-telemetry           # after manual .env edit
+sudo systemctl edit vm-telemetry              # systemd drop-in override
+systemctl cat vm-telemetry                    # the full effective unit
+sudo NONINTERACTIVE=1 ./install.sh            # re-deploy unattended (keeps current values)
+```
+
+`/nano_start` from Telegram spawns the bridge as a child of the bot,
+so `systemctl stop vm-telemetry` cleans up both.
 
 ---
 
