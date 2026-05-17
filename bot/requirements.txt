@@ -1,0 +1,7 @@
+pyTelegramBotAPI>=4.16
+psutil>=5.9
+requests>=2.31
+
+# Only required when the Gemini Nano bridge is started.
+# Install separately or via:  pip install -r requirements-bridge.txt
+# Kept out of the core requirements so the bot starts on minimal hosts.

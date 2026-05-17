@@ -1,0 +1,327 @@
+"""Gemini Nano → OpenAI-compatible HTTP bridge.
+
+Standalone subprocess the telemetry bot starts on demand. Runs a
+headless Chrome (via Playwright) pinned to a persistent profile that
+already has the Prompt API enabled and Gemini Nano downloaded
+(see README "Prep Chrome for Nano"). Exposes one endpoint:
+
+    POST  /v1/chat/completions    OpenAI-compatible (non-streaming)
+    GET   /healthz                204 if Chrome window is alive
+
+Each chat request:
+  1. Reads `messages` from the request body (system + user history).
+  2. Flattens them into a single prompt the way Chrome's
+     window.LanguageModel.create({initialPrompts}).prompt() expects.
+  3. Awaits the model's full reply, returns it as an OpenAI-shaped
+     JSON response so any agent CLI that speaks OpenAI v1 can use it
+     unchanged.
+
+Why a subprocess and not a thread inside the bot:
+  - Playwright runs its own asyncio loop; running it alongside the
+    sync telebot polling is brittle.
+  - The bridge can be killed cleanly with one SIGTERM when the user
+    presses "stop bridge" in Telegram.
+
+Config (env vars, all optional except where noted):
+  NANO_BRIDGE_PORT       default 8765
+  NANO_BRIDGE_HOST       default 0.0.0.0
+  NANO_CHROME_PROFILE    REQUIRED — path to a Chrome user-data dir
+  NANO_CHROME_EXECUTABLE override the chromium binary playwright launches
+  NANO_HEADLESS          "1" for headless (default), "0" to show the window
+  NANO_LOG_FILE          file path; if set, logs go there instead of stdout
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import os
+import signal
+import sys
+import time
+import uuid
+from typing import Optional
+
+try:
+    from aiohttp import web
+except ImportError:
+    sys.stderr.write("nano_bridge: aiohttp not installed. "
+                     "pip install -r bot/requirements-bridge.txt\n")
+    sys.exit(2)
+
+try:
+    from playwright.async_api import async_playwright, BrowserContext, Page
+except ImportError:
+    sys.stderr.write("nano_bridge: playwright not installed. "
+                     "pip install -r bot/requirements-bridge.txt && playwright install chromium\n")
+    sys.exit(2)
+
+
+PORT = int(os.environ.get("NANO_BRIDGE_PORT", "8765"))
+HOST = os.environ.get("NANO_BRIDGE_HOST", "0.0.0.0")
+PROFILE_DIR = os.environ.get("NANO_CHROME_PROFILE", "")
+CHROME_BIN = os.environ.get("NANO_CHROME_EXECUTABLE") or None
+HEADLESS = os.environ.get("NANO_HEADLESS", "1") != "0"
+LOG_FILE = os.environ.get("NANO_LOG_FILE", "")
+
+
+# In-page driver script. Loaded once into about:blank; subsequent
+# requests call window.__nanoPrompt(...) which manages a single
+# long-lived LanguageModel session for the lifetime of the bridge.
+DRIVER_JS = r"""
+window.__nanoReady = (async () => {
+  if (!('LanguageModel' in self)) {
+    throw new Error("Chrome LanguageModel API not available in this profile. " +
+                    "Enable chrome://flags/#prompt-api-for-gemini-nano and let " +
+                    "Gemini Nano finish downloading (chrome://on-device-internals).");
+  }
+  const avail = await LanguageModel.availability();
+  if (avail === "no") {
+    throw new Error("LanguageModel.availability() returned 'no' — model not usable on this device.");
+  }
+  // "downloadable" / "downloading" / "available"; the model may
+  // still be fetching on first run.
+  return avail;
+})();
+
+window.__nanoPrompt = async function(systemPrompt, history, userText) {
+  // Each request gets its own session so system+history live for this
+  // turn only. Cheap because Nano is local.
+  await window.__nanoReady;
+  const opts = {};
+  if (systemPrompt) {
+    opts.initialPrompts = [{ role: "system", content: systemPrompt }];
+  }
+  if (Array.isArray(history) && history.length) {
+    opts.initialPrompts = (opts.initialPrompts || []).concat(history);
+  }
+  const session = await LanguageModel.create(opts);
+  try {
+    const result = await session.prompt(userText);
+    return { ok: true, text: result };
+  } finally {
+    session.destroy && session.destroy();
+  }
+};
+"""
+
+
+def _setup_logging() -> logging.Logger:
+    log = logging.getLogger("nano_bridge")
+    log.setLevel(logging.INFO)
+    fmt = logging.Formatter("%(asctime)s %(levelname)s %(message)s",
+                            datefmt="%H:%M:%S")
+    if LOG_FILE:
+        h: logging.Handler = logging.FileHandler(LOG_FILE)
+    else:
+        h = logging.StreamHandler(sys.stdout)
+    h.setFormatter(fmt)
+    log.addHandler(h)
+    return log
+
+
+log = _setup_logging()
+
+
+class Bridge:
+    """Holds the long-lived browser context + page that wraps Nano."""
+
+    def __init__(self) -> None:
+        self.pw = None
+        self.ctx: Optional[BrowserContext] = None
+        self.page: Optional[Page] = None
+        self._lock = asyncio.Lock()  # serialise prompt() calls per page
+
+    async def start(self) -> None:
+        if not PROFILE_DIR:
+            raise RuntimeError("NANO_CHROME_PROFILE env var is required")
+        log.info("launching chrome (profile=%s, headless=%s, exec=%s)",
+                 PROFILE_DIR, HEADLESS, CHROME_BIN or "playwright default")
+        self.pw = await async_playwright().start()
+        # Persistent context keeps cookies, flags state, and the
+        # downloaded Nano model between bridge restarts.
+        launch_args = [
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+            # The Prompt API is gated; these features pick it up:
+            "--enable-features=OptimizationGuideOnDeviceModel,PromptAPIForGeminiNano",
+        ]
+        self.ctx = await self.pw.chromium.launch_persistent_context(
+            PROFILE_DIR,
+            headless=HEADLESS,
+            executable_path=CHROME_BIN,
+            args=launch_args,
+        )
+        self.page = await self.ctx.new_page()
+        await self.page.goto("about:blank")
+        # Inject the driver and surface availability so a bad profile
+        # blows up here, not on the first user prompt.
+        await self.page.add_script_tag(content=DRIVER_JS)
+        try:
+            avail = await self.page.evaluate("window.__nanoReady")
+            log.info("LanguageModel.availability = %s", avail)
+        except Exception as e:
+            await self.stop()
+            raise RuntimeError(f"Nano not usable in this profile: {e}") from e
+
+    async def stop(self) -> None:
+        try:
+            if self.ctx:
+                await self.ctx.close()
+        finally:
+            if self.pw:
+                await self.pw.stop()
+            self.ctx = None
+            self.page = None
+
+    async def prompt(self, system: str, history: list[dict], user_text: str) -> str:
+        if not self.page:
+            raise RuntimeError("bridge not started")
+        async with self._lock:
+            try:
+                result = await self.page.evaluate(
+                    "args => window.__nanoPrompt(args.s, args.h, args.u)",
+                    {"s": system, "h": history, "u": user_text},
+                )
+            except Exception as e:
+                raise RuntimeError(f"nano prompt failed: {e}") from e
+        if not result or not result.get("ok"):
+            raise RuntimeError(f"nano prompt error: {result}")
+        return result["text"]
+
+
+bridge = Bridge()
+
+
+# ---------- HTTP handlers ----------
+
+def _split_messages(messages: list[dict]) -> tuple[str, list[dict], str]:
+    """Flatten OpenAI 'messages' into (system, history, user_text)."""
+    system_parts: list[str] = []
+    history: list[dict] = []
+    user_text = ""
+    for m in messages:
+        role = m.get("role", "user")
+        content = m.get("content", "")
+        if isinstance(content, list):
+            # Chat-completions content can be a list of parts; join the
+            # text fragments (drop images — Nano text mode here).
+            content = "".join(p.get("text", "") for p in content
+                              if isinstance(p, dict) and p.get("type") == "text")
+        if role == "system":
+            system_parts.append(content)
+        else:
+            history.append({"role": role, "content": content})
+    # OpenAI convention: the LAST user message is the "current turn";
+    # the rest is history. The Prompt API treats initialPrompts as
+    # context, then prompt() as the current question.
+    if history and history[-1]["role"] == "user":
+        user_text = history[-1]["content"]
+        history = history[:-1]
+    return "\n\n".join(system_parts), history, user_text
+
+
+async def handle_chat(req: web.Request) -> web.Response:
+    try:
+        body = await req.json()
+    except ValueError:
+        return web.json_response({"error": "invalid json"}, status=400)
+    messages = body.get("messages") or []
+    if not messages:
+        return web.json_response({"error": "messages[] required"}, status=400)
+
+    system, history, user_text = _split_messages(messages)
+    if not user_text:
+        return web.json_response({"error": "last message must be from user"}, status=400)
+
+    t0 = time.time()
+    try:
+        reply = await bridge.prompt(system, history, user_text)
+    except Exception as e:
+        log.exception("prompt failed")
+        return web.json_response({"error": str(e)}, status=502)
+    log.info("chat reply: %d chars in %.2fs", len(reply), time.time() - t0)
+
+    return web.json_response({
+        "id": "chatcmpl-" + uuid.uuid4().hex[:24],
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": body.get("model", "gemini-nano"),
+        "choices": [{
+            "index": 0,
+            "finish_reason": "stop",
+            "message": {"role": "assistant", "content": reply},
+        }],
+        "usage": {
+            # Nano doesn't report token counts via the JS API. Provide
+            # rough chars-as-tokens estimates so clients don't crash.
+            "prompt_tokens": sum(len(m.get("content", "")) for m in messages) // 4,
+            "completion_tokens": len(reply) // 4,
+            "total_tokens": (sum(len(m.get("content", "")) for m in messages) + len(reply)) // 4,
+        },
+    })
+
+
+async def handle_health(_req: web.Request) -> web.Response:
+    if bridge.page is None:
+        return web.Response(status=503, text="not ready")
+    return web.Response(status=204)
+
+
+async def handle_models(_req: web.Request) -> web.Response:
+    # Some clients probe /v1/models before sending /v1/chat/completions.
+    # Return the synthetic name they're expecting.
+    return web.json_response({
+        "object": "list",
+        "data": [{"id": "gemini-nano", "object": "model", "owned_by": "chrome"}],
+    })
+
+
+def build_app() -> web.Application:
+    app = web.Application()
+    app.router.add_post("/v1/chat/completions", handle_chat)
+    app.router.add_get("/v1/models", handle_models)
+    app.router.add_get("/healthz", handle_health)
+    return app
+
+
+async def main() -> None:
+    # Graceful shutdown so the Chrome context is closed cleanly.
+    stopping = asyncio.Event()
+
+    def _on_signal(*_: object) -> None:
+        log.info("signal received, shutting down")
+        stopping.set()
+
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, _on_signal)
+        except NotImplementedError:
+            # Windows lacks add_signal_handler; rely on KeyboardInterrupt
+            pass
+
+    await bridge.start()
+    app = build_app()
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, HOST, PORT)
+    await site.start()
+    log.info("listening on http://%s:%d/v1", HOST, PORT)
+
+    try:
+        await stopping.wait()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        await runner.cleanup()
+        await bridge.stop()
+        log.info("bye")
+
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass
