@@ -1,63 +1,129 @@
 #!/usr/bin/env bash
-# install.sh — copy clade + wpc to a directory on $PATH.
+# Clade installer for Linux + macOS.
 #
-# Run this either inside an extracted release archive (where ./clade
-# and ./wpc sit next to this script) or from a repo checkout after
-# `scripts/build.sh`. The script auto-detects which it is.
+# One-liner:
+#   curl -fsSL https://raw.githubusercontent.com/sPROFFEs/Clade/main/scripts/install.sh | bash
 #
-# Usage:
-#   ./install.sh                  # /usr/local/bin if writable or sudo-able,
-#                                 # otherwise ~/.local/bin
-#   ./install.sh --user           # force ~/.local/bin (no sudo)
-#   ./install.sh --system         # force /usr/local/bin (use sudo if needed)
-#   PREFIX=/opt/clade/bin ./install.sh   # custom dir
+# Or with options (after `-s --` they go to the script, not bash):
+#   curl -fsSL https://… | bash -s -- --source      # build from source
+#   curl -fsSL https://… | bash -s -- --user        # ~/.local/bin
+#   curl -fsSL https://… | bash -s -- --system      # /usr/local/bin
+#   curl -fsSL https://… | bash -s -- --yes         # auto-yes all prompts
+#   curl -fsSL https://… | bash -s -- --version v0.1.0
 #
-# After install, if the target dir isn't on $PATH the script prints
-# the one line you need to add to your shell rc — it does NOT edit
-# rc files behind your back.
+# Or run locally (from inside an extracted release archive or a repo checkout):
+#   ./scripts/install.sh
+#
+# Flags:
+#   --binary           grab a prebuilt release tarball (default in one-liner mode)
+#   --source           git clone + go build (installs Go if missing, asking first)
+#   --version <tag>    pin a release tag instead of "latest"
+#   --user             install to ~/.local/bin (no sudo)
+#   --system           install to /usr/local/bin (sudo when needed)
+#   --prefix <dir>     custom install dir
+#   --yes              auto-confirm prompts (CI / scripted use)
+#   -h, --help         show this
 
 set -euo pipefail
 
-# ---------- argument parsing ----------
-MODE="auto"
+REPO="sPROFFEs/Clade"
+RAW_REPO_URL="https://github.com/sPROFFEs/Clade"
+SOURCE_BRANCH="main"
+
+MODE=""          # binary | source (empty = ask, default binary in non-tty)
+PREFIX_MODE=""   # user | system (empty = auto)
+PREFIX=""        # explicit
+VERSION=""       # tag pin
+YES=0
+
+# ---------- arg parsing ----------
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --user)   MODE="user"   ; shift ;;
-    --system) MODE="system" ; shift ;;
-    --help|-h)
-      sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
+    --binary)    MODE="binary"  ; shift ;;
+    --source)    MODE="source"  ; shift ;;
+    --user)      PREFIX_MODE="user" ; shift ;;
+    --system)    PREFIX_MODE="system" ; shift ;;
+    --prefix)    PREFIX="$2"   ; shift 2 ;;
+    --prefix=*)  PREFIX="${1#--prefix=}" ; shift ;;
+    --version)   VERSION="$2"  ; shift 2 ;;
+    --version=*) VERSION="${1#--version=}" ; shift ;;
+    --yes|-y)    YES=1 ; shift ;;
+    -h|--help)
+      sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'
       exit 0 ;;
     *) printf 'unknown arg: %s (try --help)\n' "$1" >&2; exit 2 ;;
   esac
 done
 
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# ---------- tty helpers ----------
+# When piped via `curl | bash`, stdin is the pipe. To prompt the user
+# we have to read from /dev/tty. Detect once and route every prompt
+# through here so the same code handles both interactive runs and
+# one-liners.
+HAVE_TTY=0
+if [[ -e /dev/tty ]]; then
+  HAVE_TTY=1
+fi
 
-# ---------- locate binaries ----------
-# Candidate roots, in order of preference:
-#   1. caller's cwd (just in case someone did `./scripts/install.sh` from .)
-#   2. the script's own dir (release archive layout: binaries next to install.sh)
-#   3. dist/<os>-<arch>/ (repo layout after scripts/build.sh)
+ask() {
+  local prompt="$1" default="$2" reply=""
+  if [[ "$YES" == "1" ]]; then
+    printf '%s\n' "$default"
+    return
+  fi
+  if [[ "$HAVE_TTY" == "0" ]]; then
+    printf '%s\n' "$default"
+    return
+  fi
+  printf '%s [%s]: ' "$prompt" "$default" >/dev/tty
+  read -r reply </dev/tty || reply=""
+  if [[ -z "${reply// }" ]]; then
+    printf '%s' "$default"
+  else
+    printf '%s' "$reply"
+  fi
+}
+
+yesno() {
+  local prompt="$1" default="${2:-n}" reply
+  reply="$(ask "$prompt $( [[ "$default" == y ]] && printf '[Y/n]' || printf '[y/N]' )" "$default")"
+  [[ "${reply,,}" =~ ^y(es)?$ ]]
+}
+
+# ---------- pretty ----------
+c_grn() { printf '\033[0;32m%s\033[0m\n' "$*"; }
+c_red() { printf '\033[0;31m%s\033[0m\n' "$*" >&2; }
+c_yel() { printf '\033[0;33m%s\033[0m\n' "$*"; }
+c_dim() { printf '\033[0;90m%s\033[0m\n' "$*"; }
+
+step() { printf '\n'; c_grn "==> $*"; }
+
+# ---------- platform detect ----------
 detect_triplet() {
   local os arch
   os="$(uname -s | tr '[:upper:]' '[:lower:]')"
   case "$os" in
     linux)  os=linux ;;
     darwin) os=darwin ;;
-    *)      printf 'unsupported OS: %s\n' "$os" >&2; return 1 ;;
+    *) c_red "unsupported OS: $os"; exit 1 ;;
   esac
   arch="$(uname -m)"
   case "$arch" in
     x86_64|amd64) arch=amd64 ;;
     aarch64|arm64) arch=arm64 ;;
-    *) printf 'unsupported arch: %s\n' "$arch" >&2; return 1 ;;
+    *) c_red "unsupported arch: $arch"; exit 1 ;;
   esac
   printf '%s-%s' "$os" "$arch"
 }
 
-find_bins() {
+TRIPLET="$(detect_triplet)"
+
+# ---------- locate local binaries (release-archive / repo case) ----------
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd 2>/dev/null || printf '')"
+
+find_local_bins() {
   local cand
-  for cand in "$PWD" "$HERE" "$HERE/.." "$HERE/../dist/$(detect_triplet 2>/dev/null)"; do
+  for cand in "$PWD" "$HERE" "$HERE/.." "$HERE/../dist/$TRIPLET"; do
     [[ -n "$cand" ]] || continue
     if [[ -x "$cand/clade" && -x "$cand/wpc" ]]; then
       printf '%s' "$cand"
@@ -67,30 +133,52 @@ find_bins() {
   return 1
 }
 
-SRC=""
-SRC="$(find_bins || true)"
-if [[ -z "$SRC" ]]; then
-  cat >&2 <<EOF
-✗ couldn't find clade + wpc binaries.
+LOCAL_BINS="$(find_local_bins || true)"
 
-Either:
-  - cd into the extracted release archive (where ./clade and ./wpc are), then re-run this; or
-  - from the repo root, run scripts/build.sh first to produce dist/<os>-<arch>/.
+# ---------- mode prompt ----------
+if [[ -z "$MODE" ]]; then
+  if [[ -n "$LOCAL_BINS" ]]; then
+    # Inside an archive / repo — just install what's here.
+    MODE="local"
+    c_dim "(found local binaries in $LOCAL_BINS — skipping download/build prompt)"
+  else
+    cat <<EOF
+How do you want to install Clade?
+
+  1. Download a prebuilt release  ${YES:+(default in --yes mode)}
+  2. Build from source (needs Go; will offer to install Go if missing)
+  3. Cancel
 EOF
-  exit 1
+    choice="$(ask 'Choose 1, 2, or 3' '1')"
+    case "$choice" in
+      1) MODE="binary" ;;
+      2) MODE="source" ;;
+      3) c_yel "cancelled."; exit 0 ;;
+      *) c_red "invalid choice: $choice"; exit 1 ;;
+    esac
+  fi
 fi
-printf '✓ found binaries in %s\n' "$SRC"
 
-# ---------- pick destination ----------
+# ---------- destination ----------
 choose_dest() {
-  case "$MODE" in
-    user)   printf '%s' "${PREFIX:-$HOME/.local/bin}" ;;
-    system) printf '%s' "${PREFIX:-/usr/local/bin}"   ;;
-    auto)
-      if [[ -n "${PREFIX:-}" ]]; then
-        printf '%s' "$PREFIX"
-      elif [[ -w /usr/local/bin ]] || command -v sudo >/dev/null 2>&1; then
+  if [[ -n "$PREFIX" ]]; then
+    printf '%s' "$PREFIX"
+    return
+  fi
+  case "$PREFIX_MODE" in
+    user)   printf '%s' "$HOME/.local/bin" ;;
+    system) printf '%s' "/usr/local/bin"   ;;
+    "")
+      # auto: prefer system if writable or sudo available + user agrees,
+      # otherwise drop into ~/.local/bin (no sudo needed).
+      if [[ -w /usr/local/bin ]]; then
         printf '%s' "/usr/local/bin"
+      elif command -v sudo >/dev/null 2>&1 && [[ "$HAVE_TTY" == "1" ]] && ! [[ "$YES" == "1" ]]; then
+        if yesno "Install to /usr/local/bin (uses sudo)? Otherwise will use ~/.local/bin." y; then
+          printf '%s' "/usr/local/bin"
+        else
+          printf '%s' "$HOME/.local/bin"
+        fi
       else
         printf '%s' "$HOME/.local/bin"
       fi
@@ -101,49 +189,194 @@ choose_dest() {
 DEST="$(choose_dest)"
 mkdir -p "$DEST" 2>/dev/null || true
 
-# Decide whether to wrap copy/chmod in sudo. We only do so if the
-# directory exists and isn't writable as us — never when installing
-# under $HOME, even if the caller passed --system but redirected
-# PREFIX into their own dir.
 SUDO=""
 if [[ ! -w "$DEST" ]]; then
   if command -v sudo >/dev/null 2>&1; then
     SUDO="sudo"
-    printf '→ %s not writable; will use sudo\n' "$DEST"
   else
-    printf '✗ %s not writable and no sudo available. Re-run with --user.\n' "$DEST" >&2
+    c_red "$DEST is not writable and sudo isn't available."
+    c_red "Re-run with --user or --prefix=<writable dir>."
     exit 1
   fi
 fi
 
-# ---------- install ----------
-install_one() {
-  local bin="$1"
-  $SUDO install -m 0755 "$SRC/$bin" "$DEST/$bin"
-  printf '✓ %s installed at %s/%s\n' "$bin" "$DEST" "$bin"
+# ---------- binary path: GitHub release ----------
+detect_downloader() {
+  if command -v curl >/dev/null 2>&1; then printf 'curl'
+  elif command -v wget >/dev/null 2>&1; then printf 'wget'
+  else c_red "need curl or wget"; exit 1; fi
 }
 
-install_one clade
-install_one wpc
+fetch() {
+  # fetch <url> <out>
+  local url="$1" out="$2"
+  local dl
+  dl="$(detect_downloader)"
+  if [[ "$dl" == "curl" ]]; then
+    curl -fsSL --retry 3 -o "$out" "$url"
+  else
+    wget -q -O "$out" "$url"
+  fi
+}
+
+resolve_latest_tag() {
+  local api="https://api.github.com/repos/$REPO/releases/latest"
+  local tag
+  tag="$(fetch "$api" /dev/stdout 2>/dev/null \
+        | grep -m1 '"tag_name"' \
+        | sed -E 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/' || true)"
+  printf '%s' "$tag"
+}
+
+install_from_release() {
+  step "Resolving release"
+  local tag="$VERSION"
+  if [[ -z "$tag" ]]; then
+    tag="$(resolve_latest_tag)"
+  fi
+  if [[ -z "$tag" ]]; then
+    c_red "couldn't resolve a release tag (no releases yet?)."
+    c_red "Try --source to build from source instead."
+    exit 1
+  fi
+  # Tag may be "v0.1.0" or "0.1.0"; the build-script archive names use
+  # the bare version, so strip a leading "v".
+  local bare="${tag#v}"
+  local fname="clade-${bare}-${TRIPLET}.tar.gz"
+  local url="https://github.com/$REPO/releases/download/${tag}/${fname}"
+  c_dim "  tag:     $tag"
+  c_dim "  asset:   $fname"
+  c_dim "  url:     $url"
+
+  step "Downloading"
+  local tmp
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' EXIT
+  fetch "$url" "$tmp/$fname" || { c_red "download failed."; exit 1; }
+  c_grn "  downloaded $(du -h "$tmp/$fname" | cut -f1)"
+
+  step "Extracting"
+  tar -xzf "$tmp/$fname" -C "$tmp"
+  local extracted="$tmp/$TRIPLET"
+  [[ -d "$extracted" ]] || { c_red "unexpected archive layout under $tmp"; exit 1; }
+
+  step "Installing to $DEST"
+  $SUDO install -m 0755 "$extracted/clade" "$DEST/clade"
+  $SUDO install -m 0755 "$extracted/wpc"   "$DEST/wpc"
+  c_grn "  ✓ clade + wpc installed"
+}
+
+# ---------- source path: clone + go build ----------
+have_go() { command -v go >/dev/null 2>&1; }
+
+detect_pkg_manager() {
+  # Print the apt/dnf/pacman/zypper/apk/brew install command for Go,
+  # or empty if we don't know the system.
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    if command -v brew >/dev/null 2>&1; then
+      printf '%s' "brew install go"
+    fi
+    return
+  fi
+  if command -v apt-get >/dev/null 2>&1; then
+    printf '%s' "sudo apt-get update && sudo apt-get install -y golang-go"
+  elif command -v dnf >/dev/null 2>&1; then
+    printf '%s' "sudo dnf install -y golang"
+  elif command -v pacman >/dev/null 2>&1; then
+    printf '%s' "sudo pacman -S --noconfirm go"
+  elif command -v zypper >/dev/null 2>&1; then
+    printf '%s' "sudo zypper install -y go"
+  elif command -v apk >/dev/null 2>&1; then
+    printf '%s' "sudo apk add go"
+  fi
+}
+
+install_go() {
+  local cmd
+  cmd="$(detect_pkg_manager)"
+  if [[ -z "$cmd" ]]; then
+    c_red "Go isn't installed and we can't find a known package manager."
+    c_red "Install Go manually from https://go.dev/dl/ and re-run this script."
+    return 1
+  fi
+  c_yel "Go isn't installed. The script can install it with:"
+  printf '\n    %s\n\n' "$cmd"
+  if ! yesno "Run that command now?" y; then
+    c_red "Cancelled. Install Go yourself and re-run."
+    return 1
+  fi
+  bash -c "$cmd"
+  have_go || { c_red "Go install reported success but 'go' still isn't on PATH."; return 1; }
+}
+
+install_from_source() {
+  if ! have_go; then
+    step "Go not found"
+    install_go || exit 1
+  fi
+  step "Cloning repo"
+  local tmp
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' EXIT
+  git clone --depth 1 --branch "$SOURCE_BRANCH" \
+    "${RAW_REPO_URL}.git" "$tmp/Clade" \
+    || { c_red "git clone failed"; exit 1; }
+
+  step "Building (this can take ~30s on first run while Go fetches deps)"
+  (
+    cd "$tmp/Clade"
+    GOOS="$(uname -s | tr '[:upper:]' '[:lower:]')" \
+    GOARCH="$(case $(uname -m) in x86_64|amd64) printf amd64;; aarch64|arm64) printf arm64;; esac)" \
+    CGO_ENABLED=0 \
+    go build -trimpath -ldflags '-s -w' -o ./clade ./cmd/clade
+    GOOS="$(uname -s | tr '[:upper:]' '[:lower:]')" \
+    GOARCH="$(case $(uname -m) in x86_64|amd64) printf amd64;; aarch64|arm64) printf arm64;; esac)" \
+    CGO_ENABLED=0 \
+    go build -trimpath -ldflags '-s -w' -o ./wpc   ./cmd/wpc
+  )
+
+  step "Installing to $DEST"
+  $SUDO install -m 0755 "$tmp/Clade/clade" "$DEST/clade"
+  $SUDO install -m 0755 "$tmp/Clade/wpc"   "$DEST/wpc"
+  c_grn "  ✓ clade + wpc installed"
+}
+
+# ---------- local path: bins already next to us ----------
+install_local() {
+  step "Installing to $DEST"
+  $SUDO install -m 0755 "$LOCAL_BINS/clade" "$DEST/clade"
+  $SUDO install -m 0755 "$LOCAL_BINS/wpc"   "$DEST/wpc"
+  c_grn "  ✓ clade + wpc installed"
+}
+
+# ---------- dispatch ----------
+case "$MODE" in
+  binary) install_from_release ;;
+  source) install_from_source ;;
+  local)  install_local ;;
+  *) c_red "internal: unknown MODE $MODE"; exit 1 ;;
+esac
 
 # ---------- PATH sanity check ----------
 case ":$PATH:" in
   *":$DEST:"*) ;;
   *)
     rc="$HOME/.bashrc"
-    [[ -n "${ZSH_VERSION:-}" ]] && rc="$HOME/.zshrc"
+    [[ -n "${ZSH_VERSION:-}" || "${SHELL:-}" == */zsh ]] && rc="$HOME/.zshrc"
     cat <<EOF
 
-⚠  $DEST is NOT on your PATH.
+⚠  $DEST is NOT on your PATH yet.
 
-   Add this line to your $rc (or the rc of whichever shell you use):
+   Add this line to your $rc (or the rc of the shell you actually use):
 
        export PATH="\$PATH:$DEST"
 
-   …then open a new terminal, or source the file:
+   Then open a new terminal, or run:
        source $rc
 EOF
     ;;
 esac
 
-printf '\nTry it:    clade -version\n'
+step "Done"
+printf 'Try it:    %s -version\n' "$DEST/clade"
+printf '(after PATH update, just `clade -version` from any new shell)\n'

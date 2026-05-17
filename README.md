@@ -92,58 +92,100 @@ want to survive even if the agent's session store is wiped.
 
 ## Install
 
-### From a release archive
+### One-liner (recommended)
+
+**Linux / macOS:**
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/sPROFFEs/Clade/main/scripts/install.sh | bash
+```
+
+**Windows (PowerShell):**
+
+```powershell
+iwr -useb https://raw.githubusercontent.com/sPROFFEs/Clade/main/scripts/install.ps1 | iex
+```
+
+Both installers ask you to pick between:
+
+1. **Download a prebuilt release** — grabs the latest tagged tarball
+   /zip from GitHub Releases, extracts it, drops `clade` + `wpc`
+   into the right per-OS install dir, and updates `PATH`.
+2. **Build from source** — git-clones the repo to a temp dir and
+   runs `go build`. If Go isn't installed the script offers to
+   install it via the system package manager (`apt`, `dnf`,
+   `pacman`, `zypper`, `apk`, `brew`, or `winget`) and asks for
+   your confirmation before running anything.
+
+The installer never edits your shell rc behind your back. If the
+install dir isn't already on `$PATH` it prints the one line you'd
+need to add — except on Windows, where it updates the persistent
+User (or Machine) PATH via `[Environment]::SetEnvironmentVariable`.
+
+Default destinations:
+
+| OS              | Default dir                         | `--user` / no-admin equivalent      |
+|-----------------|-------------------------------------|-------------------------------------|
+| Linux / macOS   | `/usr/local/bin` (sudo if needed)   | `~/.local/bin`                       |
+| Windows         | `%LOCALAPPDATA%\Programs\Clade`     | (same — no admin needed by default) |
+| Windows `-AllUsers` | `%ProgramFiles%\Clade`           | requires elevated PowerShell        |
+
+Common flags (POSIX form; the PS variants drop the leading `--`):
+
+```sh
+# Skip the prompt, force source build, install to ~/.local/bin:
+curl -fsSL https://… | bash -s -- --source --user --yes
+
+# Pin a specific release tag:
+curl -fsSL https://… | bash -s -- --version v0.1.0
+
+# Custom install dir:
+curl -fsSL https://… | bash -s -- --prefix /opt/clade/bin
+```
+
+### From a release archive (no curl)
 
 ```sh
 # Linux / macOS
 tar -xzf clade-0.1.0-linux-amd64.tar.gz
 cd linux-amd64
-./scripts/install.sh        # copies clade + wpc to a dir on $PATH
-clade -version              # confirm it's globally callable
+./scripts/install.sh        # auto-detects local binaries, skips download
 ```
 
 ```powershell
 # Windows
 Expand-Archive clade-0.1.0-windows-amd64.zip
 cd windows-amd64
-.\scripts\install.ps1       # copies clade.exe + wpc.exe + updates PATH
-# open a new terminal, then:
-clade -version
+.\scripts\install.ps1       # same — uses the bundled binaries
 ```
 
-If you don't want to install globally yet, you can also just run the
-binary in place from the extracted folder (`./clade` on Linux/macOS,
-`.\clade.exe` on Windows).
+You can also just run the binary in place from the extracted folder
+(`./clade` on Linux/macOS, `.\clade.exe` on Windows) if you'd rather
+not install globally yet.
 
-### From source (Go ≥ 1.21)
+### From source by hand
+
+If you'd rather not run the installer:
 
 ```sh
 git clone https://github.com/sPROFFEs/Clade.git
 cd Clade
 go build -o clade ./cmd/clade
 go build -o wpc   ./cmd/wpc
-./scripts/install.sh        # optional: drop both binaries on $PATH
+sudo install -m 0755 clade wpc /usr/local/bin/   # or wherever you keep tools
 ```
 
-`wpc` is the workpath compiler — useful for authoring templates
-outside the launcher (`wpc --help`).
+### Manual PATH snippets
 
-### Make `clade` globally callable (manual paths)
+If `clade` is sitting somewhere not on `$PATH`, pick the row that
+matches your shell / OS:
 
-If you'd rather not run the installer, here's what it would have
-done. Pick the row that matches your shell / OS.
-
-| Platform              | Where to put `clade`                        | How to make it findable                                                                                                  |
-|-----------------------|---------------------------------------------|--------------------------------------------------------------------------------------------------------------------------|
-| Linux / macOS (system)| `/usr/local/bin/clade` (needs `sudo`)        | Already on `$PATH` for every shell. `sudo install -m 0755 clade /usr/local/bin/`                                          |
-| Linux / macOS (user)  | `~/.local/bin/clade` (no `sudo`)             | Add `export PATH="$PATH:$HOME/.local/bin"` to `~/.bashrc` or `~/.zshrc`. (Many modern distros already include it.)        |
-| macOS Homebrew users  | anywhere in `$(brew --prefix)/bin/`          | Already on `$PATH`. `cp clade "$(brew --prefix)/bin/"`                                                                   |
-| Windows (per-user)    | `%LOCALAPPDATA%\Programs\Clade\clade.exe`    | `setx PATH "%PATH%;%LOCALAPPDATA%\Programs\Clade"` (close + reopen terminal afterwards).                                  |
-| Windows (all users)   | `%ProgramFiles%\Clade\clade.exe`             | From an admin PowerShell: `[Environment]::SetEnvironmentVariable("PATH","$env:PATH;$env:ProgramFiles\Clade","Machine")`. |
-
-Do the same for `wpc` next to `clade` — both binaries are tiny
-(~6 MB) and need to be on `$PATH` together if you use `wpc` for
-template authoring.
+| Platform              | Add to PATH                                                                                                              |
+|-----------------------|--------------------------------------------------------------------------------------------------------------------------|
+| Linux / macOS (user)  | `echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc` (or `~/.zshrc`)                                                |
+| macOS Homebrew users  | Already on `$PATH` if you drop the binary into `$(brew --prefix)/bin/`                                                   |
+| Windows (per-user)    | `setx PATH "%PATH%;%LOCALAPPDATA%\Programs\Clade"` (close + reopen the terminal).                                          |
+| Windows (all users)   | From an elevated PowerShell: `[Environment]::SetEnvironmentVariable("PATH","$env:PATH;$env:ProgramFiles\Clade","Machine")`. |
 
 After install, **open a new terminal** (so the new PATH propagates),
 then verify:

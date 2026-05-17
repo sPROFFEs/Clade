@@ -1,48 +1,88 @@
-# install.ps1 — copy clade.exe + wpc.exe to a directory on $PATH.
+# Clade installer for Windows.
 #
-# Run this either inside an extracted release archive (where
-# clade.exe and wpc.exe sit next to this script) or from a repo
-# checkout after scripts\build.ps1. The script auto-detects which.
+# One-liner:
+#   iwr -useb https://raw.githubusercontent.com/sPROFFEs/Clade/main/scripts/install.ps1 | iex
 #
-# Usage:
-#   .\scripts\install.ps1                 # %LOCALAPPDATA%\Programs\Clade
-#   .\scripts\install.ps1 -Prefix C:\Tools\Clade
-#   .\scripts\install.ps1 -AllUsers       # %ProgramFiles%\Clade (needs admin)
+# Or with options (you must download then run for arguments to bind):
+#   iwr -useb https://… -OutFile install.ps1
+#   .\install.ps1 -Mode Source -AllUsers
 #
-# After install, if the target dir isn't on PATH the script appends
-# it to the User PATH (or Machine PATH with -AllUsers) so new shells
-# pick it up immediately. Existing shells need to be reopened.
+# Or run locally (from inside an extracted release archive or repo checkout):
+#   .\scripts\install.ps1
+#
+# Parameters:
+#   -Mode Binary | Source       what to install (prompts if omitted)
+#   -Version <tag>              pin a release tag instead of "latest"
+#   -Prefix <dir>               install dir (default: %LOCALAPPDATA%\Programs\Clade)
+#   -AllUsers                   install to %ProgramFiles%\Clade (needs admin)
+#   -Yes                        auto-confirm prompts
 
 [CmdletBinding()]
 param(
-    [string]$Prefix,
-    [switch]$AllUsers
+    [ValidateSet("Binary","Source","")]
+    [string]$Mode = "",
+    [string]$Version = "",
+    [string]$Prefix = "",
+    [switch]$AllUsers,
+    [switch]$Yes
 )
 
 $ErrorActionPreference = "Stop"
-$here = Split-Path -Parent $MyInvocation.MyCommand.Definition
 
+$Repo = "sPROFFEs/Clade"
+$SourceBranch = "main"
+
+# ---------- pretty ----------
+function Step($Text) { Write-Host ""; Write-Host "==> $Text" -ForegroundColor Green }
+function Info($Text) { Write-Host "    $Text" -ForegroundColor DarkGray }
+function Warn($Text) { Write-Host $Text -ForegroundColor Yellow }
+function Fail($Text) { Write-Host $Text -ForegroundColor Red; exit 1 }
+
+# ---------- prompts that work even from iwr | iex ----------
+# `iwr | iex` runs the script in the host PowerShell, so Read-Host
+# still works. But $Host.UI may be a non-interactive host (PSExec,
+# CI). Detect once and route every prompt through this.
+$IsInteractive = -not ([Console]::IsInputRedirected) -and ($Host.Name -ne "Default Host")
+
+function Ask($PromptText, $Default) {
+    if ($Yes) { return $Default }
+    if (-not $IsInteractive) { return $Default }
+    $reply = Read-Host "$PromptText [$Default]"
+    if ([string]::IsNullOrWhiteSpace($reply)) { return $Default }
+    return $reply.Trim()
+}
+
+function YesNo($PromptText, $DefaultYes = $true) {
+    $hint = if ($DefaultYes) { "[Y/n]" } else { "[y/N]" }
+    $default = if ($DefaultYes) { "y" } else { "n" }
+    $r = (Ask "$PromptText $hint" $default).ToLower()
+    return $r -match "^y(es)?$"
+}
+
+# ---------- platform detect ----------
 function Get-ArchTriplet {
     $arch = $env:PROCESSOR_ARCHITECTURE
     switch ($arch) {
         "AMD64" { return "windows-amd64" }
         "ARM64" { return "windows-arm64" }
-        default { throw "unsupported PROCESSOR_ARCHITECTURE: $arch" }
+        default { Fail "unsupported PROCESSOR_ARCHITECTURE: $arch" }
     }
 }
+$Triplet = Get-ArchTriplet
 
-# Try locations in preference order:
-#   1. caller's cwd
-#   2. script's own dir (release-archive layout)
-#   3. dist\<triplet>\ (repo layout after build.ps1)
-function Find-BinariesRoot {
-    $candidates = @(
-        $PWD.Path,
-        $here,
-        (Join-Path $here ".."),
-        (Join-Path (Join-Path $here "..") (Join-Path "dist" (Get-ArchTriplet)))
-    )
-    foreach ($c in $candidates) {
+# ---------- locate local binaries (release-archive / repo case) ----------
+$here = if ($MyInvocation.MyCommand.Path) {
+    Split-Path -Parent $MyInvocation.MyCommand.Path
+} else { $null }
+
+function Find-LocalBins {
+    $cands = @($PWD.Path)
+    if ($here) {
+        $cands += $here
+        $cands += (Join-Path $here "..")
+        $cands += (Join-Path (Join-Path $here "..") (Join-Path "dist" $Triplet))
+    }
+    foreach ($c in $cands) {
         if ([string]::IsNullOrWhiteSpace($c)) { continue }
         $clade = Join-Path $c "clade.exe"
         $wpc   = Join-Path $c "wpc.exe"
@@ -52,68 +92,198 @@ function Find-BinariesRoot {
     }
     return $null
 }
+$LocalBins = Find-LocalBins
 
-$src = Find-BinariesRoot
-if (-not $src) {
-    Write-Host "x couldn't find clade.exe + wpc.exe." -ForegroundColor Red
-    Write-Host ""
-    Write-Host "Either:"
-    Write-Host "  - cd into the extracted release archive (where clade.exe and"
-    Write-Host "    wpc.exe are), then re-run this; or"
-    Write-Host "  - from the repo root, run scripts\build.ps1 first."
-    exit 1
-}
-Write-Host "v found binaries in $src" -ForegroundColor Green
-
-# ---------- pick destination ----------
-if (-not $Prefix) {
-    if ($AllUsers) {
-        $Prefix = Join-Path $env:ProgramFiles "Clade"
+# ---------- mode prompt ----------
+if (-not $Mode) {
+    if ($LocalBins) {
+        Info "(found local binaries in $LocalBins - skipping download/build prompt)"
+        $Mode = "Local"
     } else {
-        $Prefix = Join-Path $env:LOCALAPPDATA "Programs\Clade"
+        Write-Host ""
+        Write-Host "How do you want to install Clade?"
+        Write-Host "  1. Download a prebuilt release"
+        Write-Host "  2. Build from source (needs Go; will offer to install Go if missing)"
+        Write-Host "  3. Cancel"
+        $choice = Ask "Choose 1, 2, or 3" "1"
+        switch ($choice) {
+            "1" { $Mode = "Binary" }
+            "2" { $Mode = "Source" }
+            "3" { Warn "cancelled."; exit 0 }
+            default { Fail "invalid choice: $choice" }
+        }
     }
 }
 
-if (-not (Test-Path $Prefix)) {
-    New-Item -ItemType Directory -Path $Prefix -Force | Out-Null
+# ---------- destination ----------
+function Choose-Dest {
+    if ($Prefix) { return $Prefix }
+    if ($AllUsers) {
+        return (Join-Path $env:ProgramFiles "Clade")
+    }
+    return (Join-Path $env:LOCALAPPDATA "Programs\Clade")
+}
+$Dest = Choose-Dest
+if (-not (Test-Path $Dest)) {
+    New-Item -ItemType Directory -Path $Dest -Force | Out-Null
 }
 
-# ---------- install ----------
-function Install-One($name) {
-    $srcPath = Join-Path $src $name
-    $dstPath = Join-Path $Prefix $name
-    Copy-Item -Path $srcPath -Destination $dstPath -Force
-    Write-Host "v $name installed at $dstPath" -ForegroundColor Green
+# Touching %ProgramFiles% needs admin. Detect early.
+function Test-IsAdmin {
+    $id = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $p  = New-Object Security.Principal.WindowsPrincipal($id)
+    return $p.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
-Install-One "clade.exe"
-Install-One "wpc.exe"
+if ($AllUsers -and -not (Test-IsAdmin)) {
+    Fail "-AllUsers needs an elevated PowerShell. Re-open as Administrator and re-run."
+}
+
+# ---------- binary path: GitHub release ----------
+function Resolve-LatestTag {
+    $api = "https://api.github.com/repos/$Repo/releases/latest"
+    try {
+        $r = Invoke-RestMethod -Uri $api -UseBasicParsing -ErrorAction Stop
+        return $r.tag_name
+    } catch {
+        return ""
+    }
+}
+
+function Install-Binary {
+    Step "Resolving release"
+    $tag = $Version
+    if (-not $tag) { $tag = Resolve-LatestTag }
+    if (-not $tag) {
+        Fail "couldn't resolve a release tag (no releases yet?). Try -Mode Source."
+    }
+    $bare  = $tag -replace '^v',''
+    $fname = "clade-$bare-$Triplet.zip"
+    $url   = "https://github.com/$Repo/releases/download/$tag/$fname"
+    Info "tag:   $tag"
+    Info "asset: $fname"
+    Info "url:   $url"
+
+    Step "Downloading"
+    $tmp = New-Item -ItemType Directory -Force -Path (Join-Path $env:TEMP ("clade-install-" + [Guid]::NewGuid().ToString("N")))
+    try {
+        $zip = Join-Path $tmp.FullName $fname
+        Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing -ErrorAction Stop
+        Info ("downloaded " + ((Get-Item $zip).Length / 1MB).ToString("0.0") + " MB")
+
+        Step "Extracting"
+        Expand-Archive -Path $zip -DestinationPath $tmp.FullName -Force
+        $extracted = Join-Path $tmp.FullName $Triplet
+        if (-not (Test-Path $extracted)) {
+            Fail "unexpected archive layout under $($tmp.FullName)"
+        }
+
+        Step "Installing to $Dest"
+        Copy-Item -Path (Join-Path $extracted "clade.exe") -Destination $Dest -Force
+        Copy-Item -Path (Join-Path $extracted "wpc.exe")   -Destination $Dest -Force
+        Write-Host "  v clade.exe + wpc.exe installed" -ForegroundColor Green
+    } finally {
+        if (Test-Path $tmp) { Remove-Item -Recurse -Force $tmp }
+    }
+}
+
+# ---------- source path: clone + go build ----------
+function Have-Go { return [bool](Get-Command go -ErrorAction SilentlyContinue) }
+
+function Install-Go {
+    Step "Go isn't installed"
+    if (Get-Command winget -ErrorAction SilentlyContinue) {
+        Write-Host "Can install via winget:"
+        Write-Host ""
+        Write-Host "    winget install --id GoLang.Go -e --accept-package-agreements --accept-source-agreements"
+        Write-Host ""
+        if (YesNo "Run this now?") {
+            & winget install --id GoLang.Go -e --accept-package-agreements --accept-source-agreements
+            # winget puts go on PATH but the current shell won't see it
+            # without refreshing. Pull the env var fresh.
+            $env:PATH = [Environment]::GetEnvironmentVariable("PATH","Machine") + ";" + [Environment]::GetEnvironmentVariable("PATH","User")
+        } else {
+            Fail "Cancelled. Install Go from https://go.dev/dl/ and re-run."
+        }
+    } else {
+        Warn "winget isn't available on this system."
+        Warn "Install Go manually from https://go.dev/dl/ then re-run this script."
+        exit 1
+    }
+    if (-not (Have-Go)) {
+        Fail "Go install reported success but 'go' still isn't on PATH. Open a new PowerShell and re-run."
+    }
+}
+
+function Install-Source {
+    if (-not (Have-Go)) { Install-Go }
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+        Fail "git is required for --source builds. Install from https://git-scm.com/ first."
+    }
+
+    Step "Cloning repo"
+    $tmp = New-Item -ItemType Directory -Force -Path (Join-Path $env:TEMP ("clade-src-" + [Guid]::NewGuid().ToString("N")))
+    try {
+        & git clone --depth 1 --branch $SourceBranch "https://github.com/$Repo.git" (Join-Path $tmp.FullName "Clade")
+        if ($LASTEXITCODE -ne 0) { Fail "git clone failed" }
+
+        Step "Building"
+        Push-Location (Join-Path $tmp.FullName "Clade")
+        try {
+            $env:CGO_ENABLED = "0"
+            & go build -trimpath -ldflags '-s -w' -o clade.exe ./cmd/clade
+            if ($LASTEXITCODE -ne 0) { Fail "go build (clade) failed" }
+            & go build -trimpath -ldflags '-s -w' -o wpc.exe   ./cmd/wpc
+            if ($LASTEXITCODE -ne 0) { Fail "go build (wpc) failed" }
+
+            Step "Installing to $Dest"
+            Copy-Item -Path ".\clade.exe" -Destination $Dest -Force
+            Copy-Item -Path ".\wpc.exe"   -Destination $Dest -Force
+            Write-Host "  v clade.exe + wpc.exe installed" -ForegroundColor Green
+        } finally {
+            Pop-Location
+        }
+    } finally {
+        if (Test-Path $tmp) { Remove-Item -Recurse -Force $tmp }
+    }
+}
+
+# ---------- local path: bins already next to us ----------
+function Install-Local {
+    Step "Installing to $Dest"
+    Copy-Item -Path (Join-Path $LocalBins "clade.exe") -Destination $Dest -Force
+    Copy-Item -Path (Join-Path $LocalBins "wpc.exe")   -Destination $Dest -Force
+    Write-Host "  v clade.exe + wpc.exe installed" -ForegroundColor Green
+}
+
+# ---------- dispatch ----------
+switch ($Mode) {
+    "Binary" { Install-Binary }
+    "Source" { Install-Source }
+    "Local"  { Install-Local }
+    default  { Fail "internal: unknown Mode $Mode" }
+}
 
 # ---------- PATH ----------
-# Add $Prefix to the User (or Machine with -AllUsers) PATH if it
-# isn't already there. We touch the persistent env vars via
-# [Environment]::SetEnvironmentVariable so new shells pick it up;
-# editing $env:PATH only affects the current shell.
+Step "Updating PATH"
 $scope = if ($AllUsers) { "Machine" } else { "User" }
 $existing = [Environment]::GetEnvironmentVariable("PATH", $scope)
 if (-not $existing) { $existing = "" }
-
 $parts = $existing -split ";" | Where-Object { $_ -ne "" }
-if ($parts -notcontains $Prefix) {
-    $newPath = if ($existing.Trim() -eq "") { $Prefix } else { "$existing;$Prefix" }
+if ($parts -notcontains $Dest) {
+    $newPath = if ($existing.Trim() -eq "") { $Dest } else { "$existing;$Dest" }
     try {
         [Environment]::SetEnvironmentVariable("PATH", $newPath, $scope)
-        Write-Host "v $scope PATH now includes $Prefix" -ForegroundColor Green
+        Write-Host "  v $scope PATH now includes $Dest" -ForegroundColor Green
     } catch {
-        Write-Host ""
-        Write-Host "! couldn't update $scope PATH automatically: $($_.Exception.Message)" -ForegroundColor Yellow
-        Write-Host "  Add this dir to your PATH manually:" -ForegroundColor Yellow
-        Write-Host "      $Prefix"
+        Warn "couldn't update $scope PATH automatically: $($_.Exception.Message)"
+        Warn "Add this dir to your PATH manually:"
+        Write-Host "      $Dest"
     }
     # Also update the current shell so the user can test right away.
-    $env:PATH = "$env:PATH;$Prefix"
+    $env:PATH = "$env:PATH;$Dest"
 } else {
-    Write-Host "(already on $scope PATH)" -ForegroundColor DarkGray
+    Info "(already on $scope PATH)"
 }
 
-Write-Host ""
+Step "Done"
 Write-Host "Open a new terminal, then try:    clade -version"
