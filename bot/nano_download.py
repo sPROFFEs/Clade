@@ -117,13 +117,44 @@ def main() -> int:
             print("WARN: couldn't spawn Xvfb — chrome will probably fail to start.",
                   flush=True)
 
+    # First: tell the user what's actually on disk. The on-device
+    # model store lives under the profile; if it's empty Chrome has
+    # never started a download, which is itself diagnostic.
+    print("\n=== profile contents (looking for on-device-model traces) ===",
+          flush=True)
+    interesting = []
+    for root, dirs, files in os.walk(PROFILE_DIR):
+        depth = root[len(PROFILE_DIR):].count(os.sep)
+        if depth > 4:
+            dirs[:] = []
+            continue
+        for name in dirs + files:
+            low = name.lower()
+            if any(k in low for k in ("optimization_guide", "on_device",
+                                       "ondevice", "model")):
+                full = os.path.join(root, name)
+                try:
+                    size = os.path.getsize(full) if os.path.isfile(full) else 0
+                    kind = "f" if os.path.isfile(full) else "d"
+                    interesting.append((full, kind, size))
+                except OSError:
+                    pass
+    if interesting:
+        for full, kind, size in interesting[:40]:
+            tag = f"{size:,}B" if kind == "f" else "[dir]"
+            print(f"  {tag:>14}  {full}", flush=True)
+    else:
+        print("  (no model-related files/dirs found — Chrome has never "
+              "attempted a Nano download on this profile)", flush=True)
+
     try:
         # --dump-dom returns the rendered DOM and exits, no UI needed.
-        # chrome://on-device-internals renders the model status as
-        # plain text inside a <pre>, so dump + grep is enough.
+        # We MUST also pass --headless=new — otherwise Chrome tries to
+        # open a real window and hangs on Xvfb without a WM.
         args = [
             chrome,
             f"--user-data-dir={PROFILE_DIR}",
+            "--headless=new",
             "--no-sandbox",
             "--disable-dev-shm-usage",
             "--enable-features=OptimizationGuideOnDeviceModel,"
@@ -131,7 +162,7 @@ def main() -> int:
             "--enable-blink-features=AIPromptAPI",
             "--use-gl=swiftshader",
             "--enable-unsafe-swiftshader",
-            "--virtual-time-budget=20000",  # let async data load
+            "--virtual-time-budget=10000",  # let async data load
             "--dump-dom",
             "chrome://on-device-internals",
         ]

@@ -289,12 +289,12 @@ window.__nanoReady = (async () => {
 })();
 
 window.__nanoPrompt = async function(systemPrompt, history, userText) {
-  // If start-up warmup never succeeded, run a fresh full warmup now
-  // (8 attempts, more aggressive than the start-up's 5). Many setups
-  // need a manual chrome://on-device-internals visit before the
-  // service comes online — once it does, prompts stick.
+  // If start-up warmup never succeeded, try a fresh warmup. Capped
+  // at 3 attempts because if the service hasn't come up by then
+  // (with backoff that's ~10s total), it almost certainly isn't
+  // going to without manual intervention via /nano_download.
   if (!window.__nanoPrimer) {
-    const w = await window.__nanoWarmup(8);
+    const w = await window.__nanoWarmup(3);
     if (!w.ok) {
       throw new Error(
         "on-device-model service not running. availability='" + w.availability +

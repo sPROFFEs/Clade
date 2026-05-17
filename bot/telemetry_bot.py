@@ -1042,9 +1042,20 @@ def _nano_send(messages: list[dict]) -> str:
     if not bridge.running():
         raise RuntimeError("nano bridge isn't running — tap *🤖 nano bridge* → ▶️ start.")
     try:
+        # 75s is the worst-case the bridge can take when the on-device-
+        # model service comes online lazily (8-attempt warmup with
+        # backoff, then create()). Past that, prompts are dead and we
+        # want the user to know now, not in two minutes.
         r = _requests.post(f"http://127.0.0.1:{NANO_PORT}/v1/chat/completions",
                            json={"model": "gemini-nano", "messages": messages},
-                           timeout=120)
+                           timeout=75)
+    except _requests.Timeout:
+        raise RuntimeError(
+            "nano bridge took >75s to reply — Chrome's on-device-model "
+            "service almost certainly isn't coming up on this device. "
+            "Run /nano_download to see what Chrome says, or `/use "
+            "llama3.1:8b` to switch to a working local model."
+        ) from None
     except _requests.RequestException as e:
         raise RuntimeError(f"bridge unreachable: {e}") from e
     if r.status_code != 200:
