@@ -1,8 +1,10 @@
 build/
 dist/
-wpc
-wpc.exe
-code-launcher
-code-launcher.exe
+# Built binaries at the repo root only (anchored with leading slash so the
+# cmd/code-launcher/ source directory isn't matched).
+/wpc
+/wpc.exe
+/code-launcher
+/code-launcher.exe
 *.test
 *.tmp
