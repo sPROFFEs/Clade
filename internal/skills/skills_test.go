@@ -1,7 +1,11 @@
 package skills
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -93,5 +97,139 @@ func TestFetchAll_CapturesPerURLErrors(t *testing.T) {
 	results := FetchAll(context.Background(), []string{"/this/path/does/not/exist"}, target)
 	if len(results) != 1 || results[0].Err == nil {
 		t.Errorf("expected error, got %v", results)
+	}
+}
+
+func TestIsZipURL(t *testing.T) {
+	cases := map[string]bool{
+		"https://example.com/skill.zip":         true,
+		"https://example.com/path/skill.ZIP":    true,
+		"https://example.com/skill.zip?token=x": true,
+		"http://example.com/skill.zip":          true,
+		"https://example.com/skill.tar.gz":      false,
+		"https://github.com/org/repo":           false,
+		"https://github.com/org/repo.git":       false,
+		"git@github.com:org/repo.git":           false,
+		"file:///tmp/skill.zip":                 false, // we only do http(s) zip
+		"":                                     false,
+	}
+	for in, want := range cases {
+		if got := isZipURL(in); got != want {
+			t.Errorf("isZipURL(%q) = %v, want %v", in, got, want)
+		}
+	}
+}
+
+// buildSampleZip writes a zip whose contents look like a GitHub
+// archive download: every entry under a single top-level directory.
+// Returns the raw bytes ready to serve over HTTP.
+func buildSampleZip(t *testing.T, topDir string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	w := zip.NewWriter(&buf)
+	files := map[string][]byte{
+		topDir + "/SKILL.md":          []byte("# fake skill\n"),
+		topDir + "/scripts/hello.sh":  []byte("#!/usr/bin/env bash\necho hi\n"),
+		topDir + "/scripts/inner.txt": []byte("inner\n"),
+	}
+	for name, body := range files {
+		f, err := w.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.Write(body); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func TestFetchAll_ZipFlattensTopDir(t *testing.T) {
+	// Serve a GitHub-style zip from an in-process http server so we
+	// don't need network access. The top-level directory inside the
+	// archive should be stripped on extraction.
+	zipBytes := buildSampleZip(t, "myrepo-main")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/zip")
+		_, _ = w.Write(zipBytes)
+	}))
+	defer srv.Close()
+
+	target := filepath.Join(t.TempDir(), "skills")
+	results := FetchAll(context.Background(),
+		[]string{srv.URL + "/myrepo-main.zip"}, target)
+	if len(results) != 1 || results[0].Err != nil {
+		t.Fatalf("fetch failed: %#v", results)
+	}
+
+	// Skill files should land directly under the derived name (no
+	// "myrepo-main/" middle layer).
+	want := filepath.Join(target, "myrepo-main", "SKILL.md")
+	if _, err := os.Stat(want); err != nil {
+		t.Errorf("expected %s: %v", want, err)
+	}
+	wantInner := filepath.Join(target, "myrepo-main", "scripts", "hello.sh")
+	if _, err := os.Stat(wantInner); err != nil {
+		t.Errorf("expected %s: %v", wantInner, err)
+	}
+}
+
+func TestFetchAll_ZipIdempotent(t *testing.T) {
+	zipBytes := buildSampleZip(t, "tool-v1")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(zipBytes)
+	}))
+	defer srv.Close()
+	target := filepath.Join(t.TempDir(), "skills")
+
+	results := FetchAll(context.Background(), []string{srv.URL + "/tool.zip"}, target)
+	if results[0].Err != nil {
+		t.Fatalf("first fetch failed: %v", results[0].Err)
+	}
+	stat1, _ := os.Stat(filepath.Join(target, "tool"))
+
+	results = FetchAll(context.Background(), []string{srv.URL + "/tool.zip"}, target)
+	if results[0].Err != nil {
+		t.Errorf("second fetch err: %v", results[0].Err)
+	}
+	stat2, _ := os.Stat(filepath.Join(target, "tool"))
+	if stat1.ModTime() != stat2.ModTime() {
+		t.Error("second fetch re-downloaded (mtime changed)")
+	}
+}
+
+func TestFetchAll_ZipBlocksZipSlip(t *testing.T) {
+	// Hand-craft a zip with a "../escape.txt" entry — should be
+	// rejected outright.
+	var buf bytes.Buffer
+	w := zip.NewWriter(&buf)
+	f, _ := w.Create("../escape.txt")
+	_, _ = f.Write([]byte("you shouldn't see this"))
+	_ = w.Close()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(buf.Bytes())
+	}))
+	defer srv.Close()
+
+	target := filepath.Join(t.TempDir(), "skills")
+	results := FetchAll(context.Background(), []string{srv.URL + "/evil.zip"}, target)
+	if len(results) != 1 || results[0].Err == nil {
+		t.Fatalf("expected zip-slip error, got %#v", results)
+	}
+}
+
+func TestFetchAll_ZipHttpError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "nope", http.StatusNotFound)
+	}))
+	defer srv.Close()
+	target := filepath.Join(t.TempDir(), "skills")
+	results := FetchAll(context.Background(), []string{srv.URL + "/missing.zip"}, target)
+	if len(results) != 1 || results[0].Err == nil {
+		t.Fatalf("expected 404 error, got %#v", results)
 	}
 }

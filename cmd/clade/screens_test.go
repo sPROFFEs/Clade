@@ -521,6 +521,53 @@ func TestAgentsScreen_EnterOnAvailableProducesLaunch(t *testing.T) {
 	}
 }
 
+func TestAgentsScreen_OverridePersistsAgentSwap(t *testing.T) {
+	// Per-chat agent override: when the picker is opened on an
+	// existing chat (newAgentsModelForChatOverride) and the user
+	// picks a *different* agent, the new agent must be written into
+	// chat.json so the swap survives a restart.
+	tmp := seededRoot(t)
+	redirectConfig(t, t.TempDir())
+	tpl, _ := launcher.LoadTemplate(tmp, "reversing")
+	chat, err := launcher.CreateChat(tmp, *tpl, "swap-test", launcher.AgentClaude)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := &launcher.Config{WorkspacesRoot: tmp}
+
+	m := newAgentsModelForChatOverride(cfg, chat)
+	// Hand the model the agent list directly so Update treats it as
+	// already loaded. Cursor points at Codex (the swap target).
+	m.items = []launcher.Agent{
+		{ID: launcher.AgentClaude, Label: "Claude (fake)", Binary: fakeCmd(),
+			WpcTarget: "claude", Available: true, Version: "fake"},
+		{ID: launcher.AgentCodex, Label: "Codex (fake)", Binary: fakeCmd(),
+			WpcTarget: "codex", Available: true, Version: "fake"},
+	}
+	m.loading = false
+	m.cursor = 1 // Codex
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	msg := runCmd(t, cmd)
+	done, ok := msg.(screenDoneMsg)
+	if !ok {
+		t.Fatalf("expected screenDoneMsg, got %T", msg)
+	}
+	if _, isLaunching := done.next.(launchingModel); !isLaunching {
+		t.Errorf("override Enter should route through launchingModel, got %T", done.next)
+	}
+
+	// And the chat manifest on disk should now say Codex.
+	reloaded, err := launcher.LoadChat(tmp, chat.ID)
+	if err != nil || reloaded == nil {
+		t.Fatalf("LoadChat err: %v", err)
+	}
+	if reloaded.AgentID != launcher.AgentCodex {
+		t.Errorf("chat.AgentID = %q, want %q (override didn't persist)",
+			reloaded.AgentID, launcher.AgentCodex)
+	}
+}
+
 func TestAgentsScreen_EnterOnUnavailableRoutesToInstall(t *testing.T) {
 	tmp := seededRoot(t)
 	redirectConfig(t, t.TempDir())

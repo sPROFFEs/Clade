@@ -268,10 +268,43 @@ type agentsModel struct {
 	items   []launcher.Agent
 	cursor  int
 	loading bool
+
+	// override (optional) is set when the picker was opened on an
+	// existing chat to switch its agent. When non-nil, the picker
+	// behaves slightly differently:
+	//   - the cursor seeds on the chat's CURRENT agent (rather than
+	//     the user's last-used global default);
+	//   - pressing Enter on a different agent persists the swap into
+	//     chat.json BEFORE launching, so the chat list shows the new
+	//     agent on return and the change survives a restart.
+	override *chatOverride
+}
+
+// chatOverride is the per-chat agent-swap context. We hold the
+// workspaces root + chat ID so we can reload the chat fresh from
+// disk and write back the new agent without trusting a stale copy
+// from the home screen.
+type chatOverride struct {
+	root    string
+	chatID  string
+	current launcher.AgentID // agent the chat currently has; cursor seed
 }
 
 func newAgentsModel(cfg *launcher.Config, ws launcher.Workspace) agentsModel {
 	return agentsModel{cfg: cfg, ws: ws, loading: true}
+}
+
+// newAgentsModelForChatOverride opens the picker in "swap the agent
+// for this chat" mode. Caller passes the workspaces root + chat ID
+// so the picker can reload + save the chat manifest on enter.
+func newAgentsModelForChatOverride(cfg *launcher.Config, c launcher.Chat) agentsModel {
+	m := newAgentsModel(cfg, c.AsWorkspace())
+	m.override = &chatOverride{
+		root:    cfg.WorkspacesRoot,
+		chatID:  c.ID,
+		current: c.AgentID,
+	}
+	return m
 }
 
 type agentsLoadedMsg struct{ items []launcher.Agent }
@@ -289,10 +322,19 @@ func (m agentsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case agentsLoadedMsg:
 		m.items = msg.items
 		m.loading = false
-		// Seed cursor on the user's last-used agent if it's available.
-		if m.cfg.LastAgent != "" {
+		// Cursor seed priority:
+		//   1. Override mode → seed on the chat's CURRENT agent so the
+		//      user sees "where I am now" before picking a different one.
+		//   2. Otherwise → user's last-used global default.
+		seedID := ""
+		if m.override != nil {
+			seedID = string(m.override.current)
+		} else if m.cfg.LastAgent != "" {
+			seedID = m.cfg.LastAgent
+		}
+		if seedID != "" {
 			for i, a := range m.items {
-				if string(a.ID) == m.cfg.LastAgent && a.Available {
+				if string(a.ID) == seedID {
 					m.cursor = i
 					break
 				}
@@ -321,6 +363,38 @@ func (m agentsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// since that's the natural action the user wants.
 				return m, wrap(newInstallModel(m.cfg, m.ws, a.ID))
 			}
+
+			// Override mode: persist the new agent into the chat's
+			// manifest before launching. We always re-read the chat
+			// from disk so a stale in-memory copy can't clobber a
+			// concurrent edit (e.g. settings touched in another
+			// screen). If the user picked the SAME agent the chat
+			// already had, we skip the write — keeps mtimes clean.
+			if m.override != nil {
+				if a.ID != m.override.current {
+					c, err := launcher.LoadChat(m.override.root, m.override.chatID)
+					if err == nil && c != nil {
+						c.AgentID = a.ID
+						_ = launcher.SaveChatSettings(*c)
+						// Route through the normal launching screen so
+						// decoration / sandbox compile runs against the
+						// new target. OpenChat re-detects agents and
+						// builds the plan from the freshly-saved manifest.
+						return m, wrap(newLaunchingModel(m.cfg, *c))
+					}
+					// Fall through on load/save error — better to
+					// launch once with the chosen agent than to wedge
+					// the user out of their chat.
+				}
+				// Same agent as before → just launch via the normal
+				// path with no manifest write.
+				if c, err := launcher.LoadChat(m.override.root, m.override.chatID); err == nil && c != nil {
+					return m, wrap(newLaunchingModel(m.cfg, *c))
+				}
+			}
+
+			// Default path (new-chat wizard, install screen return, etc.):
+			// direct Plan + launch, no manifest writing.
 			ws := m.ws
 			cfg := *m.cfg
 			cfg.LastAgent = string(a.ID)
@@ -352,10 +426,20 @@ func (m agentsModel) View() string {
 	var b strings.Builder
 	title := fmt.Sprintf("Pick an agent · %s", m.ws.Name)
 	help := "↑/↓ select · enter launch/install · i install · o ollama · esc back"
+	if m.override != nil {
+		title = fmt.Sprintf("Switch agent for chat · %s", m.ws.Name)
+		help = "enter swap+launch · same agent re-launches as-is · i install · esc back"
+	}
 
 	if m.loading {
 		b.WriteString(hintStyle.Render("Scanning PATH for agent CLIs..."))
 		return renderChrome(title, b.String(), help)
+	}
+
+	if m.override != nil {
+		b.WriteString(hintStyle.Render(
+			fmt.Sprintf("Currently bound to: %s. Pick a different agent to swap, "+
+				"or Enter on the same agent to re-launch.", m.override.current)) + "\n\n")
 	}
 
 	// Sort: available first, missing last (deterministic UX), but preserve

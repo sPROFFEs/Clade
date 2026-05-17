@@ -129,10 +129,13 @@ func (m chatListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, wrap(newFilesModel(m.cfg, c.WorkpathDir, "chat "+c.Label, parent))
 			}
 		case "a":
-			// Power-user escape hatch: open the agents picker for this
-			// chat (install / update / pick a different agent).
+			// Per-chat agent override: open the agents picker pre-
+			// seeded on this chat's current agent. Picking a different
+			// one persists the swap into chat.json before launching, so
+			// the next time you open the chat it'll come up bound to
+			// the new agent.
 			if m.cursor < len(m.items) {
-				return m, wrap(newAgentsModel(m.cfg, m.items[m.cursor].AsWorkspace()))
+				return m, wrap(newAgentsModelForChatOverride(m.cfg, m.items[m.cursor]))
 			}
 		case "o":
 			// Ollama config — per-chat (writes into chat.json via the

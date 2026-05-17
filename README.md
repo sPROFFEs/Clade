@@ -141,7 +141,7 @@ auto-scaffolded placeholder.
 | `d`       | Delete highlighted chat (confirms)  |
 | `e`       | Edit chat settings (per-chat)       |
 | `f`       | Edit chat files (mission, persona…) |
-| `a`       | Re-pick agent for this chat         |
+| `a`       | Swap agent for this chat (persists) |
 | `o`       | Configure Ollama for this chat      |
 | `t`       | Template manager                    |
 | `r`       | Refresh                             |
@@ -346,14 +346,49 @@ bottom. Colour-stripped snippets follow.
 ╰──────────────────────────────────────────────────────────────────────╯
 ```
 
+## Online skills
+
+Each template (or chat) can declare a list of "online skills" — small
+repos / archives the launcher pulls down into the agent's expected
+load location on every launch. Two transports are auto-detected from
+the URL:
+
+- **git** — any URL `git clone` understands (https, ssh,
+  `git@host:path`, `file://`, local paths).
+- **zip** — any `http(s)://…/something.zip` URL. Downloaded with the
+  stdlib HTTP client, extracted in-process. GitHub archive downloads
+  (everything nested under a single top-level dir) get flattened so
+  the skill files land at the root of the target directory. Path-
+  escaping entries (e.g. `../foo`) are rejected.
+
+Both transports cache by directory name — re-launching the same chat
+doesn't re-download. Configure the URL list per template in the
+template wizard, or per chat with `e` on the home screen.
+
+## Per-chat agent override
+
+A chat is bound to one agent at creation, but you can swap that
+agent at any time without losing the chat's workpath, MEMORY.md, or
+session history:
+
+1. On the home screen, highlight the chat.
+2. Press `a`.
+3. The picker opens pre-seeded on the chat's current agent. Pick a
+   different one and press Enter — the new agent gets written into
+   `chat.json`, the workpath is recompiled into the sandbox for the
+   new target (`.claude/skills/…` for Claude, `AGENTS.md` for
+   Codex/OpenCode, `GEMINI.md` for Gemini), and the chat launches.
+4. Next time you open the chat it'll come up bound to the new agent.
+
+Re-launching with the *same* agent skips the manifest write and
+behaves identically to pressing Enter on the chat — no churn.
+
 ## Roadmap
 
 Not yet implemented; PRs welcome:
 
 - First-class transcript browser (per-agent adapter for
   `~/.claude/projects/`, `~/.codex/sessions/`, etc.).
-- Zip-archive online skills (git-only today).
-- Per-chat agent override (currently locked at creation).
 - Rich chat search / tagging.
 
 ## License
