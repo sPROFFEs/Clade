@@ -85,7 +85,9 @@ func section(title, body string) string {
 }
 
 // renderToolList returns a markdown bullet list of tools, or empty string if
-// there are none.
+// there are none. When a tool ships platform-paired scripts (.sh + .ps1)
+// they're all listed so the agent knows both variants exist and can
+// pick whichever matches its host shell.
 func renderToolList(wp *workpath.Workpath) string {
 	if len(wp.Tools) == 0 {
 		return ""
@@ -97,7 +99,15 @@ func renderToolList(wp *workpath.Workpath) string {
 		if desc == "" {
 			desc = "(no description)"
 		}
-		fmt.Fprintf(&b, "- `%s` — %s (`%s`)\n", t.Name, desc, t.Script)
+		scripts := t.AllScripts()
+		switch len(scripts) {
+		case 0:
+			fmt.Fprintf(&b, "- `%s` — %s\n", t.Name, desc)
+		case 1:
+			fmt.Fprintf(&b, "- `%s` — %s (`%s`)\n", t.Name, desc, scripts[0])
+		default:
+			fmt.Fprintf(&b, "- `%s` — %s (`%s`)\n", t.Name, desc, strings.Join(scripts, "`, `"))
+		}
 	}
 	return b.String()
 }

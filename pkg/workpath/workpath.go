@@ -56,11 +56,31 @@ type Workpath struct {
 }
 
 // Tool is a shell script registered as an agent-callable command.
+//
+// A single logical tool may have multiple script files when the author
+// supplies platform-paired variants (e.g. inventory.sh + inventory.ps1
+// living side-by-side). Loaders merge these into one Tool: Script holds
+// the primary (.sh preferred) for back-compat, Scripts holds every
+// script file targets should copy into the sandbox.
 type Tool struct {
-	Name        string // identifier (e.g. "file_summary")
-	Description string // single line, surfaced to the agent
-	Script      string // path relative to SourceDir (e.g. "tools/file_summary.sh")
-	Shell       string // "bash" for .sh, "pwsh" for .ps1; inferred from extension
+	Name        string   // identifier (e.g. "file_summary")
+	Description string   // single line, surfaced to the agent
+	Script      string   // primary script path (e.g. "tools/file_summary.sh")
+	Scripts     []string // all script files; len > 1 = platform-paired variants
+	Shell       string   // "bash" for .sh, "pwsh" for .ps1; inferred from Script
+}
+
+// AllScripts returns every script path the tool ships. Equivalent to
+// Scripts when set; falls back to [Script] for back-compat / manifest-
+// declared tools.
+func (t Tool) AllScripts() []string {
+	if len(t.Scripts) > 0 {
+		return t.Scripts
+	}
+	if t.Script != "" {
+		return []string{t.Script}
+	}
+	return nil
 }
 
 // Agent is a named subagent prompt with an optional tool allowlist.

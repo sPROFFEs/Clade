@@ -206,6 +206,62 @@ func TestAll_Compiles(t *testing.T) {
 	}
 }
 
+func TestTargets_PlatformPairedScriptsAllCopied(t *testing.T) {
+	// Build a tiny workpath on the fly with foo.sh + foo.ps1 paired.
+	src := t.TempDir()
+	tools := filepath.Join(src, "tools")
+	if err := os.MkdirAll(tools, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "mission.md"),
+		[]byte("# pair\n\nPaired-scripts test mission.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tools, "foo.sh"),
+		[]byte("#!/bin/sh\n# foo bash\necho hi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tools, "foo.ps1"),
+		[]byte("# foo powershell\nWrite-Host hi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	wp, err := workpath.LoadDir(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := workpath.Validate(wp); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, name := range []string{"claude", "codex", "gemini", "generic", "mika"} {
+		t.Run(name, func(t *testing.T) {
+			out := t.TempDir()
+			tgt, _ := Get(name)
+			if err := tgt.Compile(wp, out); err != nil {
+				t.Fatalf("Compile: %v", err)
+			}
+			// Both scripts must land in the output — at SOME path under out.
+			shFound, ps1Found := false, false
+			_ = filepath.WalkDir(out, func(p string, d os.DirEntry, err error) error {
+				if err != nil || d.IsDir() {
+					return nil
+				}
+				if strings.HasSuffix(p, "foo.sh") {
+					shFound = true
+				}
+				if strings.HasSuffix(p, "foo.ps1") {
+					ps1Found = true
+				}
+				return nil
+			})
+			if !shFound || !ps1Found {
+				t.Errorf("%s target: shFound=%v ps1Found=%v — both should be copied", name, shFound, ps1Found)
+			}
+		})
+	}
+}
+
 func TestKebab(t *testing.T) {
 	cases := map[string]string{
 		"foo_bar":    "foo-bar",

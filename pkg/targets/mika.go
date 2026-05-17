@@ -46,10 +46,12 @@ func (mikaTarget) Compile(wp *workpath.Workpath, outDir string) error {
 	}
 
 	for _, t := range wp.Tools {
-		src := filepath.Join(wp.SourceDir, filepath.FromSlash(t.Script))
-		dst := filepath.Join(root, "tools", filepath.Base(t.Script))
-		if err := copyFile(src, dst); err != nil {
-			return fmt.Errorf("copy tool %s: %w", t.Name, err)
+		for _, scriptRel := range t.AllScripts() {
+			src := filepath.Join(wp.SourceDir, filepath.FromSlash(scriptRel))
+			dst := filepath.Join(root, "tools", filepath.Base(scriptRel))
+			if err := copyFile(src, dst); err != nil {
+				return fmt.Errorf("copy tool %s: %w", t.Name, err)
+			}
 		}
 	}
 

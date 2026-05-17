@@ -162,27 +162,78 @@ func discoverTools(dir string) ([]Tool, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read tools/: %w", err)
 	}
-	var tools []Tool
+
+	// Group by basename so platform-paired scripts (foo.sh + foo.ps1) end
+	// up as a single Tool with two script files. Without this the
+	// validator complains about duplicate tool names.
+	type group struct {
+		name        string
+		description string
+		scripts     []string // relative paths
+	}
+	groups := map[string]*group{}
+	var order []string
+
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
 		}
-		name := e.Name()
-		ext := strings.ToLower(filepath.Ext(name))
+		fname := e.Name()
+		ext := strings.ToLower(filepath.Ext(fname))
 		if ext != ".sh" && ext != ".ps1" {
 			continue
 		}
-		path := filepath.Join(toolsDir, name)
+		base := strings.TrimSuffix(fname, ext)
+		rel := filepath.ToSlash(filepath.Join("tools", fname))
+		path := filepath.Join(toolsDir, fname)
 		desc := firstCommentLine(path)
+
+		g, ok := groups[base]
+		if !ok {
+			g = &group{name: base}
+			groups[base] = g
+			order = append(order, base)
+		}
+		g.scripts = append(g.scripts, rel)
+		// First non-empty description wins — keeps the author in control
+		// when they document only one of the two scripts.
+		if g.description == "" {
+			g.description = desc
+		}
+	}
+
+	tools := make([]Tool, 0, len(groups))
+	for _, base := range order {
+		g := groups[base]
+		// Prefer .sh as the "primary" script so Shell defaults to bash;
+		// .ps1 is the Windows fallback that targets also copy.
+		sort.Slice(g.scripts, func(i, j int) bool {
+			return scriptPriority(g.scripts[i]) < scriptPriority(g.scripts[j])
+		})
+		primary := g.scripts[0]
 		tools = append(tools, Tool{
-			Name:        strings.TrimSuffix(name, ext),
-			Description: desc,
-			Script:      filepath.ToSlash(filepath.Join("tools", name)),
-			Shell:       inferShell(name),
+			Name:        base,
+			Description: g.description,
+			Script:      primary,
+			Scripts:     g.scripts,
+			Shell:       inferShell(primary),
 		})
 	}
 	sort.Slice(tools, func(i, j int) bool { return tools[i].Name < tools[j].Name })
 	return tools, nil
+}
+
+// scriptPriority orders script paths so .sh wins over .ps1 wins over
+// anything else when picking a tool's primary script.
+func scriptPriority(s string) int {
+	switch strings.ToLower(filepath.Ext(s)) {
+	case ".sh":
+		return 0
+	case ".ps1":
+		return 1
+	default:
+		return 2
+	}
 }
 
 func discoverAgents(dir string) ([]Agent, error) {
