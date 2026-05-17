@@ -133,7 +133,7 @@ func (m ollamaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.applied {
 				switch msg.String() {
 				case "esc", "enter":
-					return m, wrap(newWorkspacesModel(m.cfg))
+					return m, wrap(newChatListModel(m.cfg))
 				}
 			}
 		}
@@ -155,7 +155,7 @@ func (m ollamaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m ollamaModel) updateEndpoint(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc:
-		return m, wrap(newWorkspacesModel(m.cfg))
+		return m, wrap(newChatListModel(m.cfg))
 	case tea.KeyEnter:
 		ep := strings.TrimSpace(m.endpoint.Value())
 		if ep == "" {
@@ -260,7 +260,7 @@ func applyOllama(ws launcher.Workspace, s ollama.Settings, claude, codex, openco
 		ws.Settings.Ollama = launcher.OllamaSettings{
 			Endpoint: s.Endpoint, Model: s.Model, WireAPI: s.WireAPI,
 		}
-		if err := launcher.SaveWorkspaceSettings(ws); err != nil {
+		if err := launcher.SaveWorkspaceLikeSettings(ws); err != nil {
 			out = append(out, "✗ claude (workspace): "+err.Error())
 		} else {
 			out = append(out, "✓ claude: per-workspace env will be set on next launch")

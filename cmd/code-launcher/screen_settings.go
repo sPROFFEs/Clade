@@ -85,7 +85,7 @@ func (m settingsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if m.step == 3 {
 			if msg.String() == "esc" || msg.String() == "enter" {
-				return m, wrap(newWorkspacesModel(m.cfg))
+				return m, wrap(newChatListModel(m.cfg))
 			}
 			return m, nil
 		}
@@ -93,7 +93,7 @@ func (m settingsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.Type {
 		case tea.KeyEsc:
 			if m.step == 0 {
-				return m, wrap(newWorkspacesModel(m.cfg))
+				return m, wrap(newChatListModel(m.cfg))
 			}
 			m.step--
 			return m, nil
@@ -114,7 +114,7 @@ func (m settingsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.ws.Settings.Language = strings.TrimSpace(m.language.Value())
 				m.ws.Settings.MemoryEnabled = m.memory
 				m.ws.Settings.OnlineSkills = m.skills
-				if err := launcher.SaveWorkspaceSettings(m.ws); err != nil {
+				if err := launcher.SaveWorkspaceLikeSettings(m.ws); err != nil {
 					m.err = err.Error()
 					return m, nil
 				}

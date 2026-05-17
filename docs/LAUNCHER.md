@@ -1,134 +1,115 @@
-# `code-launcher` — the TUI launcher
+# `code-launcher` — full reference
 
-`code-launcher` is a Bubble Tea TUI that wraps `wpc` to give you an
-agent-launch-pad: pick a workspace, pick an agent CLI, get dropped into
-a sandbox with the workpath already compiled in.
+For an overview, see the [top-level README](../README.md).
 
 ## Status
 
-**Phase 1 + Phase 2 ship in this version.** Phase 3 is the chat-transcript
-capture work that hooks into per-agent session storage; not started yet.
+**v0.2 — chats + templates model** ships in this version.
 
 **What works**
-
-- First-run wizard: prompts for a workspaces root, seeds the bundled
-  samples (`reversing`, `code-review`).
-- Workspace list, select, refresh, **settings edit** (`s`).
-- **Rich create wizard** (5 steps): name → description → language →
-  memory toggle → online-skills list.
-- Per-workspace `sandbox/` auto-created, gitignored.
-- Agent CLI detection via `exec.LookPath` + `--version` probe.
-- `wpc compile --target <claude|codex>` into the sandbox before launch
-  (called as a Go library — no shelling out to `wpc`).
-- **Install missing CLIs from inside the launcher** (`i`): per-OS catalog
-  with pnpm-first dependency handling, prereq checks, command shown
-  before execution, live output stream.
-- **Ollama config screen** (`o`): probes the endpoint, lists models,
-  configures any combination of Claude (per-workspace env injection),
-  Codex (writes `~/.codex/config.toml`), and OpenCode (writes
-  `~/.config/opencode/opencode.json`).
-- **Per-workspace language directive** prepended to compiled
-  `SKILL.md` / `AGENTS.md` so the agent replies in the right language.
-- **Persistent `MEMORY.md`** at the workspace root, copied into the
-  sandbox before launch and synced back after the agent exits.
-- **Online skills** cloned via git into `.claude/skills/<name>/` (or
-  `online-skills/<name>/` for codex/opencode) on every launch.
-- **Chat-log dir**: each launch records a `chats/<timestamp>-<agent>/
-  session.json` blob so past sessions are browseable.
-- Clean TTY hand-off: Bubble Tea quits, the agent inherits stdio.
+- Templates + chats split with auto-migration from v0.1.
+- Home = chat list, sorted by last-used; new / open / delete.
+- New-chat wizard: pick template → name → pick agent (locked).
+- Template management: list / edit settings / new / delete.
+- 5-step new-template wizard (name, description, language, memory, online skills).
+- Per-chat sandbox auto-created and gitignored.
+- Agent CLI detection (`exec.LookPath` + `--version` must succeed).
+- pnpm auto-resolve: corepack enable + pnpm setup + PNPM_HOME injection so installs work on fresh Windows.
+- Install missing CLIs from inside the launcher (`i`).
+- Ollama config screen (`o`): probe + model picker + per-agent apply.
+- Per-chat language directive, MEMORY.md staging/sync-back, online-skill git fetch on every launch.
+- Clean TTY hand-off; chat lastUsed bumped after the agent exits.
 
 **Phase 3 (not started)**
+- Transcript browser (per-agent adapter for `~/.claude/projects/`, `~/.codex/sessions/`, ...).
+- Zip-archive online skills (git-only today).
+- Per-chat agent override (locked at creation today).
+- Rich chat search / tagging.
 
-- Actual transcript capture (each agent stores transcripts differently;
-  needs per-agent adapters).
-- Zip-archive online-skills support (currently git-only).
-- Per-workspace agent-CLI installation pin (use a specific version
-  per workspace).
+## Past chatlog review
 
-## Install
+The launcher does not capture agent transcripts itself. Each chat has a
+**stable cwd** under `<root>/chats/<chat-id>/sandbox/`, so when you
+re-open a chat:
 
-### From source
+| Agent      | What happens                                                                 |
+|------------|------------------------------------------------------------------------------|
+| Claude Code| Sees the same project-hash (cwd-derived). `claude /sessions` lists past sessions; `claude -c` continues the most recent. |
+| Codex CLI  | `codex resume` from the chat dir picks up its per-project session history.   |
+| OpenCode   | `opencode --continue` from the chat dir resumes the most recent.             |
 
-```sh
-git clone <repo>
-cd skills-project
-go build -o code-launcher ./cmd/code-launcher      # code-launcher.exe on Windows
-./code-launcher
-```
+The MEMORY.md the launcher syncs back gives you a portable,
+agent-agnostic place to keep notes that survive even if the agent's
+session store is wiped.
 
-### From a release archive
-
-Unpack the `dist/<os>-<arch>/` bundle from `scripts/build.sh` anywhere.
-Run the binary from inside the bundle — `samples/` is sitting next to it,
-so first-run can seed it.
-
-```sh
-tar -xzf code-launcher-0.1.0-linux-amd64.tar.gz
-cd linux-amd64
-./code-launcher
-```
-
-## Configuration
-
-| File                                          | Holds                                          |
-|-----------------------------------------------|------------------------------------------------|
-| `$XDG_CONFIG_HOME/code-launcher/config.json` (Linux)  | `workspacesRoot`, `lastAgent`, `wpcBinary?`   |
-| `~/Library/Application Support/code-launcher/...` (macOS) | same                                       |
-| `%AppData%de-launcher\config.json` (Windows)       | same                                           |
-| `<workspaces-root>/<name>/workpath/`          | wpc source (`mission.md`, `playbook.md`, …)    |
-| `<workspaces-root>/<name>/sandbox/`           | Agent cwd; compiled artifacts; gitignored      |
-| `<workspaces-root>/<name>/workspace.json`     | Future: `language`, `onlineSkills[]`, `memoryEnabled` |
-| `<workspaces-root>/<name>/chats/`             | Reserved for Phase 2 transcript storage        |
-
-## End-to-end launch sequence
+## On-disk layout
 
 ```
-User picks workspace "reversing" → picks Codex CLI
-                            │
-                            ▼
-   targets.Get("codex").Compile(wp, <ws>/sandbox)
-                            │
-                            ▼
-        <ws>/sandbox/AGENTS.md            ← Codex reads this on every prompt
-        <ws>/sandbox/AGENTS.assets/...    ← Tools + subagent prompts
-        <ws>/sandbox/SANDBOX.md     ← Orientation file for the user
-                            │
-                            ▼
-            Bubble Tea quits; `codex` spawned with cwd=<ws>/sandbox
-                            │
-                            ▼
-              Agent inherits stdin/stdout/stderr; user takes over
+<root>/
+├── templates/
+│   └── <name>/
+│       ├── workpath/                  read-only wpc source
+│       └── template.json              default settings (language, memory, online skills, ollama)
+└── chats/
+    └── <chat-id>/                     <UTC-timestamp>-<slug>
+        ├── chat.json                  {label, template, agent, createdAt, lastUsed, settings}
+        ├── workpath/                  cloned from template at creation
+        ├── sandbox/                   agent cwd; compiled artifacts
+        ├── sessions/<ts>-<agent>/     per-launch metadata
+        └── MEMORY.md                  persistent agent memory
 ```
 
-For **Claude Code** the target is `claude`, which writes
-`<ws>/sandbox/.claude/skills/<name>/SKILL.md` + `scripts/` plus a sibling
-`.claude/agents/<name>__<agent>.md` tree. Claude Code picks them up on
-session start.
+## Launch sequence
 
-For **OpenCode** the launcher uses the `codex` target (OpenCode reads
-`AGENTS.md` too). A dedicated `opencode` wpc target with native subagent
-support is on the roadmap.
+```
+Home → pick chat → pick agent
+                  │
+                  ▼
+   wpc compiles <chat>/workpath → <chat>/sandbox (target=claude or codex)
+   language directive prepended · MEMORY.md staged · online skills cloned
+                  │
+                  ▼
+   Bubble Tea releases the TTY; agent spawned with cwd=<chat>/sandbox
+                  │
+                  ▼
+   Agent runs interactively · sees the stable cwd, offers session resume
+                  │ (agent exits)
+                  ▼
+   MEMORY.md synced back to <chat>/MEMORY.md
+   chat.json's lastUsed bumped
+   Exit code propagated to the shell
+```
 
 ## Keys
 
-### Workspaces screen
-| Key   | Effect                                |
-|-------|---------------------------------------|
-| ↑/↓ k/j | Move selection                      |
-| enter | Open workspace (or `+ new`)           |
-| s     | Settings for highlighted workspace    |
-| r     | Refresh list                          |
+### Home (chat list)
+| Key       | Effect                              |
+|-----------|-------------------------------------|
+| `↑/↓ k/j` | Move selection                      |
+| `enter`   | Open chat (or `+ new chat`)         |
+| `n`       | New chat                            |
+| `d`       | Delete highlighted chat (confirms)  |
+| `t`       | Template management                 |
+| `r`       | Refresh                             |
+| `ctrl-c`  | Quit                                |
+
+### Template list (`t` from home)
+| Key     | Effect                                            |
+|---------|---------------------------------------------------|
+| `enter` | Edit settings of highlighted template             |
+| `n`     | New template                                      |
+| `d`     | Delete (existing chats are unaffected)            |
+| `esc`   | Back to chats                                     |
 
 ### Agents screen
-| Key   | Effect                                            |
-|-------|---------------------------------------------------|
-| enter | Launch (if installed) or open installer (if not)  |
-| i     | Install / upgrade the highlighted agent           |
-| o     | Open the Ollama configuration screen              |
-| esc   | Back                                              |
+| Key     | Effect                                            |
+|---------|---------------------------------------------------|
+| `enter` | Launch (if installed) or open installer (if not)  |
+| `i`     | Install / upgrade the highlighted agent           |
+| `o`     | Open the Ollama configuration screen              |
 
 ### Anywhere
-| Key   | Effect                  |
-|-------|-------------------------|
-| ctrl-c| Quit immediately        |
-| esc   | Step back one screen    |
+| Key      | Effect                  |
+|----------|-------------------------|
+| `ctrl-c` | Quit immediately        |
+| `esc`    | Step back one screen    |

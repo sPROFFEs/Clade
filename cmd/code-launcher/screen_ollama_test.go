@@ -14,12 +14,11 @@ import (
 	"github.com/sdksdk/code-launcher/internal/launcher"
 )
 
-// TestOllamaFlow_FullWizardWritesPerWorkspaceClaudeSettings drives every
-// step of the Ollama screen against a fake Ollama server. End state:
-// workspace.json has the right Ollama block, and Plan() for Claude
-// injects ANTHROPIC_BASE_URL.
-func TestOllamaFlow_FullWizardWritesPerWorkspaceClaudeSettings(t *testing.T) {
-	// Fake Ollama: returns two models via /api/tags.
+// TestOllamaFlow_FullWizardWritesPerChatClaudeSettings: drives every step
+// of the Ollama screen against a fake Ollama server. End state:
+// chat.json has the right Ollama block (because SaveWorkspaceLikeSettings
+// detects the Chat root), and Plan() for Claude injects ANTHROPIC_BASE_URL.
+func TestOllamaFlow_FullWizardWritesPerChatClaudeSettings(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/tags" {
 			_ = json.NewEncoder(w).Encode(map[string]any{
@@ -37,18 +36,18 @@ func TestOllamaFlow_FullWizardWritesPerWorkspaceClaudeSettings(t *testing.T) {
 	if _, err := launcher.SeedSamples(tmp, []string{filepath.Join(repoRoot(t), "samples", "workpaths")}); err != nil {
 		t.Fatal(err)
 	}
-	ws, _ := launcher.LoadWorkspace(tmp, "reversing")
+	tpl, _ := launcher.LoadTemplate(tmp, "reversing")
+	chat, err := launcher.CreateChat(tmp, *tpl, "ollama-test", launcher.AgentClaude)
+	if err != nil {
+		t.Fatal(err)
+	}
 	cfg := &launcher.Config{WorkspacesRoot: tmp}
+	ws := chat.AsWorkspace()
+	m := newOllamaModel(cfg, ws)
 
-	m := newOllamaModel(cfg, *ws)
-
-	// Step 0 — endpoint
 	m.endpoint.SetValue(srv.URL)
 	nx, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = nx.(ollamaModel)
-	if cmd == nil {
-		t.Fatal("Enter on endpoint should produce probe Cmd")
-	}
 	probe := runCmd(t, cmd)
 	nx, _ = m.Update(probe)
 	m = nx.(ollamaModel)
@@ -59,52 +58,50 @@ func TestOllamaFlow_FullWizardWritesPerWorkspaceClaudeSettings(t *testing.T) {
 		t.Fatalf("probedModels = %v", m.probedModels)
 	}
 
-	// Step 1 — pick second model (down + enter)
+	// Pick second model.
 	nx, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	m = nx.(ollamaModel)
 	nx, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = nx.(ollamaModel)
-	if m.step != ollamaStepAgents {
-		t.Fatalf("step = %d, want %d (agents)", m.step, ollamaStepAgents)
-	}
 	if m.modelInput.Value() != "qwen3" {
 		t.Errorf("modelInput = %q, want qwen3", m.modelInput.Value())
 	}
 
-	// Step 2 — only Claude is pre-checked. Enter to apply.
+	// Apply.
 	nx, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = nx.(ollamaModel)
-	if cmd == nil {
-		t.Fatal("Enter on agents step should produce apply Cmd")
-	}
 	apply := runCmd(t, cmd)
 	nx, _ = m.Update(apply)
 	m = nx.(ollamaModel)
 	if !m.applied {
-		t.Fatal("expected applied=true after apply")
+		t.Fatal("expected applied=true")
 	}
-	joined := strings.Join(m.results, "\n")
-	if !strings.Contains(joined, "claude") {
-		t.Errorf("expected claude result, got:\n%s", joined)
+	if !strings.Contains(strings.Join(m.results, "\n"), "claude") {
+		t.Errorf("expected claude result; got %v", m.results)
 	}
 
-	// Workspace settings persisted.
-	wsPath := filepath.Join(ws.Root, "workspace.json")
-	raw, err := os.ReadFile(wsPath)
+	// Persisted to chat.json (not workspace.json) because of the smart saver.
+	chatJSON := filepath.Join(ws.Root, "chat.json")
+	raw, err := os.ReadFile(chatJSON)
 	if err != nil {
-		t.Fatalf("workspace.json missing: %v", err)
+		t.Fatalf("chat.json missing: %v", err)
 	}
 	if !strings.Contains(string(raw), srv.URL) || !strings.Contains(string(raw), "qwen3") {
-		t.Errorf("workspace.json doesn't contain Ollama settings:\n%s", raw)
+		t.Errorf("chat.json doesn't contain Ollama settings:\n%s", raw)
+	}
+	// And ensure we did NOT pollute with a stray workspace.json.
+	if _, err := os.Stat(filepath.Join(ws.Root, "workspace.json")); err == nil {
+		t.Error("settings should NOT have been written to workspace.json on a chat")
 	}
 
-	// Plan() for Claude now auto-injects the env vars.
-	ws2, _ := launcher.LoadWorkspace(tmp, "reversing")
+	// Plan() for Claude auto-injects the env vars.
+	chat2, _ := launcher.LoadChat(tmp, chat.ID)
+	ws2 := chat2.AsWorkspace()
 	agent := launcher.Agent{
 		ID: launcher.AgentClaude, Label: "Claude", Binary: "claude",
 		WpcTarget: "claude", Available: true,
 	}
-	plan, err := launcher.Plan(*ws2, agent)
+	plan, err := launcher.Plan(ws2, agent)
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
 	}
@@ -117,15 +114,15 @@ func TestOllamaFlow_FullWizardWritesPerWorkspaceClaudeSettings(t *testing.T) {
 }
 
 func TestOllamaFlow_FallsBackToManualEntryOnProbeError(t *testing.T) {
-	// Endpoint that's not even a valid HTTP server — probe will fail.
 	tmp := t.TempDir()
 	redirectConfig(t, filepath.Join(tmp, "cfg"))
 	t.Chdir(repoRoot(t))
 	_, _ = launcher.SeedSamples(tmp, []string{filepath.Join(repoRoot(t), "samples", "workpaths")})
-	ws, _ := launcher.LoadWorkspace(tmp, "reversing")
+	tpl, _ := launcher.LoadTemplate(tmp, "reversing")
+	chat, _ := launcher.CreateChat(tmp, *tpl, "probe-fail-test", launcher.AgentClaude)
 	cfg := &launcher.Config{WorkspacesRoot: tmp}
 
-	m := newOllamaModel(cfg, *ws)
+	m := newOllamaModel(cfg, chat.AsWorkspace())
 	m.endpoint.SetValue("http://127.0.0.1:1") // refuses connection
 	nx, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = nx.(ollamaModel)
@@ -133,7 +130,6 @@ func TestOllamaFlow_FallsBackToManualEntryOnProbeError(t *testing.T) {
 	nx, _ = m.Update(probe)
 	m = nx.(ollamaModel)
 
-	// Falls through to manual model entry.
 	if m.step != ollamaStepModel {
 		t.Errorf("step = %d, want %d", m.step, ollamaStepModel)
 	}

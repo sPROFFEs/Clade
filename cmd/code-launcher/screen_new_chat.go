@@ -1,0 +1,279 @@
+package main
+
+// New-chat flow: pick template → name + pick agent → create + open
+// (jumps straight to agent launch in the new chat's sandbox).
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/sdksdk/code-launcher/internal/launcher"
+)
+
+// --- step 1: pick template -----------------------------------------------
+
+type pickTemplateModel struct {
+	cfg    *launcher.Config
+	items  []launcher.Template
+	cursor int
+	loaded bool
+	err    string
+}
+
+func newPickTemplateModel(cfg *launcher.Config) pickTemplateModel {
+	return pickTemplateModel{cfg: cfg}
+}
+
+type templatesLoadedMsg struct {
+	items []launcher.Template
+	err   error
+}
+
+func (m pickTemplateModel) Init() tea.Cmd {
+	cfg := m.cfg
+	return func() tea.Msg {
+		items, err := launcher.ListTemplates(cfg.WorkspacesRoot)
+		return templatesLoadedMsg{items: items, err: err}
+	}
+}
+
+func (m pickTemplateModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case templatesLoadedMsg:
+		m.loaded = true
+		m.items = msg.items
+		if msg.err != nil {
+			m.err = msg.err.Error()
+		}
+		return m, nil
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "esc":
+			return m, wrap(newChatListModel(m.cfg))
+		case "up", "k":
+			if m.cursor > 0 {
+				m.cursor--
+			}
+		case "down", "j":
+			if m.cursor < len(m.items) {
+				m.cursor++
+			}
+		case "enter":
+			if m.cursor == len(m.items) {
+				return m, wrap(newNewTemplateModel(m.cfg))
+			}
+			if len(m.items) == 0 {
+				return m, nil
+			}
+			return m, wrap(newNewChatFromTemplateModel(m.cfg, m.items[m.cursor]))
+		case "t":
+			return m, wrap(newTemplateListModel(m.cfg))
+		}
+	}
+	return m, nil
+}
+
+func (m pickTemplateModel) View() string {
+	var b strings.Builder
+	b.WriteString(header("New chat — pick a template"))
+	b.WriteString("\n")
+	if !m.loaded {
+		b.WriteString(hintStyle.Render("Loading templates...") + "\n")
+		return b.String()
+	}
+	if m.err != "" {
+		b.WriteString(errorStyle.Render("Error: "+m.err) + "\n\n")
+	}
+	if len(m.items) == 0 {
+		b.WriteString(hintStyle.Render("No templates yet — create one to start chatting.") + "\n\n")
+	}
+	for i, t := range m.items {
+		marker := "  "
+		render := listItemStyle.Render
+		if i == m.cursor {
+			marker = "› "
+			render = listItemSelectedStyle.Render
+		}
+		b.WriteString(render(marker+t.Name) + "\n")
+		if i == m.cursor && t.Description != "" {
+			b.WriteString(descStyle.Render(t.Description) + "\n")
+		}
+	}
+	// "+ new template" pseudo-row
+	marker := "  "
+	r := listItemStyle.Render
+	if m.cursor == len(m.items) {
+		marker = "› "
+		r = listItemSelectedStyle.Render
+	}
+	b.WriteString(r(marker+"+ new template…") + "\n")
+	b.WriteString(helpStyle.Render("↑/↓ select · enter pick · t manage templates · esc back"))
+	return b.String()
+}
+
+// --- step 2: name + pick agent -------------------------------------------
+
+type newChatFromTemplateModel struct {
+	cfg      *launcher.Config
+	template launcher.Template
+
+	label  textinput.Model
+	step   int // 0: label, 1: agent
+	agents []launcher.Agent
+	cursor int
+	err    string
+}
+
+func newNewChatFromTemplateModel(cfg *launcher.Config, tpl launcher.Template) newChatFromTemplateModel {
+	ti := textinput.New()
+	ti.Placeholder = "e.g. cve-fix · pr-123-review · pong-port"
+	ti.Width = 60
+	ti.CharLimit = 80
+	ti.SetValue(tpl.Name + "-chat")
+	ti.Focus()
+	return newChatFromTemplateModel{cfg: cfg, template: tpl, label: ti}
+}
+
+type detectedAgentsMsg struct{ items []launcher.Agent }
+
+func (m newChatFromTemplateModel) Init() tea.Cmd { return textinput.Blink }
+
+func (m newChatFromTemplateModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case detectedAgentsMsg:
+		m.agents = msg.items
+		// Default cursor to last-used agent if available.
+		if m.cfg.LastAgent != "" {
+			for i, a := range m.agents {
+				if string(a.ID) == m.cfg.LastAgent && a.Available {
+					m.cursor = i
+					break
+				}
+			}
+		}
+		return m, nil
+	case tea.KeyMsg:
+		switch m.step {
+		case 0:
+			switch msg.Type {
+			case tea.KeyEsc:
+				return m, wrap(newPickTemplateModel(m.cfg))
+			case tea.KeyEnter:
+				if strings.TrimSpace(m.label.Value()) == "" {
+					m.err = "name cannot be empty"
+					return m, nil
+				}
+				m.step = 1
+				m.label.Blur()
+				return m, func() tea.Msg {
+					ctx, cancel := context.WithCancel(context.Background())
+					defer cancel()
+					return detectedAgentsMsg{items: launcher.DetectAgents(ctx)}
+				}
+			}
+			var cmd tea.Cmd
+			m.label, cmd = m.label.Update(msg)
+			return m, cmd
+		case 1:
+			switch msg.String() {
+			case "esc":
+				m.step = 0
+				m.label.Focus()
+				return m, textinput.Blink
+			case "up", "k":
+				if m.cursor > 0 {
+					m.cursor--
+				}
+			case "down", "j":
+				if m.cursor < len(m.agents)-1 {
+					m.cursor++
+				}
+			case "enter":
+				if m.cursor >= len(m.agents) {
+					return m, nil
+				}
+				a := m.agents[m.cursor]
+				if !a.Available {
+					// Same convention as agents picker: jump to installer.
+					stub := launcher.Workspace{
+						Name: m.template.Name, Root: m.cfg.WorkspacesRoot,
+					}
+					return m, wrap(newInstallModel(m.cfg, stub, a.ID))
+				}
+				cfg := m.cfg
+				tpl := m.template
+				label := strings.TrimSpace(m.label.Value())
+				agentID := a.ID
+				return m, func() tea.Msg {
+					chat, err := launcher.CreateChat(cfg.WorkspacesRoot, tpl, label, agentID)
+					if err != nil {
+						return errMsg{err: err}
+					}
+					return screenDoneMsg{next: newAgentsModel(cfg, chat.AsWorkspace())}
+				}
+			}
+		}
+	case errMsg:
+		m.step = 0
+		m.err = msg.err.Error()
+		m.label.Focus()
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m newChatFromTemplateModel) View() string {
+	var b strings.Builder
+	b.WriteString(header(fmt.Sprintf("New chat from %q", m.template.Name)))
+	b.WriteString("\n")
+	if m.step >= 0 {
+		b.WriteString(subtitleStyle.Render("Template: ") + m.template.Name + "\n")
+		if m.template.Description != "" {
+			b.WriteString(descStyle.Render(m.template.Description) + "\n")
+		}
+		b.WriteString("\n")
+	}
+	switch m.step {
+	case 0:
+		b.WriteString(inputLabelStyle.Render("Chat name: "))
+		b.WriteString(m.label.View() + "\n")
+		b.WriteString(descStyle.Render(
+			"A timestamp is added to make the directory unique; this name is what " +
+				"shows in the home list.") + "\n")
+	case 1:
+		b.WriteString(subtitleStyle.Render("Name: ") + m.label.Value() + "\n\n")
+		b.WriteString(inputLabelStyle.Render("Agent (locked at chat creation):") + "\n")
+		if m.agents == nil {
+			b.WriteString(hintStyle.Render("Scanning PATH for agent CLIs...") + "\n")
+		}
+		for i, a := range m.agents {
+			marker := "  "
+			r := listItemStyle.Render
+			if i == m.cursor {
+				marker = "› "
+				r = listItemSelectedStyle.Render
+			}
+			status := availableStyle.Render("available")
+			if !a.Available {
+				status = missingStyle.Render("not installed")
+				if a.ProbeError != "" {
+					status = missingStyle.Render("broken install")
+				}
+			}
+			line := marker + a.Label + " " + status
+			if a.Version != "" {
+				line += " " + versionStyle.Render("("+a.Version+")")
+			}
+			b.WriteString(r(line) + "\n")
+		}
+	}
+	if m.err != "" {
+		b.WriteString("\n" + errorStyle.Render("Error: "+m.err))
+	}
+	b.WriteString(helpStyle.Render("enter to continue · esc back"))
+	return b.String()
+}

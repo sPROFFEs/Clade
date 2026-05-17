@@ -2,13 +2,8 @@ package main
 
 // Integration tests that drive every Bubble Tea screen with synthetic
 // messages, verifying transitions end-to-end without needing a TTY.
-//
-// The shape is always:
-//   1. construct the model
-//   2. exec its Init() Cmd (if any) and feed the resulting msg back
-//   3. send keys / synthetic msgs
-//   4. assert on (a) the next screen returned via screenDoneMsg.next,
-//      (b) the View() output, or (c) side effects on disk
+// Rewritten for the chats/templates split (v0.2): the home screen is
+// chatListModel, new chats clone from templates via newPickTemplateModel.
 
 import (
 	"path/filepath"
@@ -31,9 +26,6 @@ func repoRoot(t *testing.T) string {
 	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
 }
 
-// runCmd executes a tea.Cmd and returns the message it produced. tea.Cmds
-// are just `func() tea.Msg` under the hood so this is trivial — we don't
-// need a Bubble Tea Program to drive a single Cmd.
 func runCmd(t *testing.T, cmd tea.Cmd) tea.Msg {
 	t.Helper()
 	if cmd == nil {
@@ -42,7 +34,6 @@ func runCmd(t *testing.T, cmd tea.Cmd) tea.Msg {
 	return cmd()
 }
 
-// redirectConfig points os.UserConfigDir at tmp on whatever OS this is.
 func redirectConfig(t *testing.T, tmp string) {
 	t.Helper()
 	switch runtime.GOOS {
@@ -55,21 +46,29 @@ func redirectConfig(t *testing.T, tmp string) {
 	}
 }
 
-func TestFirstRun_EnterSeedsSamplesAndAdvances(t *testing.T) {
+// seededRoot returns a workspaces root with the bundled templates seeded.
+func seededRoot(t *testing.T) string {
+	t.Helper()
+	tmp := t.TempDir()
+	if _, err := launcher.SeedSamples(tmp, []string{filepath.Join(repoRoot(t), "samples", "workpaths")}); err != nil {
+		t.Fatal(err)
+	}
+	return tmp
+}
+
+func TestFirstRun_EnterSeedsTemplatesAndAdvances(t *testing.T) {
 	tmp := t.TempDir()
 	wsRoot := filepath.Join(tmp, "ws")
 	redirectConfig(t, filepath.Join(tmp, "cfg"))
-	t.Chdir(repoRoot(t)) // makes the cwd-relative samples candidate hit
+	t.Chdir(repoRoot(t))
 
 	m := newFirstRun()
 	m.input.SetValue(wsRoot)
 
-	// Enter triggers seeding + config save.
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatal("firstRun Enter should return a Cmd")
 	}
-	// The model snapshot returned still shows the "working" state.
 	if !strings.Contains(next.View(), "Seeding samples") {
 		t.Errorf("expected status line; got: %s", next.View())
 	}
@@ -77,248 +76,182 @@ func TestFirstRun_EnterSeedsSamplesAndAdvances(t *testing.T) {
 	msg := runCmd(t, cmd)
 	done, ok := msg.(screenDoneMsg)
 	if !ok {
-		t.Fatalf("expected screenDoneMsg, got %T: %+v", msg, msg)
+		t.Fatalf("expected screenDoneMsg, got %T", msg)
 	}
-	if done.next == nil {
-		t.Fatal("expected next screen")
-	}
-	if _, isWS := done.next.(workspacesModel); !isWS {
-		t.Errorf("expected workspacesModel, got %T", done.next)
+	if _, isChatList := done.next.(chatListModel); !isChatList {
+		t.Errorf("expected chatListModel, got %T", done.next)
 	}
 
-	// Config persisted with the right root.
-	cfg, err := launcher.LoadConfig()
-	if err != nil || cfg == nil {
-		t.Fatalf("LoadConfig: cfg=%v err=%v", cfg, err)
-	}
-	if cfg.WorkspacesRoot != wsRoot {
-		t.Errorf("WorkspacesRoot = %q, want %q", cfg.WorkspacesRoot, wsRoot)
-	}
-
-	// Samples landed on disk.
-	wss, err := launcher.ListWorkspaces(wsRoot)
+	tpls, err := launcher.ListTemplates(wsRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(wss) < 2 {
-		t.Errorf("expected at least 2 seeded workspaces, got %d", len(wss))
+	if len(tpls) < 2 {
+		t.Errorf("expected at least 2 seeded templates, got %d", len(tpls))
 	}
 }
 
-func TestWorkspacesScreen_NewItemNavigation(t *testing.T) {
-	tmp := t.TempDir()
-	redirectConfig(t, filepath.Join(tmp, "cfg"))
-	t.Chdir(repoRoot(t))
-
-	// Seed two workspaces directly through the library.
-	seeded, err := launcher.SeedSamples(tmp, []string{filepath.Join(repoRoot(t), "samples", "workpaths")})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(seeded) < 2 {
-		t.Fatalf("seed needs at least 2; got %v", seeded)
-	}
+func TestChatListModel_EmptyRoot_ShowsNewChatEntry(t *testing.T) {
+	tmp := seededRoot(t)
+	redirectConfig(t, t.TempDir())
 
 	cfg := &launcher.Config{WorkspacesRoot: tmp}
-	m := newWorkspacesModel(cfg)
-
-	// Init returns the "load workspaces" Cmd.
+	m := newChatListModel(cfg)
 	loaded := runCmd(t, m.Init())
 	next, _ := m.Update(loaded)
-	m = next.(workspacesModel)
+	m = next.(chatListModel)
 
-	if len(m.items) != 2 {
-		t.Fatalf("expected 2 items, got %d", len(m.items))
+	if len(m.items) != 0 {
+		t.Errorf("expected 0 chats in a freshly-seeded root, got %d", len(m.items))
 	}
-
-	// Pressing 'down' twice should land on the synthetic "+ new workspace" entry
-	// (cursor == len(items)).
-	for i := 0; i < 2; i++ {
-		nx, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
-		m = nx.(workspacesModel)
-	}
-	if m.cursor != len(m.items) {
-		t.Errorf("cursor = %d, want %d (the + new entry)", m.cursor, len(m.items))
-	}
-
-	// Enter on the + entry transitions to newWorkspaceModel.
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	done := runCmd(t, cmd).(screenDoneMsg)
-	if _, ok := done.next.(newWorkspaceModel); !ok {
-		t.Errorf("expected newWorkspaceModel, got %T", done.next)
+	view := m.View()
+	if !strings.Contains(view, "+ new chat") {
+		t.Errorf("home should expose '+ new chat'; got:\n%s", view)
 	}
 }
 
-func TestWorkspacesScreen_EnterOnExistingPicksAgents(t *testing.T) {
-	tmp := t.TempDir()
-	redirectConfig(t, filepath.Join(tmp, "cfg"))
-	t.Chdir(repoRoot(t))
-
-	if _, err := launcher.SeedSamples(tmp, []string{filepath.Join(repoRoot(t), "samples", "workpaths")}); err != nil {
-		t.Fatal(err)
-	}
+func TestChatListModel_EnterOnNewOpensTemplatePicker(t *testing.T) {
+	tmp := seededRoot(t)
+	redirectConfig(t, t.TempDir())
 	cfg := &launcher.Config{WorkspacesRoot: tmp}
-	m := newWorkspacesModel(cfg)
-	loaded := runCmd(t, m.Init())
-	next, _ := m.Update(loaded)
-	m = next.(workspacesModel)
-
-	// Cursor starts at 0 — pick the first workspace.
+	m := newChatListModel(cfg)
+	next, _ := m.Update(runCmd(t, m.Init()))
+	m = next.(chatListModel)
+	// Cursor is at 0 == "+ new chat" since items is empty.
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	done := runCmd(t, cmd).(screenDoneMsg)
-	agents, ok := done.next.(agentsModel)
-	if !ok {
-		t.Fatalf("expected agentsModel, got %T", done.next)
-	}
-	if agents.ws.Name != m.items[0].Name {
-		t.Errorf("agentsModel got ws %q, expected %q", agents.ws.Name, m.items[0].Name)
-	}
-}
-
-func TestNewWorkspaceModel_FullWizardCreates(t *testing.T) {
-	tmp := t.TempDir()
-	redirectConfig(t, filepath.Join(tmp, "cfg"))
-
-	cfg := &launcher.Config{WorkspacesRoot: tmp}
-	m := newNewWorkspaceModel(cfg)
-
-	// step 0 — name
-	m.name.SetValue("integration-test")
-	nx, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m = nx.(newWorkspaceModel)
-	if m.step != 1 {
-		t.Fatalf("after name step = %d, want 1", m.step)
-	}
-
-	// step 1 — description
-	m.description.SetValue("scaffolded by the integration test")
-	nx, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m = nx.(newWorkspaceModel)
-	if m.step != 2 {
-		t.Fatalf("after desc step = %d, want 2", m.step)
-	}
-
-	// step 2 — language
-	m.language.SetValue("Italian")
-	nx, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m = nx.(newWorkspaceModel)
-	if m.step != 3 {
-		t.Fatalf("after lang step = %d, want 3", m.step)
-	}
-
-	// step 3 — memory toggle: y
-	nx, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
-	m = nx.(newWorkspaceModel)
-	if m.step != 4 || !m.memory {
-		t.Fatalf("after memory y: step=%d memory=%v", m.step, m.memory)
-	}
-
-	// step 4 — add one skill, then blank Enter to finalize
-	m.skillInput.SetValue("https://example.com/skill.git")
-	nx, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m = nx.(newWorkspaceModel)
-	if len(m.skills) != 1 {
-		t.Fatalf("skills = %v", m.skills)
-	}
-	nx, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m = nx.(newWorkspaceModel)
 	if cmd == nil {
-		t.Fatal("finalize Enter must produce a Cmd")
+		t.Fatal("Enter on '+ new chat' should produce a Cmd")
 	}
 	done := runCmd(t, cmd).(screenDoneMsg)
-	agents, ok := done.next.(agentsModel)
-	if !ok {
-		t.Fatalf("expected agentsModel, got %T", done.next)
-	}
-	if agents.ws.Name != "integration-test" {
-		t.Errorf("ws.Name = %q", agents.ws.Name)
-	}
-
-	// All settings persisted.
-	loaded, err := launcher.LoadWorkspace(tmp, "integration-test")
-	if err != nil || loaded == nil {
-		t.Fatalf("LoadWorkspace: %v %v", err, loaded)
-	}
-	if loaded.Settings.Language != "Italian" {
-		t.Errorf("Language = %q", loaded.Settings.Language)
-	}
-	if !loaded.Settings.MemoryEnabled {
-		t.Error("MemoryEnabled not persisted")
-	}
-	if len(loaded.Settings.OnlineSkills) != 1 || loaded.Settings.OnlineSkills[0] != "https://example.com/skill.git" {
-		t.Errorf("OnlineSkills = %v", loaded.Settings.OnlineSkills)
+	if _, ok := done.next.(pickTemplateModel); !ok {
+		t.Errorf("expected pickTemplateModel, got %T", done.next)
 	}
 }
 
-func TestNewWorkspaceModel_BadNameSurfacesErrorAtFinalize(t *testing.T) {
-	tmp := t.TempDir()
-	redirectConfig(t, filepath.Join(tmp, "cfg"))
+func TestChatListModel_TKeyOpensTemplateList(t *testing.T) {
+	tmp := seededRoot(t)
+	redirectConfig(t, t.TempDir())
 	cfg := &launcher.Config{WorkspacesRoot: tmp}
-	m := newNewWorkspaceModel(cfg)
+	m := newChatListModel(cfg)
+	next, _ := m.Update(runCmd(t, m.Init()))
+	m = next.(chatListModel)
 
-	// Drive through the wizard with a forbidden name (caps + space).
-	m.name.SetValue("Bad Name")
-	m.description.SetValue("anything")
-	// step 0 → 1 → 2 → 3 (memory, just press enter to accept default)
-	// → 4 (skills, blank Enter to finalize)
-	for i := 0; i < 3; i++ {
-		nx, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-		m = nx.(newWorkspaceModel)
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
+	if cmd == nil {
+		t.Fatal("'t' should open template list")
 	}
-	// Now on step 3 (memory). Send Enter to advance to step 4.
-	nx, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m = nx.(newWorkspaceModel)
-	if m.step != 4 {
-		t.Fatalf("after walking through wizard, step = %d, want 4", m.step)
+	done := runCmd(t, cmd).(screenDoneMsg)
+	if _, ok := done.next.(templateListModel); !ok {
+		t.Errorf("expected templateListModel, got %T", done.next)
 	}
-	// Blank Enter → finalize → CreateWorkspace fails on bad name.
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+}
+
+func TestNewChatFromTemplate_LabelPlusAgentCreatesChat(t *testing.T) {
+	tmp := seededRoot(t)
+	redirectConfig(t, t.TempDir())
+	cfg := &launcher.Config{WorkspacesRoot: tmp}
+
+	tpl, err := launcher.LoadTemplate(tmp, "reversing")
+	if err != nil || tpl == nil {
+		t.Fatalf("LoadTemplate: %v %v", err, tpl)
+	}
+	m := newNewChatFromTemplateModel(cfg, *tpl)
+	m.label.SetValue("integration-chat")
+
+	// step 0 → 1 (Enter triggers agent detection)
+	nx, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = nx.(newChatFromTemplateModel)
+	if cmd == nil {
+		t.Fatal("expected agent-detect Cmd")
+	}
+	// Skip the real detection: inject a known-available fake.
+	m.agents = []launcher.Agent{
+		{ID: launcher.AgentClaude, Label: "Claude", Binary: fakeCmd(), WpcTarget: "claude", Available: true},
+	}
+
+	nx, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = nx.(newChatFromTemplateModel)
+	if cmd == nil {
+		t.Fatal("expected create-chat Cmd")
+	}
 	msg := runCmd(t, cmd)
-	if _, isErr := msg.(errMsg); !isErr {
-		t.Fatalf("expected errMsg from invalid name at finalize, got %T", msg)
+	done, ok := msg.(screenDoneMsg)
+	if !ok {
+		t.Fatalf("expected screenDoneMsg, got %T %+v", msg, msg)
 	}
-	// Feed the errMsg back; should bounce to step 0.
-	nx2, _ := m.Update(msg)
-	m2 := nx2.(newWorkspaceModel)
-	if m2.step != 0 {
-		t.Errorf("after errMsg step = %d, want 0", m2.step)
+	if _, ok := done.next.(agentsModel); !ok {
+		t.Fatalf("expected agentsModel after chat creation, got %T", done.next)
 	}
-	if m2.err == "" {
-		t.Error("expected non-empty err after invalid name")
+
+	chats, err := launcher.ListChats(tmp)
+	if err != nil || len(chats) != 1 {
+		t.Fatalf("ListChats: chats=%+v err=%v", chats, err)
+	}
+	if chats[0].Label != "integration-chat" {
+		t.Errorf("label = %q", chats[0].Label)
+	}
+	if chats[0].Template != "reversing" {
+		t.Errorf("template = %q", chats[0].Template)
+	}
+	if chats[0].AgentID != launcher.AgentClaude {
+		t.Errorf("agent = %q", chats[0].AgentID)
+	}
+}
+
+func TestChatListModel_DeleteFlowConfirmsAndRemoves(t *testing.T) {
+	tmp := seededRoot(t)
+	redirectConfig(t, t.TempDir())
+	cfg := &launcher.Config{WorkspacesRoot: tmp}
+	tpl, _ := launcher.LoadTemplate(tmp, "reversing")
+	_, err := launcher.CreateChat(tmp, *tpl, "throwaway", launcher.AgentClaude)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := newChatListModel(cfg)
+	next, _ := m.Update(runCmd(t, m.Init()))
+	m = next.(chatListModel)
+	if len(m.items) != 1 {
+		t.Fatalf("expected 1 chat, got %d", len(m.items))
+	}
+
+	// 'd' → confirm prompt
+	nx, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	m = nx.(chatListModel)
+	if !m.deleteAsk {
+		t.Fatal("'d' should ask for confirmation")
+	}
+	// 'y' → actually delete + refresh
+	nx, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	m = nx.(chatListModel)
+	if cmd == nil {
+		t.Fatal("confirm should trigger reload Cmd")
+	}
+	runCmd(t, cmd)
+	chats, _ := launcher.ListChats(tmp)
+	if len(chats) != 0 {
+		t.Errorf("expected chat deleted, got %d remaining", len(chats))
 	}
 }
 
 func TestAgentsScreen_EnterOnAvailableProducesLaunch(t *testing.T) {
-	tmp := t.TempDir()
-	redirectConfig(t, filepath.Join(tmp, "cfg"))
-	t.Chdir(repoRoot(t))
-
-	if _, err := launcher.SeedSamples(tmp, []string{filepath.Join(repoRoot(t), "samples", "workpaths")}); err != nil {
+	tmp := seededRoot(t)
+	redirectConfig(t, t.TempDir())
+	tpl, _ := launcher.LoadTemplate(tmp, "reversing")
+	chat, err := launcher.CreateChat(tmp, *tpl, "launch-test", launcher.AgentClaude)
+	if err != nil {
 		t.Fatal(err)
 	}
-	ws, err := launcher.LoadWorkspace(tmp, "reversing")
-	if err != nil || ws == nil {
-		t.Fatalf("LoadWorkspace: %v %v", err, ws)
-	}
 	cfg := &launcher.Config{WorkspacesRoot: tmp}
-
-	m := newAgentsModel(cfg, *ws)
-
-	// Inject a known, available agent so this test doesn't depend on what's
-	// installed on the dev box. Skip Init's real detection.
+	ws := chat.AsWorkspace()
+	m := newAgentsModel(cfg, ws)
 	m.items = []launcher.Agent{
 		{
-			ID:        launcher.AgentCodex,
-			Label:     "Codex CLI (fake)",
-			Binary:    fakeCmd(),
-			WpcTarget: "codex",
-			Available: true,
-			Version:   "fake",
+			ID: launcher.AgentClaude, Label: "Claude Code (fake)",
+			Binary: fakeCmd(), WpcTarget: "claude", Available: true, Version: "fake",
 		},
 	}
 	m.loading = false
 
-	// Enter on cursor 0 → Cmd that compiles + returns launch plan.
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	msg := runCmd(t, cmd)
 	done, ok := msg.(screenDoneMsg)
@@ -331,22 +264,15 @@ func TestAgentsScreen_EnterOnAvailableProducesLaunch(t *testing.T) {
 	if done.launch.Dir != ws.SandboxDir {
 		t.Errorf("launch.Dir = %q, want %q", done.launch.Dir, ws.SandboxDir)
 	}
-	if done.updateCfg == nil || done.updateCfg.LastAgent != string(launcher.AgentCodex) {
-		t.Errorf("updateCfg.LastAgent = %+v", done.updateCfg)
-	}
 }
 
 func TestAgentsScreen_EnterOnUnavailableRoutesToInstall(t *testing.T) {
-	tmp := t.TempDir()
-	redirectConfig(t, filepath.Join(tmp, "cfg"))
-	t.Chdir(repoRoot(t))
-	if _, err := launcher.SeedSamples(tmp, []string{filepath.Join(repoRoot(t), "samples", "workpaths")}); err != nil {
-		t.Fatal(err)
-	}
-	ws, _ := launcher.LoadWorkspace(tmp, "reversing")
+	tmp := seededRoot(t)
+	redirectConfig(t, t.TempDir())
+	tpl, _ := launcher.LoadTemplate(tmp, "reversing")
+	chat, _ := launcher.CreateChat(tmp, *tpl, "install-test", launcher.AgentCodex)
 	cfg := &launcher.Config{WorkspacesRoot: tmp}
-
-	m := newAgentsModel(cfg, *ws)
+	m := newAgentsModel(cfg, chat.AsWorkspace())
 	m.items = []launcher.Agent{
 		{ID: launcher.AgentCodex, Label: "Codex", Binary: "codex", WpcTarget: "codex", Available: false},
 	}
@@ -354,35 +280,7 @@ func TestAgentsScreen_EnterOnUnavailableRoutesToInstall(t *testing.T) {
 
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil {
-		t.Fatal("Phase 2: enter on greyed agent should route to install screen, not no-op")
-	}
-	msg := runCmd(t, cmd)
-	done, ok := msg.(screenDoneMsg)
-	if !ok {
-		t.Fatalf("expected screenDoneMsg, got %T", msg)
-	}
-	if _, isInstall := done.next.(installModel); !isInstall {
-		t.Errorf("expected installModel, got %T", done.next)
-	}
-}
-
-func TestAgentsScreen_IKeyOpensInstaller(t *testing.T) {
-	tmp := t.TempDir()
-	redirectConfig(t, filepath.Join(tmp, "cfg"))
-	t.Chdir(repoRoot(t))
-	_, _ = launcher.SeedSamples(tmp, []string{filepath.Join(repoRoot(t), "samples", "workpaths")})
-	ws, _ := launcher.LoadWorkspace(tmp, "reversing")
-	cfg := &launcher.Config{WorkspacesRoot: tmp}
-
-	m := newAgentsModel(cfg, *ws)
-	m.items = []launcher.Agent{
-		{ID: launcher.AgentClaude, Label: "Claude", Binary: "claude", WpcTarget: "claude", Available: true},
-	}
-	m.loading = false
-
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
-	if cmd == nil {
-		t.Fatal("i should open install screen even for available agents (upgrade path)")
+		t.Fatal("greyed agent + Enter should route to install screen")
 	}
 	done := runCmd(t, cmd).(screenDoneMsg)
 	if _, ok := done.next.(installModel); !ok {
@@ -390,33 +288,8 @@ func TestAgentsScreen_IKeyOpensInstaller(t *testing.T) {
 	}
 }
 
-func TestAgentsScreen_OKeyOpensOllama(t *testing.T) {
-	tmp := t.TempDir()
-	redirectConfig(t, filepath.Join(tmp, "cfg"))
-	t.Chdir(repoRoot(t))
-	_, _ = launcher.SeedSamples(tmp, []string{filepath.Join(repoRoot(t), "samples", "workpaths")})
-	ws, _ := launcher.LoadWorkspace(tmp, "reversing")
-	cfg := &launcher.Config{WorkspacesRoot: tmp}
-
-	m := newAgentsModel(cfg, *ws)
-	m.items = []launcher.Agent{{ID: launcher.AgentClaude, Available: true}}
-	m.loading = false
-
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
-	if cmd == nil {
-		t.Fatal("o should open Ollama config screen")
-	}
-	done := runCmd(t, cmd).(screenDoneMsg)
-	if _, ok := done.next.(ollamaModel); !ok {
-		t.Errorf("expected ollamaModel, got %T", done.next)
-	}
-}
-
 func TestRootModel_RoutesScreensAndCapturesLaunch(t *testing.T) {
-	// Construct a root with a stub screen; send a screenDoneMsg with a
-	// launch payload and confirm the root captures it + quits.
 	root := &rootModel{screen: newFirstRun()}
-
 	plan := launcher.LaunchPlan{Command: "echo", Dir: t.TempDir()}
 	cfg := &launcher.Config{WorkspacesRoot: "/tmp/x", LastAgent: "codex"}
 
@@ -426,9 +299,6 @@ func TestRootModel_RoutesScreensAndCapturesLaunch(t *testing.T) {
 	}
 	if root.launch == nil || root.launch.Command != "echo" {
 		t.Errorf("root.launch not captured: %+v", root.launch)
-	}
-	if root.updateCfg == nil || root.updateCfg.LastAgent != "codex" {
-		t.Errorf("root.updateCfg not captured: %+v", root.updateCfg)
 	}
 }
 
@@ -444,16 +314,12 @@ func TestRootModel_ErrMsgIsFatal(t *testing.T) {
 }
 
 func TestExecAgent_RunsCommandAndPropagatesExit(t *testing.T) {
-	// Pick a command that always exists on the host and exits cleanly.
 	plan := launcher.LaunchPlan{Command: fakeCmd(), Args: fakeArgs(), Dir: t.TempDir()}
 	if code := execAgent(plan); code != 0 {
 		t.Errorf("execAgent returned %d for a successful command", code)
 	}
 }
 
-// fakeCmd returns a portable command that exits 0 on whichever OS the
-// tests run on, suitable for verifying the spawn pipeline without
-// launching an actual agent.
 func fakeCmd() string {
 	if runtime.GOOS == "windows" {
 		return "cmd"

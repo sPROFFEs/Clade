@@ -11,7 +11,10 @@ import (
 	"time"
 )
 
-// helper: minimal workspace with sandbox prepared (no agent yet, just dirs).
+// helper: a chat freshly cloned from the bundled "reversing" template,
+// with the given settings stamped on. Returned as a Workspace (via the
+// AsWorkspace bridge) so the decorate tests can stay on the existing
+// PrepareSandbox interface.
 func freshWorkspace(t *testing.T, settings WorkspaceSettings) Workspace {
 	t.Helper()
 	src := samplesDir(t)
@@ -22,15 +25,19 @@ func freshWorkspace(t *testing.T, settings WorkspaceSettings) Workspace {
 	if _, err := SeedSamples(root, []string{src}); err != nil {
 		t.Fatal(err)
 	}
-	ws, err := LoadWorkspace(root, "reversing")
-	if err != nil || ws == nil {
-		t.Fatalf("LoadWorkspace: %v %v", err, ws)
+	tpl, err := LoadTemplate(root, "reversing")
+	if err != nil || tpl == nil {
+		t.Fatalf("LoadTemplate(reversing): %v %v", err, tpl)
 	}
-	ws.Settings = settings
-	if err := SaveWorkspaceSettings(*ws); err != nil {
+	chat, err := CreateChat(root, *tpl, "decorate-test", AgentClaude)
+	if err != nil {
+		t.Fatalf("CreateChat: %v", err)
+	}
+	chat.Settings = settings
+	if err := SaveChatSettings(chat); err != nil {
 		t.Fatal(err)
 	}
-	return *ws
+	return chat.AsWorkspace()
 }
 
 func TestDecorate_LanguageDirectivePrependedToSKILLmd(t *testing.T) {

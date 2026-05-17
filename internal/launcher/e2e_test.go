@@ -22,10 +22,16 @@ func TestE2E_PlanForRealInstalledAgents(t *testing.T) {
 	if _, err := SeedSamples(root, []string{src}); err != nil {
 		t.Fatal(err)
 	}
-	ws, err := LoadWorkspace(root, "reversing")
-	if err != nil || ws == nil {
-		t.Fatalf("LoadWorkspace: %v %v", err, ws)
+	tpl, err := LoadTemplate(root, "reversing")
+	if err != nil || tpl == nil {
+		t.Fatalf("LoadTemplate: %v %v", err, tpl)
 	}
+	chat, err := CreateChat(root, *tpl, "e2e-test", AgentClaude)
+	if err != nil {
+		t.Fatalf("CreateChat: %v", err)
+	}
+	wsLocal := chat.AsWorkspace()
+	ws := &wsLocal
 
 	agents := DetectAgents(context.Background())
 	anyAvailable := false

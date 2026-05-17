@@ -50,7 +50,7 @@ func main() {
 	if cfg == nil {
 		initial = newFirstRun()
 	} else {
-		initial = newWorkspacesModel(cfg)
+		initial = newChatListModel(cfg)
 	}
 
 	root := &rootModel{screen: initial}

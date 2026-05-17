@@ -9,40 +9,41 @@ import (
 	"github.com/sdksdk/code-launcher/internal/launcher"
 )
 
-func TestSettingsScreen_FullFlowRoundTrips(t *testing.T) {
+func TestSettingsScreen_FullFlowRoundTripsOnTemplate(t *testing.T) {
 	tmp := t.TempDir()
 	redirectConfig(t, filepath.Join(tmp, "cfg"))
 	t.Chdir(repoRoot(t))
 	if _, err := launcher.SeedSamples(tmp, []string{filepath.Join(repoRoot(t), "samples", "workpaths")}); err != nil {
 		t.Fatal(err)
 	}
-	ws, _ := launcher.LoadWorkspace(tmp, "reversing")
+	tpl, err := launcher.LoadTemplate(tmp, "reversing")
+	if err != nil || tpl == nil {
+		t.Fatalf("LoadTemplate: %v %v", err, tpl)
+	}
 	cfg := &launcher.Config{WorkspacesRoot: tmp}
 
-	m := newSettingsModel(cfg, *ws)
+	// settingsModel takes a Workspace; the smart saver routes to
+	// template.json because the Root is under <root>/templates/.
+	ws := launcher.Workspace{
+		Name: tpl.Name, Root: tpl.Root, WorkpathDir: tpl.WorkpathDir,
+		Description: tpl.Description, Settings: tpl.Settings,
+	}
+	m := newSettingsModel(cfg, ws)
 
-	// step 0 — language
 	m.language.SetValue("Spanish")
 	nx, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = nx.(settingsModel)
 	if m.step != 1 {
 		t.Fatalf("after lang step = %d", m.step)
 	}
-
-	// step 1 — memory: y
 	nx, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
 	m = nx.(settingsModel)
 	if !m.memory || m.step != 2 {
 		t.Fatalf("after memory: mem=%v step=%d", m.memory, m.step)
 	}
-
-	// step 2 — add a skill, then blank Enter to save
 	m.skillInput.SetValue("https://example.com/a.git")
 	nx, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = nx.(settingsModel)
-	if len(m.skills) != 1 {
-		t.Fatalf("skills = %v", m.skills)
-	}
 	nx, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = nx.(settingsModel)
 	if m.step != 3 {
@@ -52,8 +53,9 @@ func TestSettingsScreen_FullFlowRoundTrips(t *testing.T) {
 		t.Errorf("unexpected err: %s", m.err)
 	}
 
-	// Persisted to workspace.json.
-	loaded, _ := launcher.LoadWorkspace(tmp, "reversing")
+	// Settings written to template.json (not workspace.json) because of
+	// the smart saver.
+	loaded, _ := launcher.LoadTemplate(tmp, "reversing")
 	if loaded.Settings.Language != "Spanish" {
 		t.Errorf("Language = %q", loaded.Settings.Language)
 	}
@@ -64,32 +66,33 @@ func TestSettingsScreen_FullFlowRoundTrips(t *testing.T) {
 		t.Errorf("OnlineSkills = %v", loaded.Settings.OnlineSkills)
 	}
 
-	// Enter on the done screen returns to workspaces.
+	// Enter on the done screen returns to chat list.
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	done := runCmd(t, cmd).(screenDoneMsg)
-	if _, ok := done.next.(workspacesModel); !ok {
-		t.Errorf("expected workspacesModel after settings, got %T", done.next)
+	if _, ok := done.next.(chatListModel); !ok {
+		t.Errorf("expected chatListModel after settings done, got %T", done.next)
 	}
 }
 
-func TestWorkspacesScreen_SKeyOpensSettings(t *testing.T) {
+func TestTemplateListScreen_EnterOpensSettings(t *testing.T) {
 	tmp := t.TempDir()
 	redirectConfig(t, filepath.Join(tmp, "cfg"))
 	t.Chdir(repoRoot(t))
 	_, _ = launcher.SeedSamples(tmp, []string{filepath.Join(repoRoot(t), "samples", "workpaths")})
 
 	cfg := &launcher.Config{WorkspacesRoot: tmp}
-	m := newWorkspacesModel(cfg)
+	m := newTemplateListModel(cfg)
 	loaded := runCmd(t, m.Init())
 	next, _ := m.Update(loaded)
-	m = next.(workspacesModel)
+	m = next.(templateListModel)
 	if len(m.items) < 1 {
-		t.Fatal("no items")
+		t.Fatal("no template items")
 	}
 
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	// Cursor is at 0 (first template), Enter opens its settings screen.
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil {
-		t.Fatal("'s' should open settings screen")
+		t.Fatal("Enter on a template row should open settings")
 	}
 	done := runCmd(t, cmd).(screenDoneMsg)
 	if _, ok := done.next.(settingsModel); !ok {

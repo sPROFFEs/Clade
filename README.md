@@ -1,64 +1,103 @@
 # code-launcher
 
 A terminal launcher for agent CLIs (**Claude Code**, **Codex CLI**,
-**OpenCode**) that pairs each session with a self-contained *workpath* —
+**OpenCode**) that pairs each session with a self-contained *template* —
 a versioned bundle of mission, playbook, rules, shell tools, and
-subagents — and runs the agent in an isolated sandbox.
+subagents — and clones it into a fresh isolated **chat** every time you
+start working on something new.
 
 ```
-┌─────────────────────────┐    ┌──────────────────────────┐    ┌────────────────────┐
-│  pick a workspace       │ →  │  pick an agent CLI       │ →  │  agent runs in a   │
-│  (or scaffold a new one)│    │  (install if missing)    │    │  sandbox with the  │
-│                         │    │  (route to local Ollama) │    │  workpath compiled │
-└─────────────────────────┘    └──────────────────────────┘    └────────────────────┘
+┌──────────────────┐    ┌──────────────────────┐    ┌───────────────────┐
+│ pick a chat to   │ →  │ (or start a new chat │ →  │ agent runs in     │
+│ resume           │    │  from a template)    │    │ that chat's       │
+│                  │    │                      │    │ private sandbox   │
+└──────────────────┘    └──────────────────────┘    └───────────────────┘
 ```
 
 Single static Go binary per OS. No runtime deps.
 
-## What it does for you
+## The model
 
-- **First run wizard** — picks a workspaces root, seeds two sample
-  workpaths (`reversing`, `code-review`) so you have something to run
-  immediately.
-- **Workspaces** — each one bundles a `workpath/` (knowledge base —
-  mission, playbook, rules, tools, subagents) and a `sandbox/` (the
-  agent's working directory, gitignored). The launcher never lets the
-  agent's cwd be the knowledge base.
-- **Rich create wizard** — name, description, default response language,
-  persistent `MEMORY.md` toggle, and a list of online skill repos to
-  clone on every launch.
+- **Template** — a reusable workpath pattern (mission + playbook + rules
+  + tools + subagents). Templates don't run; they're cloned. Ship with
+  two samples: `reversing`, `code-review`.
+- **Chat** — a cloned-and-running instance of a template. Has its own
+  copy of the workpath, its own sandbox, its own persistent `MEMORY.md`,
+  and is bound to a specific agent CLI at creation. Each chat is a
+  separate cwd, so Claude / Codex / OpenCode treat them as distinct
+  projects and offer their own per-project session resume.
+
+Layout under `<workspaces-root>/`:
+
+```
+templates/
+├── reversing/workpath/             read-only pattern
+└── code-review/workpath/
+chats/
+├── 20251017-1430-cve-fix/          one cloned instance per session
+│   ├── chat.json                   {template, agent, createdAt, lastUsed}
+│   ├── workpath/                   copied from template at creation
+│   ├── sandbox/                    agent cwd, gitignored
+│   ├── sessions/                   one subdir per agent launch
+│   └── MEMORY.md                   persistent across re-opens
+└── 20251017-1500-pr-123-review/
+```
+
+## What the launcher does for you
+
+- **Home screen = chat list** sorted by last-used. Resume any past chat
+  with Enter; the agent picks up its own transcript history because the
+  cwd is stable.
+- **New chat wizard** — pick a template → name the chat → pick an agent.
+  Template is cloned, sandbox is compiled, agent is launched.
+- **Template management** (`t` from home) — list / new / edit / delete.
+- **Rich template wizard** — name + description + default response
+  language + persistent `MEMORY.md` toggle + list of online skill repos
+  to clone on every launch. Every chat cloned from the template inherits
+  those defaults (and can override per-chat).
 - **Agent CLI detection + install** — probes `claude` / `codex` /
-  `opencode` on PATH. For missing ones, the **built-in installer**
-  ships per-OS install commands (Homebrew / winget / curl / pnpm) with
-  prereq checks (Node + pnpm, with auto-`corepack enable`) and shows
-  the exact command before running it.
-- **Local-model routing** — the **Ollama screen** probes a remote
-  endpoint, lists models, and configures any combination of:
-  - Claude (per-workspace `ANTHROPIC_*` env injection — no shell rc mutation)
-  - Codex (idempotent writes to `~/.codex/config.toml`)
-  - OpenCode (idempotent writes to `~/.config/opencode/opencode.json`)
-- **Workpath compilation** — the wpc compiler (bundled, importable as
-  a Go library) turns one workpath source into the right format for
-  whichever agent you picked. The compiled tree is written into the
-  sandbox.
-- **Per-workspace decoration** — language directive prepended to the
-  compiled `SKILL.md` / `AGENTS.md`; `MEMORY.md` staged and
-  synced-back; online skills cloned into the agent's expected skills
-  dir; chat session manifest dropped under `chats/`.
+  `opencode` on PATH. Detection requires `--version` to actually run, so
+  broken installs are caught before launch. For missing agents the
+  built-in installer offers per-OS commands (Homebrew / winget / curl /
+  pnpm) with pnpm-first dependency handling, including auto-`corepack
+  enable` and auto-`pnpm setup`.
+- **Local-model routing (Ollama screen)** — probes a remote endpoint,
+  lists models, configures any combination of Claude (per-chat env
+  injection), Codex (`~/.codex/config.toml`), and OpenCode
+  (`~/.config/opencode/opencode.json`).
+- **Per-chat decoration on every launch** — language directive
+  prepended to the compiled `SKILL.md` / `AGENTS.md`; `MEMORY.md` staged
+  in the sandbox and synced back after the agent exits; online skills
+  cloned via git into the agent's expected location.
 - **Clean TTY hand-off** — Bubble Tea releases the terminal, the agent
   inherits stdio uniformly on every OS.
+
+## Past chatlog review
+
+The launcher doesn't capture agent transcripts itself (each agent stores
+them differently). Instead, **each chat has a stable cwd**, so when you
+open it again:
+
+- **Claude Code** sees the same project hash and lets you pick from past
+  sessions via its own `claude /sessions` view (or `claude -c` to
+  continue the most recent).
+- **Codex CLI** stores sessions per project too; resume with `codex
+  resume` from inside the chat.
+- **OpenCode** offers `opencode --continue` from the chat dir.
+
+In other words: the launcher hands the agent a consistent project; the
+agent handles its own transcript browser. The MEMORY.md the launcher
+syncs back gives you a portable, agent-agnostic place to keep notes you
+want to survive even if the agent's session store is wiped.
 
 ## Install
 
 ### From a release archive
 
-Each release ships pre-built binaries plus `samples/` and docs:
-
 ```sh
 # Linux / macOS
 tar -xzf code-launcher-0.1.0-linux-amd64.tar.gz
-cd linux-amd64
-./code-launcher
+cd linux-amd64 && ./code-launcher
 ```
 
 ```powershell
@@ -67,20 +106,17 @@ Expand-Archive code-launcher-0.1.0-windows-amd64.zip
 .\windows-amd64\code-launcher.exe
 ```
 
-### From source
-
-Requires Go ≥ 1.21.
+### From source (Go ≥ 1.21)
 
 ```sh
 git clone http://192.168.100.86:3000/sdksdk/code-launcher.git
 cd code-launcher
-go build -o code-launcher ./cmd/code-launcher   # code-launcher.exe on Windows
+go build -o code-launcher ./cmd/code-launcher
 ./code-launcher
 ```
 
-The optional `wpc` CLI (direct access to the compiler — useful for
-authoring workpaths outside the launcher) is a separate binary in the
-same module:
+Optional `wpc` binary (the workpath compiler — useful for authoring
+templates outside the launcher):
 
 ```sh
 go build -o wpc ./cmd/wpc
@@ -94,140 +130,158 @@ wpc --help
 ```
 
 First run:
+1. Pick a workspaces root (default `~/code-launcher-workspaces`).
+2. Bundled sample templates are seeded into `templates/`.
+3. Home screen shows an empty chat list → press `n` (or Enter on `+ new
+   chat`) → pick `reversing` → name the chat → pick `Claude Code`.
+4. The chat is created, the workpath is compiled into its sandbox, the
+   agent launches.
 
-1. Choose where workspaces live (default `~/code-launcher-workspaces`).
-2. The sample workpaths get seeded into it.
-3. Pick one or scaffold a new one with the wizard.
-4. Pick an agent. If it's not installed, press `enter` (or `i`) and the
-   launcher walks you through installing it.
-5. The agent launches in the workspace's sandbox with the workpath
-   compiled in.
+Next time:
+1. Home shows your chat with "last used 2h ago".
+2. Enter resumes it — Claude offers to continue the previous session
+   from that cwd.
 
 ## Keys
 
-### Workspaces screen
+### Home (chat list)
 | Key       | Effect                              |
 |-----------|-------------------------------------|
 | `↑/↓ k/j` | Move selection                      |
-| `enter`   | Open workspace (or `+ new`)         |
-| `s`       | Settings for highlighted workspace  |
-| `r`       | Refresh list                        |
+| `enter`   | Open chat (or `+ new chat`)         |
+| `n`       | New chat                            |
+| `d`       | Delete highlighted chat (confirms)  |
+| `t`       | Template management                 |
+| `r`       | Refresh                             |
+| `ctrl-c`  | Quit                                |
 
-### Agents screen
+### Template list (`t` from home)
+| Key     | Effect                                            |
+|---------|---------------------------------------------------|
+| `enter` | Edit settings of highlighted template             |
+| `n`     | New template (full wizard)                        |
+| `d`     | Delete (existing chats from it are unaffected)    |
+| `esc`   | Back to chats                                     |
+
+### Agents screen (during new-chat or open-chat)
 | Key     | Effect                                            |
 |---------|---------------------------------------------------|
 | `enter` | Launch (if installed) or open installer (if not)  |
 | `i`     | Install / upgrade the highlighted agent           |
 | `o`     | Open the Ollama configuration screen              |
-| `esc`   | Back                                              |
-
-### Anywhere
-| Key      | Effect                  |
-|----------|-------------------------|
-| `ctrl-c` | Quit immediately        |
-| `esc`    | Step back one screen    |
 
 ## Files on disk
 
-| Path                                          | Holds                                                   |
-|-----------------------------------------------|---------------------------------------------------------|
-| `~/.config/code-launcher/config.json` (Linux/XDG) | `workspacesRoot`, `lastAgent`                         |
-| `~/Library/Application Support/code-launcher/...` (macOS) | same                                          |
-| `%AppData%\code-launcher\config.json` (Windows) | same                                                  |
-| `<workspaces-root>/<name>/workpath/`          | wpc source — `mission.md`, `playbook.md`, `rules.md`, `tools/`, `agents/` |
-| `<workspaces-root>/<name>/sandbox/`           | Agent cwd; compiled artifacts; gitignored               |
-| `<workspaces-root>/<name>/workspace.json`     | `language`, `memoryEnabled`, `onlineSkills[]`, `ollama` |
-| `<workspaces-root>/<name>/MEMORY.md`          | Persistent agent memory (synced from sandbox after exit)|
-| `<workspaces-root>/<name>/chats/`             | One subdir per launch with `session.json`               |
+| Path                                                | Holds                                                   |
+|-----------------------------------------------------|---------------------------------------------------------|
+| `~/.config/code-launcher/config.json` (Linux/XDG)   | `workspacesRoot`, `lastAgent`                           |
+| `~/Library/Application Support/code-launcher/…` (macOS) | same                                                |
+| `%AppData%\code-launcher\config.json` (Windows)     | same                                                    |
+| `<root>/templates/<name>/workpath/`                 | wpc source: `mission.md`, `playbook.md`, `rules.md`, `tools/`, `agents/` |
+| `<root>/templates/<name>/template.json`             | default settings inherited by new chats                 |
+| `<root>/chats/<chat-id>/workpath/`                  | cloned from template at chat creation                   |
+| `<root>/chats/<chat-id>/sandbox/`                   | agent cwd; compiled artifacts; gitignored               |
+| `<root>/chats/<chat-id>/chat.json`                  | `label`, `template`, `agent`, `lastUsed`, `settings`    |
+| `<root>/chats/<chat-id>/MEMORY.md`                  | persistent memory; synced from sandbox after exit       |
+| `<root>/chats/<chat-id>/sessions/<ts>-<agent>/`     | per-launch metadata (future: transcript)                |
 
-## Launch sequence
+## Launch sequence (open chat)
 
 ```
-User picks workspace "reversing" → picks Codex CLI
+Home → pick chat "cve-fix" → pick agent (Codex)
                   │
                   ▼
-   wpc compiles <ws>/workpath → <ws>/sandbox (target=codex)
-   language directive prepended · MEMORY.md staged · skills cloned
+   wpc compiles chat's workpath → chat's sandbox (target=codex)
+   language directive prepended · MEMORY.md staged · online skills cloned
                   │
                   ▼
-        <ws>/sandbox/AGENTS.md           ← Codex reads this on every prompt
-        <ws>/sandbox/AGENTS.assets/...   ← Tools + subagent prompts
-        <ws>/sandbox/MEMORY.md           ← agent reads / writes
-        <ws>/sandbox/SANDBOX.md          ← Orientation file for the user
+        <chat>/sandbox/AGENTS.md           ← Codex reads on every prompt
+        <chat>/sandbox/AGENTS.assets/...   ← Tools + subagent prompts
+        <chat>/sandbox/MEMORY.md           ← agent reads / writes
+        <chat>/sandbox/SANDBOX.md          ← orientation file
                   │
                   ▼
-   Bubble Tea releases the TTY; `codex` spawned with cwd=<ws>/sandbox
+   Bubble Tea releases the TTY; `codex` spawned with cwd=<chat>/sandbox
                   │
                   ▼
-   Agent runs interactively · waiting for the user
+   Agent runs interactively · Codex sees the project, offers session resume
                   │ (agent exits)
                   ▼
-   MEMORY.md synced back to <ws>/MEMORY.md
+   MEMORY.md synced back to <chat>/MEMORY.md
+   chat.json's lastUsed bumped → next launcher run sorts this chat to top
    Exit code propagated to the shell
 ```
 
+## Migration from v0.1
+
+Earlier versions stored runtime instances directly at `<root>/<name>/`.
+On startup the launcher auto-promotes those to `<root>/templates/<name>/`
+and surfaces a one-line note: "Promoted N legacy workspace(s) to
+templates." Existing chats from past launches don't exist in v0.1 — you
+start fresh, with your old patterns now available as templates.
+
 ## Workpath source format
 
-A workpath is a directory. The minimum:
+A workpath is a directory. Minimum:
 
 ```
 my-workpath/
-└── mission.md         # required, non-empty
+└── mission.md         required, non-empty
 ```
 
-The full shape:
+Full shape:
 
 ```
 my-workpath/
-├── workpath.json      # optional metadata + tool/agent overrides
-├── mission.md         # required: what this workpath is for
-├── playbook.md        # optional: staged process
-├── rules.md           # optional: hard constraints
-├── tools/             # optional: shell scripts, auto-registered
+├── workpath.json      optional metadata + tool/agent overrides
+├── mission.md         required
+├── playbook.md        optional staged process
+├── rules.md           optional hard constraints
+├── tools/             auto-registered shell scripts
 │   ├── file_summary.sh
 │   └── count_lines.ps1
-└── agents/            # optional: subagent prompts
+└── agents/            named subagent prompts
     └── triage.md
 ```
 
-The launcher compiles this into the right format for the chosen agent:
+The launcher compiles a chat's workpath into its sandbox using the
+matching wpc target:
 
-| Agent      | Target  | Output in sandbox                                          |
-|------------|---------|------------------------------------------------------------|
-| Claude     | `claude`| `.claude/skills/<name>/SKILL.md` + `scripts/` + `.claude/agents/<name>__<agent>.md` |
-| Codex      | `codex` | `AGENTS.md` + `AGENTS.assets/`                              |
-| OpenCode   | `codex` | `AGENTS.md` + `AGENTS.assets/` (reuses the codex target)    |
+| Agent      | Target  | Output in sandbox                                            |
+|------------|---------|--------------------------------------------------------------|
+| Claude     | `claude`| `.claude/skills/<template>/SKILL.md` + `scripts/` + `.claude/agents/<template>__<agent>.md` |
+| Codex      | `codex` | `AGENTS.md` + `AGENTS.assets/`                                |
+| OpenCode   | `codex` | `AGENTS.md` + `AGENTS.assets/` (OpenCode reads `AGENTS.md` too) |
 
-The compiler also supports two formats not used by the launcher itself
-but useful when authoring workpaths for other tools:
+Two extra targets are useful when authoring templates for other tools:
 
 | Target   | Output                                                |
 |----------|-------------------------------------------------------|
 | `mika`   | `modules/<name>/{module,playbook,rules}.md` + assets  |
 | `cursor` | `.cursor/rules/<name>.mdc` (tools/agents inlined)     |
 
-See [`docs/SCHEMA.md`](docs/SCHEMA.md) for the full schema and
-[`docs/TARGETS.md`](docs/TARGETS.md) / [`docs/ACTIVATION.md`](docs/ACTIVATION.md)
-for the per-target reference.
+See [`docs/SCHEMA.md`](docs/SCHEMA.md), [`docs/TARGETS.md`](docs/TARGETS.md),
+[`docs/ACTIVATION.md`](docs/ACTIVATION.md), and
+[`docs/LAUNCHER.md`](docs/LAUNCHER.md) for the full reference.
 
 ## Repository layout
 
 ```
 code-launcher/
 ├── cmd/
-│   ├── code-launcher/      The Bubble Tea TUI (main user-facing binary)
+│   ├── code-launcher/      The Bubble Tea TUI (main binary)
 │   └── wpc/                The compiler CLI (optional, for direct use)
 ├── internal/
-│   ├── launcher/           Config, workspaces, agents, launch, decorate
-│   ├── installer/          Per-OS install methods for claude/codex/opencode
+│   ├── launcher/           Templates, chats, config, agents, launch, decorate, migrate
+│   ├── installer/          Per-OS install methods + pnpm setup auto-resolve
 │   ├── ollama/             Endpoint probe + per-agent config writers
 │   └── skills/             Online-skill git fetcher
 ├── pkg/
-│   ├── workpath/           Loader + validator (importable)
+│   ├── workpath/           wpc loader + validator (importable)
 │   └── targets/            One file per output target (claude.go, codex.go, ...)
-├── samples/workpaths/      Bundled samples used by first-run seeding
+├── samples/workpaths/      Bundled samples seeded into templates/ on first run
 ├── scripts/                Cross-compile (build.sh / build.ps1)
-├── testdata/               Fixtures for the unit tests
+├── testdata/               Fixtures for unit tests
 └── docs/
     ├── LAUNCHER.md         Full launcher reference
     ├── QUICKSTART.md       Workpath authoring quickstart
@@ -252,7 +306,7 @@ scripts/build.sh --no-archive    # skip tar.gz/zip
 .\scripts\build.ps1 -NoArchive
 ```
 
-Produces statically linked binaries under `dist/<os>-<arch>/` for:
+Produces statically linked binaries under `dist/<os>-<arch>/` for
 `windows-amd64`, `linux-amd64`, `linux-arm64`, `darwin-amd64`,
 `darwin-arm64`. Each bundle ships both binaries (`code-launcher`,
 `wpc`), the `samples/` tree, the docs, and a tar.gz/zip archive.
@@ -263,27 +317,27 @@ Produces statically linked binaries under `dist/<os>-<arch>/` for:
 go test ./...
 ```
 
-75 tests across 7 packages — launcher logic, TUI screen transitions
-(driven with synthetic Bubble Tea messages, no TTY needed), installer
-catalog per OS/agent, Ollama config round-trips with an `httptest`
-server, online-skill git clones, and the wpc compiler targets.
+94 tests across 7 packages — template/chat storage and migration, TUI
+screen transitions (driven with synthetic Bubble Tea messages, no TTY
+needed), installer catalog per OS/agent plus pnpm auto-resolve, Ollama
+config round-trips with `httptest`, online-skill git clones, and the
+wpc compiler targets.
 
 ## Phase 3 — not started
 
-- Actual transcript capture (each agent stores transcripts differently
-  — needs per-agent adapters)
-- Zip-archive online-skills (today: git-only)
-- Per-workspace agent-CLI version pin
-- Dedicated `opencode` wpc target with native subagent support
-  (currently OpenCode reuses the `codex` target since both read `AGENTS.md`)
+- First-class transcript browser (per-agent adapter for
+  `~/.claude/projects/`, `~/.codex/sessions/`, etc.)
+- Zip-archive online-skills (git-only today)
+- Per-chat agent override (currently locked at creation)
+- Rich chat search / tagging
 
 ## Why?
 
 CLI coding agents have converged on similar primitives — instruction
 files (skill / rule / `AGENTS.md`), shell tools, named subagents — but
 each names them differently and stores them in a different place.
-**code-launcher** lets you author the instructions once, route to
-whichever agent you have on PATH today, and route a single agent
-through whichever model endpoint you have today, without forking
-`.claude/`, `.cursor/`, or `modules/` trees by hand and without
-modifying your shell rc files.
+**code-launcher** lets you write the instructions once as a template,
+clone a fresh chat from it every time you start a new task, and route
+that chat through whichever agent you have on PATH today and whichever
+model endpoint you have today — without forking `.claude/`, `.cursor/`,
+or `modules/` trees by hand and without modifying your shell rc.

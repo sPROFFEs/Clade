@@ -55,7 +55,8 @@ type OllamaSettings struct {
 }
 
 // SaveWorkspaceSettings persists ws.Settings to <ws.Root>/workspace.json.
-// Atomic (tmp + rename).
+// Atomic (tmp + rename). Prefer SaveWorkspaceLikeSettings — it routes to
+// chat.json or template.json when the Workspace originated from one.
 func SaveWorkspaceSettings(ws Workspace) error {
 	raw, err := json.MarshalIndent(ws.Settings, "", "  ")
 	if err != nil {
@@ -68,6 +69,47 @@ func SaveWorkspaceSettings(ws Workspace) error {
 		return err
 	}
 	return os.Rename(tmp, path)
+}
+
+// SaveWorkspaceLikeSettings inspects ws.Root and persists settings to the
+// canonical manifest for whatever it represents:
+//
+//   <root>/chats/<id>/      → patches chat.json (via SaveChatSettings)
+//   <root>/templates/<name>/→ patches template.json (via SaveTemplateSettings)
+//   <root>/<name>/          → legacy workspace.json
+//
+// Used by screens (Ollama, settings) that take a generic Workspace but
+// need the write to land in the right place.
+func SaveWorkspaceLikeSettings(ws Workspace) error {
+	parent := filepath.Base(filepath.Dir(ws.Root))
+	switch parent {
+	case ChatsDir:
+		root := filepath.Dir(filepath.Dir(ws.Root))
+		id := filepath.Base(ws.Root)
+		chat, err := LoadChat(root, id)
+		if err != nil {
+			return fmt.Errorf("load chat %s for settings save: %w", id, err)
+		}
+		if chat == nil {
+			return fmt.Errorf("chat not found for settings save: %s", ws.Root)
+		}
+		chat.Settings = ws.Settings
+		return SaveChatSettings(*chat)
+	case TemplatesDir:
+		root := filepath.Dir(filepath.Dir(ws.Root))
+		name := filepath.Base(ws.Root)
+		tpl, err := LoadTemplate(root, name)
+		if err != nil {
+			return fmt.Errorf("load template %s for settings save: %w", name, err)
+		}
+		if tpl == nil {
+			return fmt.Errorf("template not found for settings save: %s", ws.Root)
+		}
+		tpl.Settings = ws.Settings
+		return SaveTemplateSettings(*tpl)
+	default:
+		return SaveWorkspaceSettings(ws)
+	}
 }
 
 type workpathManifest struct {
@@ -285,7 +327,8 @@ func SeedSamples(workspacesRoot string, sampleSourceCandidates []string) ([]stri
 		if !e.IsDir() {
 			continue
 		}
-		dst := filepath.Join(workspacesRoot, e.Name(), "workpath")
+		// New layout: seed samples as templates under <root>/templates/<name>/.
+		dst := filepath.Join(workspacesRoot, TemplatesDir, e.Name(), "workpath")
 		if _, err := os.Stat(dst); err == nil {
 			continue
 		}

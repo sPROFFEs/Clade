@@ -20,7 +20,7 @@ func samplesDir(t *testing.T) string {
 	return filepath.Join(cwd, "..", "..", "samples", "workpaths")
 }
 
-func TestSeedSamples_CopiesEveryBundledWorkpath(t *testing.T) {
+func TestSeedSamples_SeedsIntoTemplatesDir(t *testing.T) {
 	src := samplesDir(t)
 	if _, err := os.Stat(src); err != nil {
 		t.Skipf("no samples dir at %s: %v", src, err)
@@ -36,20 +36,20 @@ func TestSeedSamples_CopiesEveryBundledWorkpath(t *testing.T) {
 		t.Errorf("seeded = %v, want %v", seeded, want)
 	}
 
-	// Both should now appear via ListWorkspaces, each with a workpath dir.
-	got, err := ListWorkspaces(root)
+	// New layout: samples land under <root>/templates/<name>/workpath/.
+	got, err := ListTemplates(root)
 	if err != nil {
-		t.Fatalf("ListWorkspaces: %v", err)
+		t.Fatalf("ListTemplates: %v", err)
 	}
 	if len(got) != 2 {
-		t.Fatalf("ListWorkspaces returned %d, want 2", len(got))
+		t.Fatalf("ListTemplates returned %d, want 2", len(got))
 	}
-	for _, ws := range got {
-		if _, err := os.Stat(ws.WorkpathDir); err != nil {
-			t.Errorf("workpath dir missing for %s: %v", ws.Name, err)
+	for _, tpl := range got {
+		if _, err := os.Stat(tpl.WorkpathDir); err != nil {
+			t.Errorf("workpath dir missing for %s: %v", tpl.Name, err)
 		}
-		if ws.Description == "" {
-			t.Errorf("workspace %s has empty description", ws.Name)
+		if tpl.Description == "" {
+			t.Errorf("template %s has empty description", tpl.Name)
 		}
 	}
 }
@@ -63,8 +63,8 @@ func TestSeedSamples_SkipsExisting(t *testing.T) {
 	if _, err := SeedSamples(root, []string{src}); err != nil {
 		t.Fatalf("seed1: %v", err)
 	}
-	// Mutate one of them to detect clobbering.
-	mark := filepath.Join(root, "reversing", "workpath", "mission.md")
+	// Mutate a seeded file to detect clobbering on a re-seed.
+	mark := filepath.Join(root, TemplatesDir, "reversing", "workpath", "mission.md")
 	if err := os.WriteFile(mark, []byte("MUTATED\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -77,21 +77,22 @@ func TestSeedSamples_SkipsExisting(t *testing.T) {
 	}
 	raw, _ := os.ReadFile(mark)
 	if string(raw) != "MUTATED\n" {
-		t.Error("second seed clobbered an existing workpath")
+		t.Error("second seed clobbered an existing template")
 	}
 }
 
-func TestListWorkspaces_IgnoresHiddenAndNonWorkpathDirs(t *testing.T) {
+func TestListTemplates_IgnoresHiddenAndNonWorkpathDirs(t *testing.T) {
 	root := t.TempDir()
+	tplRoot := filepath.Join(root, TemplatesDir)
 	// real one
-	must(t, os.MkdirAll(filepath.Join(root, "good", "workpath"), 0o755))
-	must(t, os.WriteFile(filepath.Join(root, "good", "workpath", "mission.md"), []byte("# good\n"), 0o644))
+	must(t, os.MkdirAll(filepath.Join(tplRoot, "good", "workpath"), 0o755))
+	must(t, os.WriteFile(filepath.Join(tplRoot, "good", "workpath", "mission.md"), []byte("# good\n"), 0o644))
 	// hidden
-	must(t, os.MkdirAll(filepath.Join(root, ".hidden", "workpath"), 0o755))
+	must(t, os.MkdirAll(filepath.Join(tplRoot, ".hidden", "workpath"), 0o755))
 	// non-workpath dir
-	must(t, os.MkdirAll(filepath.Join(root, "stray"), 0o755))
+	must(t, os.MkdirAll(filepath.Join(tplRoot, "stray"), 0o755))
 
-	got, err := ListWorkspaces(root)
+	got, err := ListTemplates(root)
 	if err != nil {
 		t.Fatal(err)
 	}
