@@ -74,14 +74,16 @@ func newOllamaModel(cfg *launcher.Config, ws launcher.Workspace) ollamaModel {
 		mi.SetValue(ws.Settings.Ollama.Model)
 	}
 
+	// Pre-check each agent based on what's already on disk so a re-open
+	// shows the current state instead of resetting to "only Claude".
 	return ollamaModel{
-		cfg:        cfg,
-		ws:         ws,
-		endpoint:   ep,
-		modelInput: mi,
-		// Default: configure Claude per-workspace, leave the global agent
-		// configs alone unless the user explicitly opts in.
-		pickClaude: true,
+		cfg:          cfg,
+		ws:           ws,
+		endpoint:     ep,
+		modelInput:   mi,
+		pickClaude:   ws.Settings.Ollama.Endpoint != "",
+		pickCodex:    ollama.CodexConfigured(),
+		pickOpenCode: ollama.OpenCodeConfigured(),
 	}
 }
 
@@ -362,12 +364,8 @@ func (m ollamaModel) View() string {
 				b.WriteString(descStyle.Render(e.hint) + "\n")
 			}
 		}
-		b.WriteString("\n" + hintStyle.Render(
-			"Gemini CLI isn't here. We tried OPENAI_* env injection (worked for Codex / "+
-				"OpenCode) but Gemini 0.42+ ignores it and keeps hitting Google via cached "+
-				"OAuth — the real switch is ~/.gemini/settings.json's selectedAuthType, "+
-				"whose schema isn't stable across CLI versions. Configure it by hand or "+
-				"run a proxy (litellm)."))
+		b.WriteString("\n" + descStyle.Render(
+			"gemini-cli — not supported (see README → \"Gemini + Ollama\")"))
 
 	case ollamaStepApply:
 		help = "enter / esc to return"

@@ -301,6 +301,47 @@ func TestApplyOpenCode_PreservesOtherProviders(t *testing.T) {
 	}
 }
 
+func TestCodexConfigured_ReflectsDiskState(t *testing.T) {
+	tmp := t.TempDir()
+	redirectHome(t, tmp)
+	if CodexConfigured() {
+		t.Fatal("fresh dir: CodexConfigured should be false")
+	}
+	if _, err := ApplyCodex(Settings{Endpoint: "x:1", Model: "m"}); err != nil {
+		t.Fatal(err)
+	}
+	if !CodexConfigured() {
+		t.Error("after ApplyCodex: CodexConfigured should be true")
+	}
+	if _, err := DisableCodex(); err != nil {
+		t.Fatal(err)
+	}
+	if CodexConfigured() {
+		t.Error("after DisableCodex: CodexConfigured should be false")
+	}
+}
+
+func TestOpenCodeConfigured_ReflectsDiskState(t *testing.T) {
+	tmp := t.TempDir()
+	redirectHome(t, tmp)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmp, "xdg"))
+	if OpenCodeConfigured() {
+		t.Fatal("fresh dir: OpenCodeConfigured should be false")
+	}
+	if _, err := ApplyOpenCode(Settings{Endpoint: "x:1", Model: "m"}, false); err != nil {
+		t.Fatal(err)
+	}
+	if !OpenCodeConfigured() {
+		t.Error("after ApplyOpenCode: OpenCodeConfigured should be true")
+	}
+	if _, err := DisableOpenCode(); err != nil {
+		t.Fatal(err)
+	}
+	if OpenCodeConfigured() {
+		t.Error("after DisableOpenCode: OpenCodeConfigured should be false")
+	}
+}
+
 func TestDisableOpenCode_RemovesProvider(t *testing.T) {
 	tmp := t.TempDir()
 	redirectHome(t, tmp)

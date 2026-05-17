@@ -333,6 +333,40 @@ needed), installer catalog per OS/agent plus pnpm auto-resolve, Ollama
 config round-trips with `httptest`, online-skill git clones, and the
 wpc compiler targets.
 
+## Gemini + Ollama
+
+The Ollama screen configures **Claude / Codex / OpenCode** automatically.
+Gemini CLI is intentionally not in that list — here's why and how to
+work around it.
+
+**What didn't work:** the launcher tried injecting `OPENAI_API_KEY` +
+`OPENAI_BASE_URL` (the env-var convention that works for Codex /
+OpenCode). Gemini CLI 0.42+ ignores them and stays on its cached
+Google OAuth credentials, then fails with `Model "..." was not found
+or is invalid` when you try to use an Ollama model name.
+
+**What does work** — pick one:
+
+1. **Run a proxy (recommended).** [litellm](https://github.com/BerriAI/litellm)
+   exposes Ollama as a real Gemini-API-compatible endpoint that the
+   official Gemini CLI accepts:
+   ```sh
+   pip install 'litellm[proxy]'
+   litellm --model ollama/qwen3-coder --host 0.0.0.0 --port 4000
+   ```
+   Then point Gemini at the proxy via its own config — depends on the
+   CLI version you have installed.
+
+2. **Hand-edit `~/.gemini/settings.json`** to flip
+   `selectedAuthType` to the OpenAI provider in your Gemini CLI
+   version. The exact schema has shifted between releases (the launcher
+   doesn't auto-write it for this reason). Check `gemini --help`
+   and your CLI's docs for the current shape.
+
+When Gemini officially documents a stable OpenAI-compat config
+mechanism, the launcher will pick it up — open an issue with the
+shape and we'll add it.
+
 ## Phase 3 — not started
 
 - First-class transcript browser (per-agent adapter for

@@ -370,6 +370,37 @@ func ApplyOpenCode(s Settings, makeDefault bool) (string, error) {
 	return configPath, atomicWrite(configPath, out)
 }
 
+// CodexConfigured reports whether ~/.codex/config.toml has the
+// [model_providers.ollama_remote] block we manage. The Ollama screen
+// uses this to pre-check the codex checkbox when reopened.
+func CodexConfigured() bool {
+	path, err := CodexConfigPath()
+	if err != nil {
+		return false
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(raw), "[model_providers."+codexProviderName+"]")
+}
+
+// OpenCodeConfigured reports whether opencode.json has our ollama_remote
+// provider entry. Same purpose as CodexConfigured.
+func OpenCodeConfigured() bool {
+	path, err := OpenCodeConfigPath()
+	if err != nil {
+		return false
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	// Cheap check — full JSON parse not needed, the key string is
+	// distinctive enough.
+	return strings.Contains(string(raw), `"`+openCodeProviderName+`"`)
+}
+
 // DisableOpenCode removes the ollama_remote provider entry. No-op if the
 // file doesn't exist.
 func DisableOpenCode() (string, error) {

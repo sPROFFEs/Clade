@@ -6,12 +6,14 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/sdksdk/code-launcher/internal/launcher"
+	"github.com/sdksdk/code-launcher/internal/ollama"
 )
 
 // TestOllamaFlow_FullWizardWritesPerChatClaudeSettings: drives every step
@@ -67,7 +69,14 @@ func TestOllamaFlow_FullWizardWritesPerChatClaudeSettings(t *testing.T) {
 		t.Errorf("modelInput = %q, want qwen3", m.modelInput.Value())
 	}
 
-	// Apply.
+	// Boxes are now pre-checked from disk state — a brand-new chat
+	// starts with NONE checked. Tick Claude explicitly with space, then
+	// Enter to apply.
+	nx, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	m = nx.(ollamaModel)
+	if !m.pickClaude {
+		t.Fatal("space should toggle claude on")
+	}
 	nx, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = nx.(ollamaModel)
 	apply := runCmd(t, cmd)
@@ -112,6 +121,54 @@ func TestOllamaFlow_FullWizardWritesPerChatClaudeSettings(t *testing.T) {
 		t.Errorf("ANTHROPIC_AUTH_TOKEN = %q", plan.Env["ANTHROPIC_AUTH_TOKEN"])
 	}
 }
+
+// TestOllamaScreen_PreChecksBoxesFromDisk: when the user has previously
+// applied Ollama settings for codex/opencode, reopening the screen
+// should show those boxes already checked. The bug was that only
+// Claude defaulted to true and the others were unchecked even when
+// their config files clearly had the ollama_remote block.
+func TestOllamaScreen_PreChecksBoxesFromDisk(t *testing.T) {
+	tmp := t.TempDir()
+	switch runtime.GOOS {
+	case "windows":
+		t.Setenv("USERPROFILE", tmp)
+		t.Setenv("APPDATA", filepath.Join(tmp, "cfg"))
+	default:
+		t.Setenv("HOME", tmp)
+		t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmp, "xdg"))
+	}
+
+	// Pre-stage both codex + opencode configs.
+	s := ollama.Settings{Endpoint: "http://10.0.0.1:11434", Model: "qwen3"}
+	if _, err := ollama.ApplyCodex(s); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ollama.ApplyOpenCode(s, true); err != nil {
+		t.Fatal(err)
+	}
+
+	// Build a chat with claude already configured.
+	root := seededRoot(t)
+	tpl, _ := launcher.LoadTemplate(root, "reversing")
+	chat, _ := launcher.CreateChat(root, *tpl, "precheck", launcher.AgentClaude)
+	chat.Settings.Ollama = launcher.OllamaSettings{Endpoint: s.Endpoint, Model: s.Model}
+	_ = launcher.SaveChatSettings(chat)
+
+	loaded, _ := launcher.LoadChat(root, chat.ID)
+	m := newOllamaModel(&launcher.Config{WorkspacesRoot: root}, loaded.AsWorkspace())
+	if !m.pickClaude {
+		t.Error("pickClaude should be true when ws.Settings.Ollama is populated")
+	}
+	if !m.pickCodex {
+		t.Error("pickCodex should be true when ~/.codex/config.toml has the ollama_remote block")
+	}
+	if !m.pickOpenCode {
+		t.Error("pickOpenCode should be true when opencode.json has the ollama_remote provider")
+	}
+}
+
+// Pull in os/runtime for the new test.
+var _ = runtime.GOOS
 
 func TestOllamaFlow_FallsBackToManualEntryOnProbeError(t *testing.T) {
 	tmp := t.TempDir()
