@@ -49,6 +49,12 @@ type ollamaModel struct {
 	pickOpenCode bool
 	agentCursor  int // 0..2
 
+	// returnTo, when set, names the Cmd to fire after the user
+	// dismisses the apply screen. New-chat uses this to immediately
+	// launch the chat we just configured Ollama for, instead of
+	// dumping the user back at the home list.
+	returnTo func() tea.Cmd
+
 	// apply results
 	applying bool
 	applied  bool
@@ -85,6 +91,24 @@ func newOllamaModel(cfg *launcher.Config, ws launcher.Workspace) ollamaModel {
 		pickCodex:    ollama.CodexConfigured(),
 		pickOpenCode: ollama.OpenCodeConfigured(),
 	}
+}
+
+// newOllamaModelWithReturn is the variant the new-chat flow uses so
+// "apply then dismiss" launches the just-created chat rather than
+// dropping the user back at the home list. Defaults all checkboxes to
+// pre-checked on the basis of disk state but, for a brand-new chat
+// with no prior config anywhere, tick Claude as the most useful
+// default (the user picked Ollama with intent, after all).
+func newOllamaModelWithReturn(cfg *launcher.Config, ws launcher.Workspace, returnTo func() tea.Cmd) ollamaModel {
+	m := newOllamaModel(cfg, ws)
+	m.returnTo = returnTo
+	if !m.pickClaude && !m.pickCodex && !m.pickOpenCode {
+		// Brand-new chat: assume the chat's locked agent benefits, and
+		// pre-check Claude. The user can flip codex/opencode too if
+		// they want global config writes.
+		m.pickClaude = true
+	}
+	return m
 }
 
 type ollamaProbeDoneMsg struct {
@@ -135,6 +159,9 @@ func (m ollamaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.applied {
 				switch msg.String() {
 				case "esc", "enter":
+					if m.returnTo != nil {
+						return m, m.returnTo()
+					}
 					return m, wrap(newChatListModel(m.cfg))
 				}
 			}

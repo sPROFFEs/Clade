@@ -224,8 +224,10 @@ You MUST follow this protocol:
 **3. How to update:**
    - Use your file-write tool (Edit / Write — whichever your CLI
      exposes) to **append** to ` + "`MEMORY.md`" + `.
-   - Each new entry starts with a date and a 1-line title:
-     ` + "`## YYYY-MM-DD — short title`" + `, followed by the body.
+   - The launcher already wrote a "## YYYY-MM-DD HH:MM — Session
+     opened" marker at the bottom of the file. Place new notes BELOW
+     that most recent marker as ` + "`### Title`" + ` (H3) subsections so each
+     session's contributions are visibly grouped.
    - Never overwrite or shorten existing entries unless asked.
    - After writing, tell the user "✓ saved to MEMORY.md: <title>" in
      one short line so they see the action.
@@ -260,23 +262,57 @@ func appendMemoryDirective(ws Workspace, agent Agent) error {
 }
 
 // stageMemory copies workspace/MEMORY.md → sandbox/MEMORY.md before
-// launch. The workspace-level file is the canonical source of truth;
-// sync-back happens via SyncMemoryBack after the agent exits.
+// launch and APPENDS a session-start marker. The marker has two
+// purposes:
+//
+//  1. It gives the user visible proof memory is alive — the file
+//     grows every launch even if the agent itself writes nothing.
+//  2. It gives the agent an anchor: the directive (see decorate.go's
+//     memoryDirectiveSection) says "add notes BELOW the most recent
+//     '## YYYY-MM-DD ...' marker", so each session's contributions
+//     are clearly grouped.
+//
+// The workspace-level file is the canonical source of truth; sync-back
+// happens via SyncMemoryBack after the agent exits.
 func stageMemory(ws Workspace) error {
 	src := filepath.Join(ws.Root, "MEMORY.md")
 	if _, err := os.Stat(src); errors.Is(err, fs.ErrNotExist) {
-		// Initialize a starter memory file on first use.
 		header := "# Memory\n\n" +
 			"This file persists across agent sessions for this workspace.\n" +
-			"The agent can read it on launch and append notes you want to keep.\n"
+			"Each session opens with a date-stamped marker; agents add notes\n" +
+			"below the most recent marker.\n"
 		if err := os.WriteFile(src, []byte(header), 0o644); err != nil {
 			return err
 		}
 	} else if err != nil {
 		return err
 	}
+	// Append the marker to the workspace file FIRST so each launch
+	// leaves a trace immediately (visible to the user even if the
+	// agent exits abnormally and sync-back never runs), THEN copy to
+	// the sandbox so the agent sees its own session marker as the
+	// last entry in the file.
+	if err := appendSessionStartMarker(src, ws); err != nil {
+		return err
+	}
 	dst := filepath.Join(ws.SandboxDir, "MEMORY.md")
 	return copyFileLib(src, dst)
+}
+
+// appendSessionStartMarker tacks "## YYYY-MM-DD HH:MM — Session opened"
+// onto MEMORY.md so each launch leaves a visible trace and the agent
+// has a clear anchor for that session's appends.
+func appendSessionStartMarker(path string, ws Workspace) error {
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	stamp := time.Now().Local().Format("2006-01-02 15:04")
+	line := fmt.Sprintf("\n## %s — Session opened\n_(workspace: %s)_\n\n",
+		stamp, ws.Name)
+	_, err = f.WriteString(line)
+	return err
 }
 
 // SyncMemoryBack copies sandbox/MEMORY.md → workspace/MEMORY.md if the

@@ -284,21 +284,25 @@ func TestNewChatFromTemplate_LabelPlusAgentCreatesChat(t *testing.T) {
 		{ID: launcher.AgentClaude, Label: "Claude", Binary: fakeCmd(), WpcTarget: "claude", Available: true},
 	}
 
-	nx, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	// Step 1 (agent) → Enter advances to step 2 (Ollama y/n), it does
+	// NOT immediately spawn the create-chat Cmd anymore.
+	nx, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = nx.(newChatFromTemplateModel)
+	if m.step != 2 {
+		t.Fatalf("after picking agent, step = %d, want 2 (ollama)", m.step)
+	}
+	// Pick "no" to launch immediately without going through the Ollama wizard.
+	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
 	if cmd == nil {
-		t.Fatal("expected create-chat Cmd")
+		t.Fatal("'n' on Ollama step should produce a finalize Cmd")
 	}
 	msg := runCmd(t, cmd)
 	done, ok := msg.(screenDoneMsg)
 	if !ok {
 		t.Fatalf("expected screenDoneMsg, got %T %+v", msg, msg)
 	}
-	// After picking an available agent, we now launch directly — no
-	// intermediate agents picker. The done message should carry a
-	// LaunchPlan, not a next screen.
 	if done.launch == nil {
-		t.Fatalf("expected launch plan after new-chat, got next=%T", done.next)
+		t.Fatalf("expected launch plan after new-chat (Ollama=no), got next=%T", done.next)
 	}
 	if done.launchedWS == nil {
 		t.Fatal("expected launchedWS to be set so main() can sync MEMORY.md back")
@@ -407,6 +411,45 @@ func TestChatListModel_AKeyOpensAgentsPicker(t *testing.T) {
 	done := runCmd(t, cmd).(screenDoneMsg)
 	if _, ok := done.next.(agentsModel); !ok {
 		t.Errorf("expected agentsModel via 'a', got %T", done.next)
+	}
+}
+
+func TestNewChatFromTemplate_OllamaYesRoutesToOllamaScreen(t *testing.T) {
+	tmp := seededRoot(t)
+	redirectConfig(t, t.TempDir())
+	cfg := &launcher.Config{WorkspacesRoot: tmp}
+	tpl, _ := launcher.LoadTemplate(tmp, "reversing")
+
+	m := newNewChatFromTemplateModel(cfg, *tpl)
+	m.label.SetValue("with-ollama")
+	// step 0 → 1
+	nx, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = nx.(newChatFromTemplateModel)
+	m.agents = []launcher.Agent{
+		{ID: launcher.AgentClaude, Binary: fakeCmd(), WpcTarget: "claude", Available: true},
+	}
+	// step 1 → 2
+	nx, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = nx.(newChatFromTemplateModel)
+	if m.step != 2 {
+		t.Fatalf("step = %d, want 2", m.step)
+	}
+	// 'y' triggers finalize → returns screenDoneMsg with next=ollamaModel
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	if cmd == nil {
+		t.Fatal("'y' should produce a finalize Cmd")
+	}
+	done := runCmd(t, cmd).(screenDoneMsg)
+	if done.launch != nil {
+		t.Errorf("'y' should NOT launch directly — it should route to Ollama screen first; got launch=%+v", done.launch)
+	}
+	if _, ok := done.next.(ollamaModel); !ok {
+		t.Errorf("expected ollamaModel as the next screen, got %T", done.next)
+	}
+	// Chat was still created so the Ollama screen has a real ws to save into.
+	chats, _ := launcher.ListChats(tmp)
+	if len(chats) != 1 || chats[0].Label != "with-ollama" {
+		t.Errorf("expected the chat to be created before the Ollama screen; got %+v", chats)
 	}
 }
 

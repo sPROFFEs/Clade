@@ -233,6 +233,33 @@ func TestDecorate_MemoryDirectiveIdempotent(t *testing.T) {
 	}
 }
 
+func TestDecorate_MemoryStagedFileGetsSessionMarker(t *testing.T) {
+	// Each launch must append a "## YYYY-MM-DD HH:MM — Session opened"
+	// marker to MEMORY.md in the sandbox, so the file grows visibly
+	// even if the agent itself writes nothing.
+	ws := freshWorkspace(t, WorkspaceSettings{MemoryEnabled: true})
+	agent := Agent{ID: AgentClaude, Binary: "claude", WpcTarget: "claude", Available: true}
+	if err := PrepareSandbox(ws, agent); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(ws.SandboxDir, "MEMORY.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "— Session opened") {
+		t.Errorf("expected session marker in MEMORY.md; got:\n%s", body)
+	}
+	// And re-running PrepareSandbox appends a second marker (multiple
+	// launches → multiple markers).
+	if err := PrepareSandbox(ws, agent); err != nil {
+		t.Fatal(err)
+	}
+	body2, _ := os.ReadFile(filepath.Join(ws.SandboxDir, "MEMORY.md"))
+	if got := strings.Count(string(body2), "— Session opened"); got != 2 {
+		t.Errorf("expected 2 markers after 2 launches, got %d", got)
+	}
+}
+
 func TestDecorate_PersonalityPrependedAfterFrontmatter(t *testing.T) {
 	ws := freshWorkspace(t, WorkspaceSettings{})
 	// Write a personality file the loader will pick up.

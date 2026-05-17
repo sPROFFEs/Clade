@@ -118,11 +118,13 @@ type newChatFromTemplateModel struct {
 	cfg      *launcher.Config
 	template launcher.Template
 
-	label  textinput.Model
-	step   int // 0: label, 1: agent
-	agents []launcher.Agent
-	cursor int
-	err    string
+	label       textinput.Model
+	step        int // 0: label, 1: agent, 2: ollama y/n
+	agents      []launcher.Agent
+	cursor      int
+	pickedAgent launcher.Agent // captured at step 1 → used at step 2's launch
+	wantOllama  bool           // toggled with y/n/space at step 2
+	err         string
 }
 
 func newNewChatFromTemplateModel(cfg *launcher.Config, tpl launcher.Template) newChatFromTemplateModel {
@@ -206,27 +208,29 @@ func (m newChatFromTemplateModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						return newPickTemplateModel(cfg)
 					}))
 				}
-				cfg := *m.cfg
-				cfg.LastAgent = string(a.ID)
-				tpl := m.template
-				label := strings.TrimSpace(m.label.Value())
-				agentID := a.ID
-				picked := a
-				return m, func() tea.Msg {
-					chat, err := launcher.CreateChat(cfg.WorkspacesRoot, tpl, label, agentID)
-					if err != nil {
-						return errMsg{err: err}
-					}
-					// Skip the redundant agents picker — we already know
-					// the agent. Build the plan and launch directly.
-					plan, err := launcher.Plan(chat.AsWorkspace(), picked)
-					if err != nil {
-						return errMsg{err: err}
-					}
-					_ = launcher.TouchChat(&chat)
-					wsCopy := chat.AsWorkspace()
-					return screenDoneMsg{launch: &plan, updateCfg: &cfg, launchedWS: &wsCopy}
-				}
+				// Advance to step 2 (Ollama y/n) instead of launching.
+				m.pickedAgent = a
+				m.step = 2
+				return m, nil
+			}
+
+		case 2:
+			// Self-hosted model question.
+			switch msg.String() {
+			case "esc":
+				m.step = 1
+				return m, nil
+			case "y", "Y":
+				m.wantOllama = true
+				return m, m.finalize()
+			case "n", "N":
+				m.wantOllama = false
+				return m, m.finalize()
+			case " ":
+				m.wantOllama = !m.wantOllama
+				return m, nil
+			case "enter":
+				return m, m.finalize()
 			}
 		}
 	case errMsg:
@@ -236,6 +240,63 @@ func (m newChatFromTemplateModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	return m, nil
+}
+
+// finalize creates the chat and routes either straight to launch (when
+// the user declined Ollama) or to the Ollama config screen first (with
+// a returnTo callback that launches the chat after Ollama is applied).
+func (m newChatFromTemplateModel) finalize() tea.Cmd {
+	cfg := *m.cfg
+	cfg.LastAgent = string(m.pickedAgent.ID)
+	tpl := m.template
+	label := strings.TrimSpace(m.label.Value())
+	agentID := m.pickedAgent.ID
+	picked := m.pickedAgent
+	wantOllama := m.wantOllama
+
+	return func() tea.Msg {
+		chat, err := launcher.CreateChat(cfg.WorkspacesRoot, tpl, label, agentID)
+		if err != nil {
+			return errMsg{err: err}
+		}
+		if wantOllama {
+			// Route to the Ollama screen with a returnTo that, once the
+			// user dismisses the apply step, builds the launch plan
+			// against the chat's (now-updated) Ollama settings and
+			// fires it.
+			cfgCopy := cfg
+			chatCopy := chat
+			pickedCopy := picked
+			returnTo := func() tea.Cmd {
+				return func() tea.Msg {
+					// Re-load the chat so we pick up the freshly-saved
+					// Ollama settings (the Ollama screen wrote them).
+					reloaded, lerr := launcher.LoadChat(cfgCopy.WorkspacesRoot, chatCopy.ID)
+					if lerr != nil || reloaded == nil {
+						return errMsg{err: fmt.Errorf("reload chat after Ollama apply: %v", lerr)}
+					}
+					plan, perr := launcher.Plan(reloaded.AsWorkspace(), pickedCopy)
+					if perr != nil {
+						return errMsg{err: perr}
+					}
+					_ = launcher.TouchChat(reloaded)
+					ws := reloaded.AsWorkspace()
+					return screenDoneMsg{launch: &plan, updateCfg: &cfgCopy, launchedWS: &ws}
+				}
+			}
+			ollama := newOllamaModelWithReturn(&cfgCopy, chat.AsWorkspace(), returnTo)
+			return screenDoneMsg{next: ollama}
+		}
+
+		// No Ollama — launch directly.
+		plan, err := launcher.Plan(chat.AsWorkspace(), picked)
+		if err != nil {
+			return errMsg{err: err}
+		}
+		_ = launcher.TouchChat(&chat)
+		wsCopy := chat.AsWorkspace()
+		return screenDoneMsg{launch: &plan, updateCfg: &cfg, launchedWS: &wsCopy}
+	}
 }
 
 func (m newChatFromTemplateModel) View() string {
@@ -282,6 +343,22 @@ func (m newChatFromTemplateModel) View() string {
 			}
 			b.WriteString(selectionRow(line, isSel) + "\n")
 		}
+	case 2:
+		help = "y / n to choose · space to toggle · enter to accept · esc back"
+		b.WriteString(subtitleStyle.Render("Name: ") + m.label.Value() + "\n")
+		b.WriteString(subtitleStyle.Render("Agent: ") + m.pickedAgent.Label + "\n\n")
+		mark := "[ ] No, use the agent's default backend"
+		if m.wantOllama {
+			mark = availableStyle.Render("[x] Yes, configure an Ollama / self-hosted model")
+		}
+		b.WriteString(inputLabelStyle.Render("Self-hosted model? ") + mark + "\n\n")
+		b.WriteString(descStyle.Render(
+			"Yes → drops you into the Ollama wizard (endpoint + model + per-agent " +
+				"writes); after you apply, this chat launches. You can change or " +
+				"clear the setting later via 'o' on the home screen.") + "\n")
+		b.WriteString(descStyle.Render(
+			"No → launches immediately with whatever cloud/OAuth backend the agent " +
+				"uses by default.") + "\n")
 	}
 	if m.err != "" {
 		b.WriteString("\n" + errorStyle.Render("✗ "+m.err))
