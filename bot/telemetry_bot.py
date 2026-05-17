@@ -209,7 +209,11 @@ def nano_kb() -> InlineKeyboardMarkup:
                InlineKeyboardButton("⬆️ update", callback_data="nano:update"))
     else:
         # Surface setup directly when prereqs missing — saves a hop.
-        kb.add(InlineKeyboardButton("⚙️ setup (one-time)", callback_data="nano:setup"))
+        # The Chrome installer is gated on Debian/Ubuntu only, but the
+        # script's preflight handles non-Debian gracefully so we always
+        # show the button — clicking it on RHEL just prints a hint.
+        kb.add(InlineKeyboardButton("🌐 install Chrome", callback_data="nano:installchrome"),
+               InlineKeyboardButton("⚙️ setup (one-time)", callback_data="nano:setup"))
         kb.add(InlineKeyboardButton("📋 check state", callback_data="nano:check"))
     return kb
 
@@ -870,6 +874,59 @@ def cmd_nano_check(m):
     _run_setup_streaming(m, "check")
 
 
+@bot.message_handler(commands=["install_chrome"])
+@auth
+def cmd_install_chrome(m):
+    """Run install_chrome.sh and stream the output. The bot's
+    systemd user must be able to sudo without a password for
+    apt-get / gpg / tee — if not, we surface the sudo prompt
+    failure clearly so the user can run it from a shell."""
+    script = Path(__file__).parent / "install_chrome.sh"
+    if not script.exists():
+        bot.reply_to(m, f"❌ {script} missing")
+        return
+    placeholder = bot.reply_to(m, "📦 installing Google Chrome (needs sudo)...",
+                               parse_mode="Markdown")
+    buf: list[str] = ["📦 `install_chrome.sh`\n```"]
+
+    def _flush() -> None:
+        body = "\n".join(buf[-40:]) + "\n```"
+        try:
+            bot.edit_message_text(body, CHAT_ID, placeholder.message_id,
+                                  parse_mode="Markdown")
+        except Exception:
+            pass
+
+    try:
+        # -n makes sudo fail fast if no password cache / NOPASSWD —
+        # better than hanging on a prompt nobody can answer.
+        proc = subprocess.Popen(
+            ["sudo", "-n", "bash", str(script)],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            bufsize=1)
+    except OSError as e:
+        bot.edit_message_text(f"❌ launch failed: {e}", CHAT_ID,
+                              placeholder.message_id)
+        return
+
+    last_edit = 0.0
+    assert proc.stdout
+    for line in proc.stdout:
+        buf.append(line.rstrip())
+        now = time.time()
+        if now - last_edit > 1.5:
+            _flush()
+            last_edit = now
+    proc.wait()
+    buf.append(f"\n_exit code: {proc.returncode}_")
+    if proc.returncode != 0:
+        buf.append(
+            "\n_if you see `sudo: a password is required`, run from a shell on the VM:_\n"
+            f"_  sudo {script}_"
+        )
+    _flush()
+
+
 # ---------- chat from Telegram (Nano or any Ollama model) ----------
 #
 # One unified flow with a switchable target:
@@ -1319,6 +1376,10 @@ def on_cb(c):
         bot.answer_callback_query(c.id)
         _run_setup_streaming(c.message, "check")
         return
+    elif data == "nano:installchrome":
+        bot.answer_callback_query(c.id)
+        cmd_install_chrome(c.message)
+        return
     elif data == "nano:logs":
         tail = _tail(NANO_LOG, 20) or "(empty)"
         _safe_edit(c, f"*nano_bridge.log (last 20 lines)*\n```\n{tail}\n```",
@@ -1352,6 +1413,7 @@ SLASH_COMMANDS = [
     BotCommand("use",           "switch chat target to an Ollama model"),
     BotCommand("use_nano",      "switch chat target to Gemini Nano"),
     BotCommand("reset",         "clear chat history for current target"),
+    BotCommand("install_chrome", "install Google Chrome (needed for Nano)"),
     BotCommand("nano_setup",    "first-time Nano bridge setup"),
     BotCommand("nano_update",   "update Nano bridge"),
     BotCommand("nano_check",    "report Nano prereq state"),
