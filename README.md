@@ -1,5 +1,28 @@
 # Clade
 
+```
+                       ╲ │ ╱
+                        ╲│╱
+                         λ
+                        ╱│╲
+                       ╱ │ ╲
+
+       ██████╗ ██╗      █████╗ ██████╗ ███████╗
+      ██╔════╝ ██║     ██╔══██╗██╔══██╗██╔════╝
+      ██║      ██║     ███████║██║  ██║█████╗
+      ██║      ██║     ██╔══██║██║  ██║██╔══╝
+      ╚██████╗ ███████╗██║  ██║██████╔╝███████╗
+       ╚═════╝ ╚══════╝╚═╝  ╚═╝╚═════╝ ╚══════╝
+
+           fork agent chats from one common template
+```
+
+> **clade** *(noun, biology)*: a group of organisms that all descend
+> from one common ancestor — exactly what happens when you fork a
+> chat from a template. The Greek lower-case **λ** at the top is
+> both a nod to Half-Life's logo and the cladogram fork that the
+> launcher exists to manage.
+
 A terminal launcher for agent CLIs (**Claude Code**, **Codex CLI**,
 **OpenCode**) that pairs each session with a self-contained *template* —
 a versioned bundle of mission, playbook, rules, shell tools, and
@@ -71,6 +94,122 @@ chats/
   cloned via git into the agent's expected location.
 - **Clean TTY hand-off** — Bubble Tea releases the terminal, the agent
   inherits stdio uniformly on every OS.
+
+## Screens
+
+> The launcher renders with [Bubble Tea](https://github.com/charmbracelet/bubbletea)
+> + [Lip Gloss](https://github.com/charmbracelet/lipgloss) — k9s /
+> lazygit-style chrome (rounded outer frame, title bar, help bar). The
+> snippets below are the actual rendered output (colour stripped) — what
+> you'd see in a real terminal session.
+
+### Home — chat list
+
+The home screen is your chat list, sorted by last-used. Resume any
+past chat with Enter; persistent rows at the bottom take you into
+the new-chat wizard or the template manager.
+
+```
+╭──────────────────────────────────────────────────────────────────────╮
+│ clade │ Chats                                          ctrl-c quit   │
+│ ──────────────────────────────────────────────────────────────────── │
+│ › security-audit                (reversing · claude · 2h ago)        │
+│     red-team audit of the auth flow                                  │
+│   pr-123-review                 (code-review · codex · 1d ago)       │
+│   cve-fix                       (code-review · claude · 4d ago)      │
+│                                                                      │
+│   + new chat…                                                        │
+│   Manage templates →                                                 │
+│ ──────────────────────────────────────────────────────────────────── │
+│ ↑↓ select · enter open · n new · d delete · t templates · r refresh  │
+╰──────────────────────────────────────────────────────────────────────╯
+```
+
+### New chat — template picker
+
+Choose which template to fork from. Bundled samples (`reversing`,
+`code-review`) appear here on first run.
+
+```
+╭──────────────────────────────────────────────────────────────────────╮
+│ clade │ New chat · pick template                       ctrl-c quit   │
+│ ──────────────────────────────────────────────────────────────────── │
+│ › reversing       (binary analysis · IDA / Ghidra workflow)          │
+│   code-review     (PR audit · diff + rules + memory)                 │
+│                                                                      │
+│   + new template…                                                    │
+│ ──────────────────────────────────────────────────────────────────── │
+│ ↑↓ select · enter pick · esc back                                    │
+╰──────────────────────────────────────────────────────────────────────╯
+```
+
+### Agent picker
+
+After naming the chat you pick an agent. Detection runs `--version`
+on each candidate so broken installs are caught early; missing
+agents reveal an `i` shortcut into the per-OS installer.
+
+```
+╭──────────────────────────────────────────────────────────────────────╮
+│ clade │ Pick agent for "cve-fix"                       ctrl-c quit   │
+│ ──────────────────────────────────────────────────────────────────── │
+│ › claude       ✓ installed   1.0.92  (Anthropic Claude Code)         │
+│   codex        ✓ installed   0.42.1  (OpenAI Codex CLI)              │
+│   opencode     ✗ missing             [press i to install]            │
+│   gemini       ✓ installed   0.42.0  (Google Gemini CLI)             │
+│ ──────────────────────────────────────────────────────────────────── │
+│ enter launch · i install · o ollama · esc back                       │
+╰──────────────────────────────────────────────────────────────────────╯
+```
+
+### Ollama — local-model routing
+
+Reachable from any chat via `o`. Probes a remote endpoint, lists the
+installed models, and writes per-agent config (Claude env vars,
+Codex `config.toml`, OpenCode `opencode.json`).
+
+```
+╭──────────────────────────────────────────────────────────────────────╮
+│ clade │ Ollama config for "cve-fix"                    ctrl-c quit   │
+│ ──────────────────────────────────────────────────────────────────── │
+│ endpoint:   http://192.168.1.50:11434                                │
+│ status:     ✓ reachable · 5 models                                   │
+│                                                                      │
+│ model:    › qwen3-coder:14b                                          │
+│             llama3.1:8b                                              │
+│             phi3:mini                                                │
+│             gemma3:4b                                                │
+│             gemini-nano (via bridge)                                 │
+│                                                                      │
+│ apply to: [x] claude   [x] codex   [ ] opencode                      │
+│ ──────────────────────────────────────────────────────────────────── │
+│ space toggle · enter apply · e edit endpoint · esc back              │
+╰──────────────────────────────────────────────────────────────────────╯
+```
+
+### Launching — decoration + hand-off
+
+When you confirm, the launcher compiles the chat's workpath into its
+sandbox, stages `MEMORY.md`, clones any online skills, then releases
+the TTY so the agent inherits stdio uniformly across OSes.
+
+```
+╭──────────────────────────────────────────────────────────────────────╮
+│ clade │ Launching cve-fix                              ctrl-c quit   │
+│ ──────────────────────────────────────────────────────────────────── │
+│ ✓ compiled workpath → sandbox (target=claude)                        │
+│ ✓ prepended personality.md → SKILL.md                                │
+│ ✓ prepended language directive (en)                                  │
+│ ✓ staged MEMORY.md in sandbox/                                       │
+│ ✓ cloned online skill 'security-skills' (3 files)                    │
+│ ✓ session marker appended to MEMORY.md                               │
+│                                                                      │
+│   spawning: claude  --model qwen3-coder:14b                          │
+│   cwd:      /home/uwu/clade-workspaces/chats/cve-fix/sandbox         │
+│                                                                      │
+│   handing off TTY to the agent now...                                │
+╰──────────────────────────────────────────────────────────────────────╯
+```
 
 ## Past chatlog review
 
