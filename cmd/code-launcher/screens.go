@@ -1,0 +1,591 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
+	"sort"
+	"strings"
+
+	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/sdksdk/code-launcher/internal/launcher"
+)
+
+// Each screen is its own model type. The root model delegates Update/View
+// to the active screen and consumes "done" messages to transition.
+//
+// We hand-roll the list/selection logic instead of using bubbles/list to
+// keep the visual output tight and stay in full control of styling.
+
+// --- shared messages ------------------------------------------------------
+
+type (
+	screenDoneMsg struct {
+		next       tea.Model
+		launch     *launcher.LaunchPlan // when set, root quits and execs after Run
+		updateCfg  *launcher.Config     // when set, root persists it before transitioning
+		launchedWS *launcher.Workspace  // for post-launch hooks (memory sync-back)
+	}
+	errMsg struct{ err error }
+)
+
+func wrap(m tea.Model) tea.Cmd        { return func() tea.Msg { return screenDoneMsg{next: m} } }
+func wrapErr(err error) tea.Cmd       { return func() tea.Msg { return errMsg{err: err} } }
+func wrapLaunch(p launcher.LaunchPlan, c *launcher.Config) tea.Cmd {
+	return func() tea.Msg { return screenDoneMsg{launch: &p, updateCfg: c} }
+}
+
+// --- first-run screen ----------------------------------------------------
+
+type firstRunModel struct {
+	input  textinput.Model
+	err    string
+	status string
+}
+
+func newFirstRun() firstRunModel {
+	ti := textinput.New()
+	ti.Placeholder = defaultWorkspacesRoot()
+	ti.SetValue(defaultWorkspacesRoot())
+	ti.Focus()
+	ti.CharLimit = 4096
+	ti.Width = 60
+	return firstRunModel{input: ti}
+}
+
+func defaultWorkspacesRoot() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "code-launcher-workspaces"
+	}
+	return filepath.Join(home, "code-launcher-workspaces")
+}
+
+func (m firstRunModel) Init() tea.Cmd { return textinput.Blink }
+
+func (m firstRunModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.Type {
+		case tea.KeyEnter:
+			root, err := filepath.Abs(strings.TrimSpace(m.input.Value()))
+			if err != nil {
+				m.err = err.Error()
+				return m, nil
+			}
+			m.status = "Seeding samples..."
+			return m, func() tea.Msg {
+				execDir, _ := os.Executable()
+				if execDir != "" {
+					execDir = filepath.Dir(execDir)
+				}
+				candidates := launcher.SampleCandidates(execDir)
+				// Also try cwd-relative — useful in `go run .` from the repo root.
+				if cwd, err := os.Getwd(); err == nil {
+					candidates = append(candidates, filepath.Join(cwd, "samples", "workpaths"))
+				}
+				_, err := launcher.SeedSamples(root, candidates)
+				if err != nil {
+					return errMsg{err: fmt.Errorf("seed samples: %w", err)}
+				}
+				cfg := &launcher.Config{WorkspacesRoot: root}
+				if err := launcher.SaveConfig(cfg); err != nil {
+					return errMsg{err: fmt.Errorf("save config: %w", err)}
+				}
+				return screenDoneMsg{next: newWorkspacesModel(cfg)}
+			}
+		}
+	}
+	var cmd tea.Cmd
+	m.input, cmd = m.input.Update(msg)
+	return m, cmd
+}
+
+func (m firstRunModel) View() string {
+	var b strings.Builder
+	b.WriteString(header("First run — pick a home for your workspaces"))
+	b.WriteString("\n")
+	b.WriteString(subtitleStyle.Render(
+		"Each workspace bundles a workpath (knowledge base) and a sandbox (agent cwd).",
+	))
+	b.WriteString("\n")
+	dir, file, _ := launcher.ConfigPaths()
+	b.WriteString(versionStyle.Render(
+		fmt.Sprintf("Config will live at %s (in %s)", filepath.Base(file), dir),
+	))
+	b.WriteString("\n\n")
+	b.WriteString(inputLabelStyle.Render("Workspaces root: "))
+	b.WriteString(m.input.View())
+	b.WriteString("\n")
+	if m.status != "" {
+		b.WriteString("\n" + hintStyle.Render(m.status))
+	}
+	if m.err != "" {
+		b.WriteString("\n" + errorStyle.Render("Error: "+m.err))
+	}
+	b.WriteString(helpStyle.Render("enter to continue · ctrl-c to abort"))
+	return b.String()
+}
+
+// --- workspaces screen ---------------------------------------------------
+
+type workspacesModel struct {
+	cfg    *launcher.Config
+	items  []launcher.Workspace
+	cursor int
+	err    string
+}
+
+func newWorkspacesModel(cfg *launcher.Config) workspacesModel {
+	return workspacesModel{cfg: cfg}
+}
+
+type workspacesLoadedMsg struct {
+	items []launcher.Workspace
+	err   error
+}
+
+func (m workspacesModel) Init() tea.Cmd {
+	cfg := m.cfg
+	return func() tea.Msg {
+		items, err := launcher.ListWorkspaces(cfg.WorkspacesRoot)
+		return workspacesLoadedMsg{items: items, err: err}
+	}
+}
+
+func (m workspacesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case workspacesLoadedMsg:
+		if msg.err != nil {
+			m.err = msg.err.Error()
+			return m, nil
+		}
+		m.items = msg.items
+		return m, nil
+	case tea.KeyMsg:
+		// items length + 1 (the "new workspace" entry)
+		max := len(m.items)
+		switch msg.String() {
+		case "up", "k":
+			if m.cursor > 0 {
+				m.cursor--
+			}
+		case "down", "j":
+			if m.cursor < max {
+				m.cursor++
+			}
+		case "enter":
+			if m.cursor == len(m.items) {
+				return m, wrap(newNewWorkspaceModel(m.cfg))
+			}
+			ws := m.items[m.cursor]
+			return m, wrap(newAgentsModel(m.cfg, ws))
+		case "s":
+			if m.cursor < len(m.items) {
+				return m, wrap(newSettingsModel(m.cfg, m.items[m.cursor]))
+			}
+		case "r":
+			return m, m.Init() // refresh
+		}
+	}
+	return m, nil
+}
+
+func (m workspacesModel) View() string {
+	var b strings.Builder
+	b.WriteString(header("Workspaces in " + m.cfg.WorkspacesRoot))
+	b.WriteString("\n")
+	if m.err != "" {
+		b.WriteString(errorStyle.Render("Error: "+m.err) + "\n\n")
+	}
+	if len(m.items) == 0 {
+		b.WriteString(hintStyle.Render("No workspaces yet. Create one to get started.") + "\n\n")
+	}
+	for i, ws := range m.items {
+		render := listItemStyle.Render
+		marker := "  "
+		if i == m.cursor {
+			render = listItemSelectedStyle.Render
+			marker = "› "
+		}
+		b.WriteString(render(marker + ws.Name))
+		b.WriteString("\n")
+		if i == m.cursor && ws.Description != "" {
+			b.WriteString(descStyle.Render(ws.Description) + "\n")
+		}
+	}
+	// The synthetic "+ new workspace" item lives at cursor == len(items).
+	marker := "  "
+	newRender := listItemStyle.Render
+	if m.cursor == len(m.items) {
+		marker = "› "
+		newRender = listItemSelectedStyle.Render
+	}
+	b.WriteString(newRender(marker + "+ new workspace…") + "\n")
+
+	b.WriteString(helpStyle.Render("↑/↓ select · enter open · s settings · r refresh · ctrl-c quit"))
+	return b.String()
+}
+
+// --- new workspace screen -----------------------------------------------
+
+type newWorkspaceModel struct {
+	cfg         *launcher.Config
+	name        textinput.Model
+	description textinput.Model
+	language    textinput.Model
+	skillInput  textinput.Model
+	memory      bool
+	skills      []string
+	// 0: name, 1: desc, 2: language, 3: memory toggle, 4: online skills, 5: working
+	step int
+	err  string
+}
+
+func newNewWorkspaceModel(cfg *launcher.Config) newWorkspaceModel {
+	mk := func(ph string, w, lim int) textinput.Model {
+		ti := textinput.New()
+		ti.Placeholder = ph
+		ti.CharLimit = lim
+		ti.Width = w
+		return ti
+	}
+	name := mk("kebab-case (a-z, 0-9, '-' '_')", 50, 64)
+	name.Focus()
+	desc := mk("one-line summary of what this workpath does", 60, 200)
+	lang := mk("blank to skip · e.g. 'es', 'ja', 'Italian'", 40, 60)
+	skill := mk("git URL — blank to finish", 70, 300)
+
+	return newWorkspaceModel{
+		cfg:         cfg,
+		name:        name,
+		description: desc,
+		language:    lang,
+		skillInput:  skill,
+	}
+}
+
+func (m newWorkspaceModel) Init() tea.Cmd { return textinput.Blink }
+
+func (m newWorkspaceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		// Memory toggle step: capture y/n/space before anything else.
+		if m.step == 3 {
+			switch msg.String() {
+			case "y", "Y":
+				m.memory = true
+				m.step = 4
+				m.skillInput.Focus()
+				return m, textinput.Blink
+			case "n", "N":
+				m.memory = false
+				m.step = 4
+				m.skillInput.Focus()
+				return m, textinput.Blink
+			case " ":
+				m.memory = !m.memory
+				return m, nil
+			case "enter":
+				m.step = 4
+				m.skillInput.Focus()
+				return m, textinput.Blink
+			case "esc":
+				m.step = 2
+				m.language.Focus()
+				return m, textinput.Blink
+			}
+			return m, nil
+		}
+
+		switch msg.Type {
+		case tea.KeyEsc:
+			if m.step == 0 {
+				return m, wrap(newWorkspacesModel(m.cfg))
+			}
+			// Step back one.
+			m.step--
+			return m, nil
+		case tea.KeyEnter:
+			switch m.step {
+			case 0:
+				m.step = 1
+				m.name.Blur()
+				m.description.Focus()
+				return m, textinput.Blink
+			case 1:
+				m.step = 2
+				m.description.Blur()
+				m.language.Focus()
+				return m, textinput.Blink
+			case 2:
+				// Language is optional — blank just moves on.
+				m.step = 3
+				m.language.Blur()
+				return m, nil
+			case 4:
+				url := strings.TrimSpace(m.skillInput.Value())
+				if url != "" {
+					m.skills = append(m.skills, url)
+					m.skillInput.SetValue("")
+					return m, nil
+				}
+				// Blank Enter → finalize.
+				m.step = 5
+				cfg := m.cfg
+				name := strings.TrimSpace(m.name.Value())
+				desc := strings.TrimSpace(m.description.Value())
+				lang := strings.TrimSpace(m.language.Value())
+				mem := m.memory
+				urls := append([]string(nil), m.skills...)
+				return m, func() tea.Msg {
+					ws, err := launcher.CreateWorkspace(cfg.WorkspacesRoot, name, desc)
+					if err != nil {
+						return errMsg{err: err}
+					}
+					ws.Settings.Language = lang
+					ws.Settings.MemoryEnabled = mem
+					ws.Settings.OnlineSkills = urls
+					if err := launcher.SaveWorkspaceSettings(ws); err != nil {
+						return errMsg{err: err}
+					}
+					return screenDoneMsg{next: newAgentsModel(cfg, ws)}
+				}
+			}
+		}
+	case errMsg:
+		m.step = 0
+		m.err = msg.err.Error()
+		m.name.Focus()
+		return m, nil
+	}
+	var cmd tea.Cmd
+	switch m.step {
+	case 0:
+		m.name, cmd = m.name.Update(msg)
+	case 1:
+		m.description, cmd = m.description.Update(msg)
+	case 2:
+		m.language, cmd = m.language.Update(msg)
+	case 4:
+		m.skillInput, cmd = m.skillInput.Update(msg)
+	}
+	return m, cmd
+}
+
+func (m newWorkspaceModel) View() string {
+	var b strings.Builder
+	b.WriteString(header(fmt.Sprintf("New workspace (step %d/5)", m.step+1)))
+	b.WriteString("\n")
+	b.WriteString(hintStyle.Render("Name + description are required. Language / memory / online skills are optional."))
+	b.WriteString("\n\n")
+
+	// Already-captured fields recap.
+	if m.step >= 1 {
+		b.WriteString(subtitleStyle.Render("Name: ") + m.name.Value() + "\n")
+	}
+	if m.step >= 2 {
+		b.WriteString(subtitleStyle.Render("Description: ") + m.description.Value() + "\n")
+	}
+	if m.step >= 3 && m.language.Value() != "" {
+		b.WriteString(subtitleStyle.Render("Language: ") + m.language.Value() + "\n")
+	}
+	if m.step >= 4 {
+		mark := "no"
+		if m.memory {
+			mark = availableStyle.Render("yes")
+		}
+		b.WriteString(subtitleStyle.Render("Memory: ") + mark + "\n")
+	}
+	if m.step >= 4 && len(m.skills) > 0 {
+		b.WriteString(subtitleStyle.Render("Online skills: ") + fmt.Sprintf("%d added\n", len(m.skills)))
+	}
+	if m.step >= 1 {
+		b.WriteString("\n")
+	}
+
+	switch m.step {
+	case 0:
+		b.WriteString(inputLabelStyle.Render("Name: "))
+		b.WriteString(m.name.View() + "\n")
+	case 1:
+		b.WriteString(inputLabelStyle.Render("Description: "))
+		b.WriteString(m.description.View() + "\n")
+	case 2:
+		b.WriteString(inputLabelStyle.Render("Default language (optional): "))
+		b.WriteString(m.language.View() + "\n")
+		b.WriteString(descStyle.Render("Adds a 'respond in <lang>' directive to the agent's startup context.") + "\n")
+	case 3:
+		mark := "[ ] no"
+		if m.memory {
+			mark = availableStyle.Render("[x] yes")
+		}
+		b.WriteString(inputLabelStyle.Render("Persistent MEMORY.md? ") + mark + "\n")
+		b.WriteString(descStyle.Render("y/n to set · space to toggle · enter to accept current") + "\n")
+	case 4:
+		b.WriteString(inputLabelStyle.Render("Online skill URL: "))
+		b.WriteString(m.skillInput.View() + "\n")
+		b.WriteString(descStyle.Render("Add as many as you like (Enter on each). Blank Enter finishes.") + "\n")
+		for i, u := range m.skills {
+			b.WriteString(descStyle.Render(fmt.Sprintf("  %d. %s", i+1, u)) + "\n")
+		}
+	case 5:
+		b.WriteString(hintStyle.Render("Scaffolding workspace...") + "\n")
+	}
+
+	if m.err != "" {
+		b.WriteString("\n" + errorStyle.Render("Error: "+m.err))
+	}
+	b.WriteString(helpStyle.Render("enter to continue · esc to go back · ctrl-c to abort"))
+	return b.String()
+}
+
+// --- agents screen -------------------------------------------------------
+
+type agentsModel struct {
+	cfg     *launcher.Config
+	ws      launcher.Workspace
+	items   []launcher.Agent
+	cursor  int
+	loading bool
+}
+
+func newAgentsModel(cfg *launcher.Config, ws launcher.Workspace) agentsModel {
+	return agentsModel{cfg: cfg, ws: ws, loading: true}
+}
+
+type agentsLoadedMsg struct{ items []launcher.Agent }
+
+func (m agentsModel) Init() tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		return agentsLoadedMsg{items: launcher.DetectAgents(ctx)}
+	}
+}
+
+func (m agentsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case agentsLoadedMsg:
+		m.items = msg.items
+		m.loading = false
+		// Seed cursor on the user's last-used agent if it's available.
+		if m.cfg.LastAgent != "" {
+			for i, a := range m.items {
+				if string(a.ID) == m.cfg.LastAgent && a.Available {
+					m.cursor = i
+					break
+				}
+			}
+		}
+		return m, nil
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "esc":
+			return m, wrap(newWorkspacesModel(m.cfg))
+		case "up", "k":
+			if m.cursor > 0 {
+				m.cursor--
+			}
+		case "down", "j":
+			if m.cursor < len(m.items)-1 {
+				m.cursor++
+			}
+		case "enter":
+			if m.cursor >= len(m.items) {
+				return m, nil
+			}
+			a := m.items[m.cursor]
+			if !a.Available {
+				// Greyed-out: route to install screen on Enter too,
+				// since that's the natural action the user wants.
+				return m, wrap(newInstallModel(m.cfg, m.ws, a.ID))
+			}
+			ws := m.ws
+			cfg := *m.cfg
+			cfg.LastAgent = string(a.ID)
+			return m, func() tea.Msg {
+				plan, err := launcher.Plan(ws, a)
+				if err != nil {
+					return errMsg{err: err}
+				}
+				wsCopy := ws
+				return screenDoneMsg{launch: &plan, updateCfg: &cfg, launchedWS: &wsCopy}
+			}
+		case "i":
+			// 'i' explicitly opens the install screen for the highlighted
+			// agent (whether or not it's already installed — useful for
+			// the 'install' = upgrade path).
+			if m.cursor >= len(m.items) {
+				return m, nil
+			}
+			return m, wrap(newInstallModel(m.cfg, m.ws, m.items[m.cursor].ID))
+		case "o":
+			// 'o' opens the Ollama config screen.
+			return m, wrap(newOllamaModel(m.cfg, m.ws))
+		}
+	}
+	return m, nil
+}
+
+func (m agentsModel) View() string {
+	var b strings.Builder
+	b.WriteString(header(fmt.Sprintf("Pick an agent for %q", m.ws.Name)))
+	b.WriteString("\n")
+	if m.loading {
+		b.WriteString(hintStyle.Render("Scanning PATH for agent CLIs...") + "\n")
+		return b.String()
+	}
+
+	// Sort: available first, missing last (deterministic UX), but preserve
+	// the canonical agent order within each bucket.
+	items := append([]launcher.Agent(nil), m.items...)
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].Available != items[j].Available {
+			return items[i].Available
+		}
+		return false
+	})
+	for i, a := range items {
+		marker := "  "
+		render := listItemStyle.Render
+		if i == m.cursor {
+			marker = "› "
+			render = listItemSelectedStyle.Render
+		}
+		label := a.Label
+		statusStyle := availableStyle
+		statusText := "available"
+		if !a.Available {
+			statusStyle = missingStyle
+			statusText = "not installed"
+			render = listItemStyle.Render // never highlight a disabled row
+		}
+		line := fmt.Sprintf("%s%s %s", marker, label, statusStyle.Render("— "+statusText))
+		if a.Version != "" {
+			line += " " + versionStyle.Render("("+a.Version+")")
+		}
+		b.WriteString(render(line) + "\n")
+		if i == m.cursor && !a.Available && a.InstallHint != "" {
+			b.WriteString(descStyle.Render("install: "+a.InstallHint) + "\n")
+		}
+	}
+
+	b.WriteString("\n")
+	b.WriteString(hintStyle.Render(
+		"Grey entries aren't on PATH — press enter (or i) to install them.",
+	))
+	b.WriteString("\n")
+	b.WriteString(helpStyle.Render("↑/↓ select · enter launch/install · i install · o ollama · esc back · ctrl-c quit"))
+	return b.String()
+}
+
+// --- shared helpers ------------------------------------------------------
+
+func wpcVersionString() string {
+	return fmt.Sprintf("code-launcher / %s %s/%s", "v0.1", runtime.GOOS, runtime.GOARCH)
+}

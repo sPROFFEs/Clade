@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/sdksdk/wpc/pkg/workpath"
+	"github.com/sdksdk/code-launcher/pkg/workpath"
 )
 
 // Target is the contract for a per-CLI compiler.

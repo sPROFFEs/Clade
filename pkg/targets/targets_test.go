@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sdksdk/wpc/pkg/workpath"
+	"github.com/sdksdk/code-launcher/pkg/workpath"
 )
 
 // loadByo loads the shared fixture used by every target test.

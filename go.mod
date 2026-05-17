@@ -1,4 +1,4 @@
-module github.com/sdksdk/wpc
+module github.com/sdksdk/code-launcher
 
 go 1.26.1
 

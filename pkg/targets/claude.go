@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sdksdk/wpc/pkg/workpath"
+	"github.com/sdksdk/code-launcher/pkg/workpath"
 )
 
 // claudeTarget emits a Claude Code skill bundle.

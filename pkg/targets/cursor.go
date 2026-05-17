@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sdksdk/wpc/pkg/workpath"
+	"github.com/sdksdk/code-launcher/pkg/workpath"
 )
 
 // cursorTarget emits a Cursor rule file.

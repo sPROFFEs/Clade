@@ -1,6 +1,6 @@
-# `waifu` — the TUI launcher
+# `code-launcher` — the TUI launcher
 
-`waifu` is a Bubble Tea TUI that wraps `wpc` to give you an
+`code-launcher` is a Bubble Tea TUI that wraps `wpc` to give you an
 agent-launch-pad: pick a workspace, pick an agent CLI, get dropped into
 a sandbox with the workpath already compiled in.
 
@@ -52,8 +52,8 @@ capture work that hooks into per-agent session storage; not started yet.
 ```sh
 git clone <repo>
 cd skills-project
-go build -o waifu ./cmd/waifu      # waifu.exe on Windows
-./waifu
+go build -o code-launcher ./cmd/code-launcher      # code-launcher.exe on Windows
+./code-launcher
 ```
 
 ### From a release archive
@@ -63,18 +63,18 @@ Run the binary from inside the bundle — `samples/` is sitting next to it,
 so first-run can seed it.
 
 ```sh
-tar -xzf waifu-0.1.0-linux-amd64.tar.gz
+tar -xzf code-launcher-0.1.0-linux-amd64.tar.gz
 cd linux-amd64
-./waifu
+./code-launcher
 ```
 
 ## Configuration
 
 | File                                          | Holds                                          |
 |-----------------------------------------------|------------------------------------------------|
-| `$XDG_CONFIG_HOME/waifu/config.json` (Linux)  | `workspacesRoot`, `lastAgent`, `wpcBinary?`   |
-| `~/Library/Application Support/waifu/...` (macOS) | same                                       |
-| `%AppData%\waifu\config.json` (Windows)       | same                                           |
+| `$XDG_CONFIG_HOME/code-launcher/config.json` (Linux)  | `workspacesRoot`, `lastAgent`, `wpcBinary?`   |
+| `~/Library/Application Support/code-launcher/...` (macOS) | same                                       |
+| `%AppData%de-launcher\config.json` (Windows)       | same                                           |
 | `<workspaces-root>/<name>/workpath/`          | wpc source (`mission.md`, `playbook.md`, …)    |
 | `<workspaces-root>/<name>/sandbox/`           | Agent cwd; compiled artifacts; gitignored      |
 | `<workspaces-root>/<name>/workspace.json`     | Future: `language`, `onlineSkills[]`, `memoryEnabled` |
@@ -91,7 +91,7 @@ User picks workspace "reversing" → picks Codex CLI
                             ▼
         <ws>/sandbox/AGENTS.md            ← Codex reads this on every prompt
         <ws>/sandbox/AGENTS.assets/...    ← Tools + subagent prompts
-        <ws>/sandbox/WAIFU_SANDBOX.md     ← Orientation file for the user
+        <ws>/sandbox/SANDBOX.md     ← Orientation file for the user
                             │
                             ▼
             Bubble Tea quits; `codex` spawned with cwd=<ws>/sandbox

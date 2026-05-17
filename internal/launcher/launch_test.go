@@ -33,7 +33,7 @@ func TestPrepareSandbox_CompilesCodexTarget(t *testing.T) {
 	}
 
 	// Codex target writes AGENTS.md + AGENTS.assets at sandbox root.
-	for _, rel := range []string{"AGENTS.md", "AGENTS.assets/tools/file_summary.sh", "WAIFU_SANDBOX.md"} {
+	for _, rel := range []string{"AGENTS.md", "AGENTS.assets/tools/file_summary.sh", "SANDBOX.md"} {
 		if _, err := os.Stat(filepath.Join(ws.SandboxDir, rel)); err != nil {
 			t.Errorf("expected %s in sandbox: %v", rel, err)
 		}

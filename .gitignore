@@ -2,7 +2,7 @@ build/
 dist/
 wpc
 wpc.exe
-waifu
-waifu.exe
+code-launcher
+code-launcher.exe
 *.test
 *.tmp

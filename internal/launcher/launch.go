@@ -7,8 +7,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/sdksdk/wpc/pkg/targets"
-	"github.com/sdksdk/wpc/pkg/workpath"
+	"github.com/sdksdk/code-launcher/pkg/targets"
+	"github.com/sdksdk/code-launcher/pkg/workpath"
 )
 
 // PrepareSandbox loads the workpath, validates it, and compiles it into
@@ -71,7 +71,7 @@ var LastDecorationNotes []string
 // writeSandboxReadme drops an orientation file on first compile so the
 // user lands in something self-explanatory when they cd into the sandbox.
 func writeSandboxReadme(ws Workspace, agent Agent) error {
-	path := filepath.Join(ws.SandboxDir, "WAIFU_SANDBOX.md")
+	path := filepath.Join(ws.SandboxDir, "SANDBOX.md")
 	if _, err := os.Stat(path); err == nil {
 		return nil
 	} else if !errors.Is(err, fs.ErrNotExist) {

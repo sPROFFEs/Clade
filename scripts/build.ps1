@@ -1,4 +1,4 @@
-# Cross-compile wpc + waifu for every supported OS/arch and stage them
+# Cross-compile wpc + code-launcher for every supported OS/arch and stage them
 # under dist\<os>-<arch>\ ready for distribution.
 #
 # Usage:
@@ -47,8 +47,8 @@ function Build-One($triplet) {
 
     & go build -trimpath -ldflags $LdFlags -o (Join-Path $out "wpc$ext") "./cmd/wpc"
     if ($LASTEXITCODE -ne 0) { throw "wpc build failed for $triplet" }
-    & go build -trimpath -ldflags $LdFlags -o (Join-Path $out "waifu$ext") "./cmd/waifu"
-    if ($LASTEXITCODE -ne 0) { throw "waifu build failed for $triplet" }
+    & go build -trimpath -ldflags $LdFlags -o (Join-Path $out "code-launcher$ext") "./cmd/code-launcher"
+    if ($LASTEXITCODE -ne 0) { throw "code-launcher build failed for $triplet" }
 
     # Bundle samples + docs so the binary is self-sufficient at first run.
     Copy-Item -Recurse -Force "samples" (Join-Path $out "samples")
@@ -58,7 +58,7 @@ function Build-One($triplet) {
     Copy-Item "README.md" $out
 
     if (-not $NoArchive) {
-        $archiveBase = "waifu-$Version-$triplet"
+        $archiveBase = "code-launcher-$Version-$triplet"
         if ($goos -eq "windows") {
             $zip = Join-Path "dist" "$archiveBase.zip"
             if (Test-Path $zip) { Remove-Item $zip }
