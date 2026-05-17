@@ -325,11 +325,17 @@ class Bridge:
         # if the operator explicitly forces it.
         resolved = CHROME_BIN
         if not resolved:
+            # Prefer Dev (unstable) → Beta → Stable. Chrome's Linux
+            # AI rollout is most complete on the Dev channel; if the
+            # operator has both installed they almost certainly mean
+            # the more-permissive one to be used.
             for candidate in (
-                "/usr/bin/google-chrome",
-                "/usr/bin/google-chrome-stable",
-                "/usr/bin/google-chrome-beta",
                 "/usr/bin/google-chrome-unstable",
+                "/opt/google/chrome-unstable/chrome",
+                "/usr/bin/google-chrome-beta",
+                "/opt/google/chrome-beta/chrome",
+                "/usr/bin/google-chrome-stable",
+                "/usr/bin/google-chrome",
                 "/opt/google/chrome/chrome",
                 "/snap/bin/google-chrome",
                 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
@@ -338,6 +344,19 @@ class Bridge:
                     resolved = candidate
                     log.info("auto-detected Google Chrome at %s", resolved)
                     break
+            # Log the version so it's obvious in the trail which
+            # channel Chrome reported as. "Google Chrome 148.x" = stable;
+            # "Google Chrome 149.x" or higher with a "dev"/"beta" tag
+            # means we picked up the right channel.
+            if resolved:
+                try:
+                    ver = subprocess.check_output(
+                        [resolved, "--version"], timeout=5,
+                        stderr=subprocess.DEVNULL).decode().strip()
+                    log.info("chrome version: %s", ver)
+                except (OSError, subprocess.TimeoutExpired,
+                        subprocess.CalledProcessError):
+                    pass
         if not resolved:
             resolved = self.pw.chromium.executable_path
             log.warning(
@@ -403,7 +422,18 @@ class Bridge:
         log.info("chromium context up")
 
         self.page = await self.ctx.new_page()
-        await self.page.goto("about:blank")
+        # Some Chrome AI APIs refuse to register on about:blank because
+        # it's an opaque origin. A real https:// page gives us a
+        # secure context with a stable origin string. We pick a
+        # minimal page (no extra deps) and inject the driver there.
+        try:
+            await self.page.goto("https://example.com",
+                                 wait_until="domcontentloaded", timeout=15000)
+        except Exception:
+            # No network? Fall back to about:blank — the diagnostic
+            # below will explain what's exposed there.
+            log.warning("could not load https://example.com — falling back to about:blank")
+            await self.page.goto("about:blank")
         # Inject the driver and surface availability so a bad profile
         # blows up here, not on the first user prompt.
         await self.page.add_script_tag(content=DRIVER_JS)

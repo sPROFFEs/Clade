@@ -291,11 +291,15 @@ def _detect_chrome() -> Optional[str]:
     download into it. Operator override wins."""
     if CHROME_BIN:
         return CHROME_BIN
+    # Order matches the bridge's auto-detect: Dev → Beta → Stable.
+    # Chrome's Linux AI rollout is most complete on Dev.
     for candidate in (
-        "/usr/bin/google-chrome",
-        "/usr/bin/google-chrome-stable",
-        "/usr/bin/google-chrome-beta",
         "/usr/bin/google-chrome-unstable",
+        "/opt/google/chrome-unstable/chrome",
+        "/usr/bin/google-chrome-beta",
+        "/opt/google/chrome-beta/chrome",
+        "/usr/bin/google-chrome-stable",
+        "/usr/bin/google-chrome",
         "/opt/google/chrome/chrome",
         "/snap/bin/google-chrome",
         "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
