@@ -34,10 +34,12 @@ from typing import Optional
 import psutil
 import telebot
 from telebot.types import (
+    BotCommand,
+    ForceReply,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
-    ReplyKeyboardMarkup,
     KeyboardButton,
+    ReplyKeyboardMarkup,
 )
 
 # Local modules
@@ -87,38 +89,98 @@ def auth(func):
 # ---------- keyboards ----------
 
 def main_kb() -> ReplyKeyboardMarkup:
+    """Persistent reply keyboard. Stays under every message so the
+    user can always jump to a top-level area in one tap."""
     kb = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     kb.add(KeyboardButton("📊 status"),
-           KeyboardButton("🧠 ollama"),
-           KeyboardButton("🤖 nano bridge"),
+           KeyboardButton("🧠 ollama"))
+    kb.add(KeyboardButton("🤖 nano bridge"),
+           KeyboardButton("⚡ loaded"))
+    kb.add(KeyboardButton("ℹ️ help"),
            KeyboardButton("💀 kill all"))
     return kb
 
 
 def ollama_kb() -> InlineKeyboardMarkup:
+    """Top-level Ollama menu. Each button leads to its own
+    interactive flow — no more 'type /pull <name>' hints."""
     kb = InlineKeyboardMarkup(row_width=2)
-    kb.add(InlineKeyboardButton("📦 list", callback_data="oll:list"),
+    kb.add(InlineKeyboardButton("📦 browse models", callback_data="oll:browse"),
            InlineKeyboardButton("⚡ loaded", callback_data="oll:loaded"))
-    kb.add(InlineKeyboardButton("⬇️  pull (type /pull <name>)", callback_data="oll:hint_pull"),
-           InlineKeyboardButton("🗑  rm  (type /rm <name>)", callback_data="oll:hint_rm"))
-    kb.add(InlineKeyboardButton("🔥 load (type /load <name>)", callback_data="oll:hint_load"),
-           InlineKeyboardButton("❄️  unload (type /unload <name>)", callback_data="oll:hint_unload"))
-    kb.add(InlineKeyboardButton("⏱  keepalive (type /keepalive <dur>)", callback_data="oll:hint_keep"))
+    kb.add(InlineKeyboardButton("⬇️ pull new model", callback_data="oll:pull"),
+           InlineKeyboardButton("⏱ keepalive", callback_data="oll:keepmenu"))
+    kb.add(InlineKeyboardButton("🔄 refresh", callback_data="oll:refresh"))
+    return kb
+
+
+def model_list_kb(models: list, prefix: str = "m") -> InlineKeyboardMarkup:
+    """One button per installed model — clicking opens the action
+    sheet for that model. Truncated names so long IDs don't overflow."""
+    kb = InlineKeyboardMarkup(row_width=1)
+    for m in models:
+        label = f"{m.name[:34]:34s} · {oc._humanize_mb(m.size_mb)}"
+        kb.add(InlineKeyboardButton(label.strip() + "  ›",
+                                    callback_data=f"{prefix}:open:{m.name}"))
+    kb.add(InlineKeyboardButton("← back", callback_data="oll:back"))
+    return kb
+
+
+def model_actions_kb(name: str, is_loaded: bool) -> InlineKeyboardMarkup:
+    """Per-model action sheet. Hides 'unload' when not in VRAM,
+    'load' when already loaded — no dead actions."""
+    kb = InlineKeyboardMarkup(row_width=2)
+    if is_loaded:
+        kb.add(InlineKeyboardButton("❄️ unload", callback_data=f"m:unload:{name}"))
+    else:
+        kb.add(InlineKeyboardButton("🔥 load", callback_data=f"m:load:{name}"))
+    kb.add(InlineKeyboardButton("🗑 delete", callback_data=f"m:delask:{name}"))
+    kb.add(InlineKeyboardButton("← back", callback_data="oll:browse"))
+    return kb
+
+
+def keepalive_kb() -> InlineKeyboardMarkup:
+    """Quick-pick TTLs. 'pin' = -1 (until ollama restart),
+    '❄️ 0' = 0 (flush right now)."""
+    kb = InlineKeyboardMarkup(row_width=5)
+    kb.row(*[InlineKeyboardButton(lbl, callback_data=f"k:{v}")
+             for lbl, v in [("5m", "5m"), ("1h", "1h"), ("24h", "24h"),
+                            ("📌 pin", "-1"), ("❄️ 0", "0")]])
+    kb.add(InlineKeyboardButton("← back", callback_data="oll:back"))
+    return kb
+
+
+def confirm_kb(yes_data: str, label_yes: str = "✅ yes",
+               label_no: str = "❌ no") -> InlineKeyboardMarkup:
+    """Two-button confirmation. yes_data is the callback fired on
+    'yes'; 'no' always cancels (callback c:cancel)."""
+    kb = InlineKeyboardMarkup(row_width=2)
+    kb.add(InlineKeyboardButton(label_yes, callback_data=yes_data),
+           InlineKeyboardButton(label_no, callback_data="c:cancel"))
+    return kb
+
+
+def status_refresh_kb() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardMarkup(row_width=2)
+    kb.add(InlineKeyboardButton("🔄 refresh", callback_data="status:refresh"),
+           InlineKeyboardButton("⚡ loaded", callback_data="oll:loaded"))
     return kb
 
 
 def nano_kb() -> InlineKeyboardMarkup:
     kb = InlineKeyboardMarkup(row_width=2)
     if bridge.running():
-        kb.add(InlineKeyboardButton("⏹  stop bridge", callback_data="nano:stop"),
+        kb.add(InlineKeyboardButton("⏹ stop bridge", callback_data="nano:stop"),
                InlineKeyboardButton("🔗 url", callback_data="nano:url"))
+        kb.add(InlineKeyboardButton("📋 status", callback_data="nano:status"),
+               InlineKeyboardButton("📜 logs", callback_data="nano:logs"))
     elif _bridge_ready():
-        kb.add(InlineKeyboardButton("▶️  start bridge", callback_data="nano:start"))
+        kb.add(InlineKeyboardButton("▶️ start bridge", callback_data="nano:start"))
+        kb.add(InlineKeyboardButton("📋 status", callback_data="nano:status"),
+               InlineKeyboardButton("⬆️ update", callback_data="nano:update"))
     else:
         # Surface setup directly when prereqs missing — saves a hop.
-        kb.add(InlineKeyboardButton("⚙️  setup (one-time)", callback_data="nano:setup"))
-    kb.add(InlineKeyboardButton("📋 status", callback_data="nano:status"),
-           InlineKeyboardButton("⬆️  update", callback_data="nano:update"))
+        kb.add(InlineKeyboardButton("⚙️ setup (one-time)", callback_data="nano:setup"))
+        kb.add(InlineKeyboardButton("📋 check state", callback_data="nano:check"))
     return kb
 
 
@@ -453,17 +515,19 @@ def cmd_start(m):
 @auth
 def cmd_help(m):
     bot.send_message(CHAT_ID, (
-        "*hardware*\n"
-        "  📊 status — full snapshot\n"
-        "\n*ollama*\n"
-        "  /models — list installed\n"
+        "_tip: every slash command also appears in Telegram's `/` menu._\n"
+        "\n*hardware*\n"
+        "  📊 status / /status — full snapshot (with 🔄 refresh)\n"
+        "\n*ollama* — tap *🧠 ollama* for a button menu\n"
+        "  /models — interactive browser (tap a model for load/unload/delete)\n"
         "  /loaded — currently in VRAM\n"
-        "  /pull <name>\n"
+        "  /pull [name] — no arg → asks interactively\n"
         "  /rm <name>\n"
         "  /load <name>\n"
         "  /unload <name>\n"
-        "  /keepalive <duration> — `5m` `1h` `24h` `-1` (pin) `0` (unload)\n"
-        "\n*nano bridge*\n"
+        "  /keepalive [duration] — `5m` `1h` `24h` `-1` (pin) `0` (unload),\n"
+        "    no arg → shows quick-pick buttons\n"
+        "\n*nano bridge* — tap *🤖 nano bridge* for state-aware buttons\n"
         "  /nano_setup — one-time: install Playwright + Chromium + download Nano\n"
         "  /nano_update — upgrade bridge deps + Chromium + re-prime Nano\n"
         "  /nano_check — report install state (no changes)\n"
@@ -472,21 +536,28 @@ def cmd_help(m):
         "  /nano_url — paste-ready URL for code-launcher\n"
         "  /nano_status — running state + prereqs\n"
         "\n*danger*\n"
-        "  💀 kill all — stop ollama + bridge, free VRAM\n"
+        "  /kill or 💀 kill all — stop ollama + bridge, free VRAM (asks ✅/❌ first)\n"
     ), parse_mode="Markdown")
+
+
+@bot.message_handler(commands=["status"])
+@auth
+def cmd_status(m):
+    bot.send_message(CHAT_ID, status_text(), parse_mode="Markdown",
+                     reply_markup=status_refresh_kb())
 
 
 @bot.message_handler(func=lambda m: m.text == "📊 status")
 @auth
 def btn_status(m):
-    bot.send_message(CHAT_ID, status_text(), parse_mode="Markdown")
+    cmd_status(m)
 
 
 @bot.message_handler(func=lambda m: m.text == "🧠 ollama")
 @auth
 def btn_ollama(m):
-    bot.send_message(CHAT_ID, "*ollama menu* — pick or use `/help`",
-                     parse_mode="Markdown", reply_markup=ollama_kb())
+    bot.send_message(CHAT_ID, "*ollama menu*", parse_mode="Markdown",
+                     reply_markup=ollama_kb())
 
 
 @bot.message_handler(func=lambda m: m.text == "🤖 nano bridge")
@@ -496,12 +567,32 @@ def btn_nano(m):
                      reply_markup=nano_kb())
 
 
+@bot.message_handler(func=lambda m: m.text in ("ℹ️ help", "ℹ help"))
+@auth
+def btn_help(m):
+    # Reply-keyboard help shortcut → reuse the /help handler.
+    cmd_help(m)
+
+
+@bot.message_handler(func=lambda m: m.text == "⚡ loaded")
+@auth
+def btn_loaded(m):
+    cmd_loaded(m)
+
+
+@bot.message_handler(commands=["kill"])
+@auth
+def cmd_kill(m):
+    # Confirmation prompt before the destructive op.
+    bot.send_message(CHAT_ID,
+                     "Stop Ollama + nano bridge and clear VRAM?",
+                     reply_markup=confirm_kb("c:kill"))
+
+
 @bot.message_handler(func=lambda m: m.text == "💀 kill all")
 @auth
 def btn_kill(m):
-    bot.send_message(CHAT_ID, "🧹 purging VRAM, stopping ollama + bridge...")
-    purge()
-    bot.send_message(CHAT_ID, "✅ purged.")
+    cmd_kill(m)
 
 
 # ---------- ollama slash commands ----------
@@ -515,11 +606,11 @@ def cmd_models(m):
         bot.reply_to(m, f"❌ {e}")
         return
     if not items:
-        bot.reply_to(m, "(no models installed; pull one with `/pull <name>`)",
-                     parse_mode="Markdown")
+        bot.reply_to(m, "(no models installed; tap *⬇️ pull new model* or `/pull <name>`)",
+                     parse_mode="Markdown", reply_markup=ollama_kb())
         return
-    body = "\n".join("• " + oc.humanize(x) for x in items)
-    bot.reply_to(m, f"*models ({len(items)})*\n{body}", parse_mode="Markdown")
+    bot.reply_to(m, f"*installed models ({len(items)})* — tap one:",
+                 parse_mode="Markdown", reply_markup=model_list_kb(items))
 
 
 @bot.message_handler(commands=["loaded"])
@@ -542,18 +633,19 @@ def _arg(message) -> str:
     return parts[1] if len(parts) > 1 else ""
 
 
-@bot.message_handler(commands=["pull"])
-@auth
-def cmd_pull(m):
-    name = _arg(m)
+def _do_pull(name: str, reply_to_msg=None) -> None:
+    """Shared pull logic so /pull, the force-reply flow, and the
+    inline 'pull new model' button all share one progress-updating
+    implementation."""
+    name = name.strip()
     if not name:
-        bot.reply_to(m, "usage: `/pull <model>` — e.g. `/pull gemma3:4b`",
-                     parse_mode="Markdown")
+        bot.send_message(CHAT_ID, "❌ empty model name; cancelled.")
         return
-    msg = bot.reply_to(m, f"⬇️  pulling `{name}`...", parse_mode="Markdown")
+    msg = bot.send_message(CHAT_ID, f"⬇️ pulling `{name}`...",
+                           parse_mode="Markdown",
+                           reply_to_message_id=reply_to_msg.message_id if reply_to_msg else None)
     try:
         for line in oc.pull(name):
-            # Edit the same message rather than spamming new ones.
             try:
                 bot.edit_message_text(line, CHAT_ID, msg.message_id)
             except Exception:
@@ -561,7 +653,37 @@ def cmd_pull(m):
     except oc.OllamaError as e:
         bot.send_message(CHAT_ID, f"❌ pull failed: {e}")
         return
-    bot.send_message(CHAT_ID, f"✅ `{name}` ready", parse_mode="Markdown")
+    bot.send_message(CHAT_ID, f"✅ `{name}` ready", parse_mode="Markdown",
+                     reply_markup=ollama_kb())
+
+
+@bot.message_handler(commands=["pull"])
+@auth
+def cmd_pull(m):
+    name = _arg(m)
+    if not name:
+        # No arg given — ask interactively. Telegram's ForceReply
+        # places the cursor in the input box pre-quoted to the bot,
+        # so the next message becomes the model name without the user
+        # needing to remember "/pull".
+        prompt = bot.send_message(
+            CHAT_ID,
+            "model to pull? (e.g. `gemma3:4b`, `qwen3:7b`, `phi3:mini`)",
+            parse_mode="Markdown",
+            reply_markup=ForceReply(selective=True))
+        bot.register_next_step_handler(prompt, _pull_step)
+        return
+    _do_pull(name, reply_to_msg=m)
+
+
+def _pull_step(m) -> None:
+    if m.chat.id != CHAT_ID:
+        return
+    name = (m.text or "").strip()
+    if not name or name.startswith("/"):
+        bot.reply_to(m, "cancelled.")
+        return
+    _do_pull(name, reply_to_msg=m)
 
 
 @bot.message_handler(commands=["rm", "delete"])
@@ -619,11 +741,10 @@ def cmd_unload(m):
 def cmd_keepalive(m):
     dur = _arg(m)
     if not dur:
-        bot.reply_to(m, (
-            f"current default keep_alive: `{oc.DEFAULT_KEEP_ALIVE}`\n"
-            "usage: `/keepalive <duration>` — `5m`, `1h`, `24h`, `-1` (pin), `0` (immediate unload)\n"
-            "applies to subsequent `/load` calls; affects new requests until the next change."
-        ), parse_mode="Markdown")
+        bot.reply_to(m,
+                     f"*keepalive* — currently `{oc.DEFAULT_KEEP_ALIVE}`\n"
+                     "applies to currently-loaded models + future loads.",
+                     parse_mode="Markdown", reply_markup=keepalive_kb())
         return
     # Apply to every currently-loaded model.
     try:
@@ -706,61 +827,236 @@ def cmd_nano_check(m):
 
 # ---------- inline keyboard callbacks ----------
 
+def _loaded_names() -> set:
+    """Names currently in VRAM, used to render the right per-model
+    action sheet (load vs unload)."""
+    try:
+        return {r.name for r in oc.list_running()}
+    except oc.OllamaError:
+        return set()
+
+
+def _safe_edit(c, text: str, kb=None) -> None:
+    """Edit the message the callback originated from, falling back to
+    sending a new one if the edit is rejected (e.g. content identical).
+    Keeps the chat tidy — clicking inline buttons mutates one panel
+    rather than spawning a new bubble per click."""
+    try:
+        bot.edit_message_text(text, CHAT_ID, c.message.message_id,
+                              parse_mode="Markdown", reply_markup=kb)
+    except Exception:
+        bot.send_message(CHAT_ID, text, parse_mode="Markdown", reply_markup=kb)
+
+
 @bot.callback_query_handler(func=lambda c: True)
 def on_cb(c):
     if c.message.chat.id != CHAT_ID:
         return
-    if c.data == "oll:list":
+    data = c.data or ""
+
+    # --- ollama top-level ---
+    if data == "oll:back" or data == "oll:refresh":
+        _safe_edit(c, "*ollama menu*", ollama_kb())
+
+    elif data == "oll:browse":
         try:
             items = oc.list_models()
-            body = "\n".join("• " + oc.humanize(x) for x in items) or "(none)"
         except oc.OllamaError as e:
-            body = f"❌ {e}"
-        bot.send_message(CHAT_ID, f"*models*\n{body}", parse_mode="Markdown")
-    elif c.data == "oll:loaded":
+            _safe_edit(c, f"❌ {e}", ollama_kb())
+        else:
+            if not items:
+                _safe_edit(c, "no models installed yet. tap *⬇️ pull new model*.",
+                           ollama_kb())
+            else:
+                _safe_edit(c, f"*installed models ({len(items)})* — tap one:",
+                           model_list_kb(items))
+
+    elif data == "oll:loaded":
         try:
             items = oc.list_running()
             body = "\n".join("⚡ " + oc.humanize_running(x) for x in items) or "(none loaded)"
         except oc.OllamaError as e:
             body = f"❌ {e}"
-        bot.send_message(CHAT_ID, f"*loaded*\n{body}", parse_mode="Markdown")
-    elif c.data == "oll:hint_pull":
-        bot.send_message(CHAT_ID, "type:  `/pull <model-name>`  e.g. `/pull gemma3:4b`",
-                         parse_mode="Markdown")
-    elif c.data == "oll:hint_rm":
-        bot.send_message(CHAT_ID, "type:  `/rm <model-name>`", parse_mode="Markdown")
-    elif c.data == "oll:hint_load":
-        bot.send_message(CHAT_ID, "type:  `/load <model-name> [keep_alive]`",
-                         parse_mode="Markdown")
-    elif c.data == "oll:hint_unload":
-        bot.send_message(CHAT_ID, "type:  `/unload <model-name>`", parse_mode="Markdown")
-    elif c.data == "oll:hint_keep":
-        bot.send_message(CHAT_ID, "type:  `/keepalive <duration>` — `5m`, `1h`, `24h`, `-1`, `0`",
-                         parse_mode="Markdown")
-    elif c.data == "nano:start":
-        bot.send_message(CHAT_ID, "starting bridge...")
-        bot.send_message(CHAT_ID, bridge.start(), parse_mode="Markdown")
-    elif c.data == "nano:stop":
-        bot.send_message(CHAT_ID, bridge.stop())
-    elif c.data == "nano:url":
-        bot.send_message(CHAT_ID, (
-            "*endpoint:* " + bridge.url() + "\n"
-            "*model:* `gemini-nano`"), parse_mode="Markdown")
-    elif c.data == "nano:status":
+        _safe_edit(c, f"*loaded*\n{body}", ollama_kb())
+
+    elif data == "oll:pull":
+        bot.answer_callback_query(c.id)
+        prompt = bot.send_message(
+            CHAT_ID,
+            "model to pull? (e.g. `gemma3:4b`, `qwen3:7b`, `phi3:mini`)",
+            parse_mode="Markdown",
+            reply_markup=ForceReply(selective=True))
+        bot.register_next_step_handler(prompt, _pull_step)
+        return
+
+    elif data == "oll:keepmenu":
+        _safe_edit(c,
+                   f"*keepalive* — currently `{oc.DEFAULT_KEEP_ALIVE}`\n"
+                   "applies to currently-loaded models + future loads.",
+                   keepalive_kb())
+
+    # --- per-model action sheet ---
+    elif data.startswith("m:open:"):
+        name = data[len("m:open:"):]
+        loaded = name in _loaded_names()
+        _safe_edit(c, f"*{name}* {'· ⚡ loaded' if loaded else ''}",
+                   model_actions_kb(name, loaded))
+
+    elif data.startswith("m:load:"):
+        name = data[len("m:load:"):]
+        bot.answer_callback_query(c.id, f"loading {name}...")
+        try:
+            oc.load(name)
+        except oc.OllamaError as e:
+            _safe_edit(c, f"❌ load failed: {e}", model_actions_kb(name, False))
+            return
+        _safe_edit(c, f"⚡ `{name}` loaded (TTL `{oc.DEFAULT_KEEP_ALIVE}`)",
+                   model_actions_kb(name, True))
+        return
+
+    elif data.startswith("m:unload:"):
+        name = data[len("m:unload:"):]
+        bot.answer_callback_query(c.id, f"unloading {name}...")
+        try:
+            oc.unload(name)
+        except oc.OllamaError as e:
+            _safe_edit(c, f"❌ unload failed: {e}", model_actions_kb(name, True))
+            return
+        _safe_edit(c, f"❄️ `{name}` unloaded", model_actions_kb(name, False))
+        return
+
+    elif data.startswith("m:delask:"):
+        name = data[len("m:delask:"):]
+        _safe_edit(c, f"delete *{name}*? this frees disk space and cannot be undone.",
+                   confirm_kb(f"m:del:{name}"))
+
+    elif data.startswith("m:del:"):
+        name = data[len("m:del:"):]
+        bot.answer_callback_query(c.id, f"deleting {name}...")
+        try:
+            oc.delete(name)
+        except oc.OllamaError as e:
+            _safe_edit(c, f"❌ delete failed: {e}", ollama_kb())
+            return
+        _safe_edit(c, f"🗑 `{name}` removed.", ollama_kb())
+        return
+
+    # --- keepalive quick-pick ---
+    elif data.startswith("k:"):
+        dur = data[2:]
+        oc.DEFAULT_KEEP_ALIVE = dur
+        try:
+            running = oc.list_running()
+        except oc.OllamaError:
+            running = []
+        errs = []
+        for r in running:
+            try:
+                oc.load(r.name, keep_alive=dur)
+            except oc.OllamaError as e:
+                errs.append(f"{r.name}: {e}")
+        suffix = f" · applied to {len(running)} loaded model(s)" if running else ""
+        if errs:
+            _safe_edit(c, f"⏱ keep_alive = `{dur}`{suffix}\n❌ partial:\n" + "\n".join(errs),
+                       ollama_kb())
+        else:
+            _safe_edit(c, f"⏱ keep_alive = `{dur}`{suffix}", ollama_kb())
+        return
+
+    # --- generic confirmation outcomes ---
+    elif data == "c:cancel":
+        _safe_edit(c, "cancelled.", ollama_kb())
+        return
+    elif data == "c:kill":
+        bot.answer_callback_query(c.id, "purging...")
+        _safe_edit(c, "🧹 purging VRAM, stopping ollama + bridge...")
+        purge()
+        bot.send_message(CHAT_ID, "✅ purged.", reply_markup=main_kb())
+        return
+
+    # --- status refresh ---
+    elif data == "status:refresh":
+        _safe_edit(c, status_text(), status_refresh_kb())
+        return
+
+    # --- nano bridge ---
+    elif data == "nano:start":
+        bot.answer_callback_query(c.id, "starting bridge...")
+        result = bridge.start()
+        _safe_edit(c, result, nano_kb())
+        return
+    elif data == "nano:stop":
+        bot.answer_callback_query(c.id, "stopping...")
+        _safe_edit(c, bridge.stop(), nano_kb())
+        return
+    elif data == "nano:url":
+        _safe_edit(c,
+                   f"*endpoint:* `{bridge.url()}`\n"
+                   f"_(localhost: `{bridge.localhost_url()}`)_\n"
+                   f"*model:* `gemini-nano`",
+                   nano_kb())
+        return
+    elif data == "nano:status":
         body = bridge.status() + f"\n*prereqs:* {'✓ ready' if _bridge_ready() else '❌ run /nano_setup'}"
-        bot.send_message(CHAT_ID, body, parse_mode="Markdown")
-    elif c.data == "nano:setup":
+        _safe_edit(c, body, nano_kb())
+        return
+    elif data == "nano:setup":
+        bot.answer_callback_query(c.id)
         _run_setup_streaming(c.message, "install")
-    elif c.data == "nano:update":
+        return
+    elif data == "nano:update":
+        bot.answer_callback_query(c.id)
         _run_setup_streaming(c.message, "update")
+        return
+    elif data == "nano:check":
+        bot.answer_callback_query(c.id)
+        _run_setup_streaming(c.message, "check")
+        return
+    elif data == "nano:logs":
+        tail = _tail(NANO_LOG, 20) or "(empty)"
+        _safe_edit(c, f"*nano_bridge.log (last 20 lines)*\n```\n{tail}\n```",
+                   nano_kb())
+        return
+
     bot.answer_callback_query(c.id)
 
 
 # ---------- main ----------
 
+SLASH_COMMANDS = [
+    BotCommand("start",         "show main menu"),
+    BotCommand("help",          "all commands"),
+    BotCommand("status",        "hardware + ollama + bridge snapshot"),
+    BotCommand("models",        "browse / load / delete installed models"),
+    BotCommand("loaded",        "models currently in VRAM"),
+    BotCommand("pull",          "download a model (or just type the name)"),
+    BotCommand("rm",            "delete a model"),
+    BotCommand("load",          "pin a model into VRAM"),
+    BotCommand("unload",        "flush a model from VRAM"),
+    BotCommand("keepalive",     "set TTL for loaded models"),
+    BotCommand("nano_setup",    "first-time Nano bridge setup"),
+    BotCommand("nano_update",   "update Nano bridge"),
+    BotCommand("nano_check",    "report Nano prereq state"),
+    BotCommand("nano_start",    "start headless-Chrome bridge"),
+    BotCommand("nano_stop",     "stop bridge"),
+    BotCommand("nano_url",      "show bridge URL (paste into code-launcher)"),
+    BotCommand("nano_status",   "bridge state + prereqs"),
+    BotCommand("kill",          "purge all AI processes + bridge (DESTRUCTIVE)"),
+]
+
+
 def main() -> None:
     t = threading.Thread(target=alert_loop, name="alerts", daemon=True)
     t.start()
+    # Register slash commands so Telegram's '/' autocomplete shows
+    # them with descriptions. Setting "scope=default" applies it to
+    # every chat the bot ever talks to — the auth decorator still
+    # gates execution, this is just discovery.
+    try:
+        bot.set_my_commands(SLASH_COMMANDS)
+        log.info("registered %d slash commands", len(SLASH_COMMANDS))
+    except Exception:
+        log.exception("set_my_commands failed (continuing)")
     try:
         bot.send_message(CHAT_ID,
                          "🛡 telemetry bot online · `/start` for menu, `/help` for commands.",

@@ -54,7 +54,31 @@ python telemetry_bot.py
 
 It sends `🛡 telemetry bot online` to your chat and starts the alert
 daemon. Use `/start` for the keyboard, `/help` for the full command
-list.
+list. The bot also calls Telegram's `setMyCommands` at startup, so
+every command shows up in the chat's **`/` autocomplete menu** with a
+short description — no need to memorise them.
+
+## UX cheat sheet
+
+- **Persistent reply keyboard** under every message: `📊 status`,
+  `🧠 ollama`, `🤖 nano bridge`, `⚡ loaded`, `ℹ️ help`, `💀 kill all`.
+- **`🧠 ollama`** opens an inline menu: *browse models · loaded · pull
+  new model · keepalive · refresh*.
+- **Browse models** lists every installed model as a button. Tap one
+  → action sheet (`🔥 load` / `❄️ unload` / `🗑 delete`). `load` and
+  `unload` are hidden when the action doesn't make sense.
+- **`⬇️ pull new model`** opens a `ForceReply` prompt — type just the
+  model name, no `/pull` prefix needed.
+- **`⏱ keepalive`** shows quick-pick buttons (`5m` `1h` `24h`
+  `📌 pin` `❄️ 0`). The pick applies to all currently-loaded models
+  and becomes the new default.
+- **Destructive actions** (`💀 kill all`, `🗑 delete`) always ask
+  `✅ yes / ❌ no` first.
+- **`📊 status`** ships with a `🔄 refresh` button — taps re-edit the
+  same message instead of spawning new ones.
+- **`🤖 nano bridge`** keyboard is state-aware: shows *setup* when
+  prereqs are missing, *start* when ready, *stop / url / logs* when
+  running.
 
 ---
 
