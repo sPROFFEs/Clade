@@ -125,6 +125,50 @@ func TestBuildCmd_BashShell(t *testing.T) {
 	}
 }
 
+func TestAutoFixable_SplitsByCapability(t *testing.T) {
+	missing := []string{"node", "pnpm", "go"}
+	fix := AutoFixable(missing)
+	unfix := UnfixableMissing(missing)
+
+	// Only pnpm is auto-fixable today.
+	if !equal(fix, []string{"pnpm"}) {
+		t.Errorf("AutoFixable = %v, want [pnpm]", fix)
+	}
+	// node + go (anything else) → user must install.
+	if !equal(unfix, []string{"node", "go"}) {
+		t.Errorf("UnfixableMissing = %v, want [node go]", unfix)
+	}
+}
+
+func TestAutoFixable_EmptyInputs(t *testing.T) {
+	if got := AutoFixable(nil); len(got) != 0 {
+		t.Errorf("AutoFixable(nil) = %v", got)
+	}
+	if got := UnfixableMissing(nil); len(got) != 0 {
+		t.Errorf("UnfixableMissing(nil) = %v", got)
+	}
+}
+
+func TestAutoFixable_OnlyPnpmMissing_NothingToBlock(t *testing.T) {
+	// This is the exact scenario from the user bug report: pnpm is
+	// auto-fixable, so the install screen should NOT block on it.
+	if got := UnfixableMissing([]string{"pnpm"}); len(got) != 0 {
+		t.Errorf("UnfixableMissing([pnpm]) = %v, expected empty (auto-fixable)", got)
+	}
+}
+
+func equal(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestDetectOS_ReturnsKnownValue(t *testing.T) {
 	o := DetectOS()
 	switch o {

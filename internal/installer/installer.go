@@ -151,6 +151,40 @@ func PrereqsMissing(m Method) []string {
 	return missing
 }
 
+// autoFixablePrereqs lists prereqs the launcher can install for the user
+// without invasive system changes. Run() resolves these automatically
+// before running the install method. Anything not in this set requires
+// user action (e.g. installing Node).
+var autoFixablePrereqs = map[string]bool{
+	"pnpm": true,
+}
+
+// AutoFixable returns the subset of `missing` that Run() will resolve
+// automatically. The TUI uses this to render "will auto-install: X"
+// instead of blocking the user.
+func AutoFixable(missing []string) []string {
+	var out []string
+	for _, p := range missing {
+		if autoFixablePrereqs[p] {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// UnfixableMissing returns the prereqs in `missing` that the user must
+// install themselves (Node, mostly). The TUI blocks Enter when this is
+// non-empty.
+func UnfixableMissing(missing []string) []string {
+	var out []string
+	for _, p := range missing {
+		if !autoFixablePrereqs[p] {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 // AutoInstallPnpm runs `corepack enable` so pnpm becomes available
 // without an extra global install. Requires Node ≥ 16.10, which ships
 // corepack. Returns a clear error if Node isn't on PATH.
@@ -166,13 +200,95 @@ func AutoInstallPnpm(ctx context.Context, w io.Writer) error {
 	return cmd.Run()
 }
 
+// pnpmGlobalBinDir asks pnpm where it puts global bins. Returns an empty
+// string when pnpm hasn't been set up yet — pnpm prints "undefined" in
+// that case, which we normalize.
+func pnpmGlobalBinDir(ctx context.Context) string {
+	out, err := exec.CommandContext(ctx, "pnpm", "config", "get", "global-bin-dir").Output()
+	if err != nil {
+		return ""
+	}
+	s := strings.TrimSpace(string(out))
+	if s == "" || s == "undefined" {
+		return ""
+	}
+	return s
+}
+
+// EnsurePnpmReady makes pnpm fully usable for a `pnpm add -g …` command
+// in the same process:
+//
+//  1. If pnpm is missing, runs `corepack enable`.
+//  2. If pnpm has no global-bin-dir configured (the "ERR_PNPM_NO_GLOBAL_BIN_DIR"
+//     case the user hits on a fresh Windows install), runs `pnpm setup`.
+//  3. Returns env additions (PNPM_HOME, PATH) so the upcoming install
+//     command in *this* process sees the new bin dir — pnpm setup writes
+//     to user-level env vars that don't propagate to running processes.
+func EnsurePnpmReady(ctx context.Context, w io.Writer) ([]string, error) {
+	if _, err := exec.LookPath("pnpm"); err != nil {
+		fmt.Fprintln(w, "→ pnpm not on PATH; enabling via corepack...")
+		if err := AutoInstallPnpm(ctx, w); err != nil {
+			return nil, err
+		}
+	}
+
+	binDir := pnpmGlobalBinDir(ctx)
+	if binDir == "" {
+		fmt.Fprintln(w, "→ pnpm global bin dir not configured; running `pnpm setup`...")
+		cmd := exec.CommandContext(ctx, "pnpm", "setup")
+		cmd.Stdout, cmd.Stderr = w, w
+		if err := cmd.Run(); err != nil {
+			return nil, fmt.Errorf("pnpm setup: %w", err)
+		}
+		binDir = pnpmGlobalBinDir(ctx)
+		if binDir == "" {
+			return nil, fmt.Errorf("pnpm setup ran but global-bin-dir is still empty; restart your shell and retry")
+		}
+		fmt.Fprintf(w, "✓ pnpm bin dir: %s\n", binDir)
+	}
+
+	sep := ":"
+	if runtime.GOOS == "windows" {
+		sep = ";"
+	}
+	return []string{
+		"PNPM_HOME=" + binDir,
+		"PATH=" + binDir + sep + os.Getenv("PATH"),
+	}, nil
+}
+
 // Run executes the method's command line. stdout/stderr are streamed live
 // so the TUI can render output as it arrives. Returns the OS exit error
 // (nil on exit 0).
+//
+// For pnpm methods, Run auto-resolves the two common Windows footguns
+// (pnpm not installed, pnpm setup not run) and injects PNPM_HOME + PATH
+// into the install command's env. That makes `pnpm add -g …` work
+// end-to-end without a shell restart.
 func Run(ctx context.Context, m Method, stdout, stderr io.Writer) error {
+	var extraEnv []string
+	if strings.HasPrefix(m.Command, "pnpm ") {
+		env, err := EnsurePnpmReady(ctx, stdout)
+		if err != nil {
+			return err
+		}
+		extraEnv = env
+	}
 	cmd := buildCmd(ctx, m)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
+	if len(extraEnv) > 0 {
+		cmd.Env = append(os.Environ(), extraEnv...)
+		// Also mirror the additions onto OUR process env so subsequent
+		// exec.LookPath calls (the post-install agent re-detection, the
+		// eventual launch) see the new pnpm bin dir without needing the
+		// user to restart their shell.
+		for _, kv := range extraEnv {
+			if i := strings.Index(kv, "="); i > 0 {
+				_ = os.Setenv(kv[:i], kv[i+1:])
+			}
+		}
+	}
 	return cmd.Run()
 }
 

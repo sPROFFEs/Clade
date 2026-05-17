@@ -108,9 +108,11 @@ func (m installModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			chosen := m.methods[m.cursor]
 			missing := installer.PrereqsMissing(chosen)
-			if len(missing) > 0 {
-				m.prereqWarn = "missing prereq: " + strings.Join(missing, ", ") +
-					" — install them first, or pick another method"
+			// Only block on prereqs that need real user action (e.g. Node).
+			// pnpm-style ones are auto-installed by Run().
+			if unfix := installer.UnfixableMissing(missing); len(unfix) > 0 {
+				m.prereqWarn = "missing prereq: " + strings.Join(unfix, ", ") +
+					" — install it first, or pick another method"
 				return m, nil
 			}
 			m.prereqWarn = ""
@@ -174,11 +176,20 @@ func (m installModel) View() string {
 			b.WriteString("\n")
 			if i == m.cursor && len(mth.Prereqs) > 0 {
 				missing := installer.PrereqsMissing(mth)
-				if len(missing) > 0 {
-					b.WriteString(descStyle.Render(
-						errorStyle.Render("missing prereqs: "+strings.Join(missing, ", "))) + "\n")
-				} else {
+				if len(missing) == 0 {
 					b.WriteString(descStyle.Render("prereqs ok: "+strings.Join(mth.Prereqs, ", ")) + "\n")
+				} else {
+					unfix := installer.UnfixableMissing(missing)
+					fixable := installer.AutoFixable(missing)
+					if len(unfix) > 0 {
+						b.WriteString(descStyle.Render(
+							errorStyle.Render("you must install: "+strings.Join(unfix, ", "))) + "\n")
+					}
+					if len(fixable) > 0 {
+						b.WriteString(descStyle.Render(
+							availableStyle.Render("will auto-fix: "+strings.Join(fixable, ", ")+
+								" (corepack + pnpm setup)")) + "\n")
+					}
 				}
 			}
 		}
