@@ -169,6 +169,45 @@ func equal(a, b []string) bool {
 	return true
 }
 
+func TestExtractPnpmHome(t *testing.T) {
+	// Real-world pnpm setup output the user reported.
+	out := `Next configuration changes were made:
+PNPM_HOME=C:\Users\user\AppData\Local\pnpm
+Path=%PNPM_HOME%;C:\Users\user\.cargo\bin;C:\Users\user\AppData\Local\Microsoft\WindowsApps
+Setup complete. Open a new terminal to start using pnpm.`
+
+	got := extractPnpmHome(out)
+	if got != `C:\Users\user\AppData\Local\pnpm` {
+		t.Errorf("extractPnpmHome = %q, want the Windows path", got)
+	}
+}
+
+func TestExtractPnpmHome_UnixLayout(t *testing.T) {
+	out := `Updating /Users/me/.zshrc
+PNPM_HOME=/Users/me/Library/pnpm
+PATH=$PNPM_HOME:$PATH
+Setup complete. Open a new terminal to start using pnpm.`
+	if got := extractPnpmHome(out); got != "/Users/me/Library/pnpm" {
+		t.Errorf("extractPnpmHome = %q", got)
+	}
+}
+
+func TestExtractPnpmHome_AbsentReturnsEmpty(t *testing.T) {
+	if got := extractPnpmHome("nothing here"); got != "" {
+		t.Errorf("expected empty, got %q", got)
+	}
+}
+
+func TestDefaultPnpmHome_NonEmptyOnEveryOS(t *testing.T) {
+	// We don't assert the exact path (env-dependent) — just that we
+	// always have *some* fallback so EnsurePnpmReady never bails for
+	// "couldn't resolve PNPM_HOME" when only the env-propagation step
+	// failed.
+	if defaultPnpmHome() == "" {
+		t.Error("defaultPnpmHome returned empty on this OS")
+	}
+}
+
 func TestDetectOS_ReturnsKnownValue(t *testing.T) {
 	o := DetectOS()
 	switch o {

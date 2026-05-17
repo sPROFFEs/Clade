@@ -6,11 +6,14 @@
 package installer
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 )
@@ -202,7 +205,10 @@ func AutoInstallPnpm(ctx context.Context, w io.Writer) error {
 
 // pnpmGlobalBinDir asks pnpm where it puts global bins. Returns an empty
 // string when pnpm hasn't been set up yet — pnpm prints "undefined" in
-// that case, which we normalize.
+// that case, which we normalize. Note: pnpm reads PNPM_HOME from this
+// process's env, so a value written by an earlier `pnpm setup` (which
+// lands in the Windows user registry / shell rc) is invisible until the
+// process restarts. EnsurePnpmReady handles that gap.
 func pnpmGlobalBinDir(ctx context.Context) string {
 	out, err := exec.CommandContext(ctx, "pnpm", "config", "get", "global-bin-dir").Output()
 	if err != nil {
@@ -215,15 +221,67 @@ func pnpmGlobalBinDir(ctx context.Context) string {
 	return s
 }
 
+// defaultPnpmHome returns the OS-default location pnpm setup writes to.
+// Used as a fallback when neither pnpm config get nor parsing the setup
+// output gives us a value.
+//
+//	Windows: %LOCALAPPDATA%\pnpm
+//	macOS:   ~/Library/pnpm
+//	Linux:   $XDG_DATA_HOME/pnpm or ~/.local/share/pnpm
+func defaultPnpmHome() string {
+	home, _ := os.UserHomeDir()
+	switch runtime.GOOS {
+	case "windows":
+		if local := os.Getenv("LOCALAPPDATA"); local != "" {
+			return filepath.Join(local, "pnpm")
+		}
+		if home != "" {
+			return filepath.Join(home, "AppData", "Local", "pnpm")
+		}
+	case "darwin":
+		if home != "" {
+			return filepath.Join(home, "Library", "pnpm")
+		}
+	default:
+		if xdg := os.Getenv("XDG_DATA_HOME"); xdg != "" {
+			return filepath.Join(xdg, "pnpm")
+		}
+		if home != "" {
+			return filepath.Join(home, ".local", "share", "pnpm")
+		}
+	}
+	return ""
+}
+
+var pnpmHomeRE = regexp.MustCompile(`(?m)^\s*PNPM_HOME\s*=\s*(.+?)\s*$`)
+
+// extractPnpmHome scrapes the value out of `pnpm setup` output, which
+// includes a line like:
+//
+//	PNPM_HOME=C:\Users\user\AppData\Local\pnpm
+//
+// on Windows and similar on other platforms.
+func extractPnpmHome(setupStdout string) string {
+	m := pnpmHomeRE.FindStringSubmatch(setupStdout)
+	if len(m) < 2 {
+		return ""
+	}
+	return strings.TrimSpace(m[1])
+}
+
 // EnsurePnpmReady makes pnpm fully usable for a `pnpm add -g …` command
 // in the same process:
 //
 //  1. If pnpm is missing, runs `corepack enable`.
 //  2. If pnpm has no global-bin-dir configured (the "ERR_PNPM_NO_GLOBAL_BIN_DIR"
-//     case the user hits on a fresh Windows install), runs `pnpm setup`.
-//  3. Returns env additions (PNPM_HOME, PATH) so the upcoming install
-//     command in *this* process sees the new bin dir — pnpm setup writes
-//     to user-level env vars that don't propagate to running processes.
+//     case on a fresh Windows install), runs `pnpm setup`.
+//  3. Resolves PNPM_HOME using three sources in order:
+//     a) `pnpm config get global-bin-dir`  (post-restart-of-shell case)
+//     b) parse PNPM_HOME from the just-captured pnpm setup stdout
+//     c) the OS-default location (%LOCALAPPDATA%\pnpm etc.)
+//  4. Returns env additions (PNPM_HOME, PATH) so the upcoming install
+//     command in *this* process sees the new bin dir without needing a
+//     shell restart.
 func EnsurePnpmReady(ctx context.Context, w io.Writer) ([]string, error) {
 	if _, err := exec.LookPath("pnpm"); err != nil {
 		fmt.Fprintln(w, "→ pnpm not on PATH; enabling via corepack...")
@@ -235,14 +293,30 @@ func EnsurePnpmReady(ctx context.Context, w io.Writer) ([]string, error) {
 	binDir := pnpmGlobalBinDir(ctx)
 	if binDir == "" {
 		fmt.Fprintln(w, "→ pnpm global bin dir not configured; running `pnpm setup`...")
+		var setupCap bytes.Buffer
 		cmd := exec.CommandContext(ctx, "pnpm", "setup")
-		cmd.Stdout, cmd.Stderr = w, w
+		cmd.Stdout = io.MultiWriter(w, &setupCap)
+		cmd.Stderr = io.MultiWriter(w, &setupCap)
 		if err := cmd.Run(); err != nil {
 			return nil, fmt.Errorf("pnpm setup: %w", err)
 		}
+		// pnpm setup writes to user-level env (registry on Windows, rc
+		// files on Unix) — those don't propagate to our running process.
+		// Try config first, fall back to parsing setup output, then to
+		// the OS default.
 		binDir = pnpmGlobalBinDir(ctx)
 		if binDir == "" {
-			return nil, fmt.Errorf("pnpm setup ran but global-bin-dir is still empty; restart your shell and retry")
+			binDir = extractPnpmHome(setupCap.String())
+		}
+		if binDir == "" {
+			binDir = defaultPnpmHome()
+		}
+		if binDir == "" {
+			return nil, fmt.Errorf("pnpm setup ran but couldn't resolve PNPM_HOME; restart your shell and retry")
+		}
+		// pnpm setup creates the dir; verify it's there.
+		if _, err := os.Stat(binDir); err != nil {
+			return nil, fmt.Errorf("pnpm setup ran but %s doesn't exist: %w", binDir, err)
 		}
 		fmt.Fprintf(w, "✓ pnpm bin dir: %s\n", binDir)
 	}
