@@ -41,7 +41,40 @@ import signal
 import sys
 import time
 import uuid
+from pathlib import Path
 from typing import Optional
+
+
+# chrome://flags entries the Prompt API depends on. Without these in
+# the profile's Local State, --enable-features alone leaves
+# window.LanguageModel undefined on stable Chrome.
+ENABLED_LABS = [
+    "prompt-api-for-gemini-nano@1",
+    "optimization-guide-on-device-model@2",  # Enabled BypassPerfRequirement
+]
+
+
+def _seed_local_state(profile_dir: str) -> None:
+    """Mirror nano_setup._seed_local_state so bridge restarts also
+    self-heal a profile that lost its flag state."""
+    p = Path(profile_dir) / "Local State"
+    data: dict = {}
+    if p.exists():
+        try:
+            data = json.loads(p.read_text())
+        except (OSError, ValueError):
+            data = {}
+    browser = data.setdefault("browser", {})
+    cur = browser.get("enabled_labs_experiments") or []
+    changed = False
+    for flag in ENABLED_LABS:
+        if flag not in cur:
+            cur.append(flag)
+            changed = True
+    if changed:
+        browser["enabled_labs_experiments"] = cur
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(data, indent=2))
 
 try:
     from aiohttp import web
@@ -188,6 +221,9 @@ class Bridge:
                 f"chrome binary not found ({resolved!r}). install Google "
                 f"Chrome (apt install google-chrome-stable) or set "
                 f"NANO_CHROME_EXECUTABLE.")
+        # Self-heal the profile: re-seed Local State in case Chrome
+        # rewrote it without our flags between runs.
+        _seed_local_state(prof)
         log.info("launching chrome (profile=%s, headless=%s, exec=%s)",
                  prof, HEADLESS, resolved)
 
@@ -196,8 +232,16 @@ class Bridge:
         launch_args = [
             "--no-sandbox",
             "--disable-dev-shm-usage",
-            # The Prompt API is gated; these features pick it up:
-            "--enable-features=OptimizationGuideOnDeviceModel,PromptAPIForGeminiNano",
+            # The Prompt API is gated; these features + blink features
+            # + the on-device-model umbrella unlock it. The perf-check
+            # bypass and swiftshader keep it alive on virtualised
+            # hosts where Chrome's GPU check would otherwise refuse.
+            "--enable-features=OptimizationGuideOnDeviceModel,"
+            "PromptAPIForGeminiNano,BuiltInAIAPI",
+            "--enable-blink-features=AIPromptAPI",
+            "--optimization-guide-on-device-model-execution-validation",
+            "--use-gl=swiftshader",
+            "--enable-unsafe-swiftshader",
         ]
         try:
             self.ctx = await self.pw.chromium.launch_persistent_context(
@@ -228,7 +272,21 @@ class Bridge:
             log.info("LanguageModel.availability = %s", avail)
         except Exception as e:
             await self.stop()
-            raise RuntimeError(f"Nano not usable in this profile: {e}") from e
+            raise RuntimeError(
+                "Nano not usable in this profile.\n"
+                f"  underlying error: {e}\n"
+                "  things to try (in order):\n"
+                "    1. /nano_setup so Local State is re-seeded with the flags.\n"
+                "    2. Run Chrome non-headless once on this profile so it can\n"
+                "       finish the on-device-model download:\n"
+                "         google-chrome --user-data-dir=" + PROFILE_DIR + " \\\n"
+                "           chrome://on-device-internals\n"
+                "       Wait for the model to reach 'Available', close Chrome,\n"
+                "       then /nano_start.\n"
+                "    3. If your box has no GPU (typical VPS) Chrome's on-device\n"
+                "       model service may refuse no matter what. In that case\n"
+                "       use Ollama models from Telegram instead: /use <model>"
+            ) from e
 
     async def stop(self) -> None:
         try:

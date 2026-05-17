@@ -174,6 +174,52 @@ Subsequent runs: seconds.
 - `/nano_update` — upgrades the deps, re-runs `playwright install
   chromium --force`, re-primes Nano. Use after a Chrome major bump.
 
+### When `/nano_setup` reports availability but `/nano_start` fails
+
+Symptom: `Chrome LanguageModel API not available in this profile`,
+even after `apt install google-chrome-stable`.
+
+This happens because Chrome stable checks **per-profile flag state**
+(stored in `<profile>/Local State`) *in addition to* the
+`--enable-features=…` CLI flags. The installer now seeds that file
+automatically with:
+
+```json
+{ "browser": { "enabled_labs_experiments": [
+    "prompt-api-for-gemini-nano@1",
+    "optimization-guide-on-device-model@2"
+] } }
+```
+
+If you've upgraded from an older bot version, run `/nano_setup` once
+more — that re-runs `ensure_profile` and seeds the flags.
+
+If that *still* fails, the most reliable recovery is to open Chrome
+**non-headless** against the profile once so the on-device-model
+service can complete its first-run handshake:
+
+```sh
+google-chrome --user-data-dir=$NANO_CHROME_PROFILE chrome://on-device-internals
+```
+
+Wait for the model to reach **Available** in that page, close Chrome,
+then `/nano_start` from Telegram. On a headless VPS without a real
+GPU, Chrome's model service may refuse outright — see the next
+section for the realistic alternative.
+
+### Don't want to fight headless Chrome? Use Ollama from Telegram.
+
+The same `/ask`, `/chat`, and `💬 chat` flow works against any Ollama
+model — no Chrome, no Nano, no headless gymnastics:
+
+```
+/use llama3.1:8b   # set chat target
+/chat              # turn chat mode on
+hello              # send any text
+```
+
+`/use_nano` switches back when Nano is finally happy.
+
 ### Fallback: if `/nano_setup` can't trigger the download
 
 On some boxes Chrome's on-device-model service refuses to fetch

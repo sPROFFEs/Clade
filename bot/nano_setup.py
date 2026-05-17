@@ -30,6 +30,7 @@ can stream it back to Telegram.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -149,6 +150,54 @@ NANO_PRIME_JS = r"""
 """
 
 
+# chrome://flags entries that need to be persisted in the profile's
+# Local State so the Prompt API is exposed and the on-device-model
+# bypasses the perf-requirement gate. Each entry is
+# "<flag-name>@<variation-index>" where 1=Enabled, 2=Enabled with the
+# first non-default variation (used here for "BypassPerfRequirement").
+ENABLED_LABS = [
+    "prompt-api-for-gemini-nano@1",
+    "optimization-guide-on-device-model@2",  # 2 = Enabled BypassPerfRequirement
+]
+
+
+def _seed_local_state(profile_dir: str) -> None:
+    """Pre-populate the profile's Local State with the chrome://flags
+    settings Gemini Nano needs. Without this, --enable-features alone
+    is not enough on stable Chrome — the API checks per-profile flag
+    state and stays hidden if the user never toggled the flag in the
+    UI. Idempotent: only adds entries that aren't already there."""
+    p = Path(profile_dir) / "Local State"
+    data: dict = {}
+    if p.exists():
+        try:
+            data = json.loads(p.read_text())
+        except (OSError, ValueError):
+            # Corrupt or unreadable file — back it up and start fresh
+            # so we don't lose anything we couldn't parse.
+            backup = p.with_suffix(".bak")
+            try:
+                p.rename(backup)
+                log(f"  ↳ unreadable Local State backed up to {backup}")
+            except OSError:
+                pass
+            data = {}
+    browser = data.setdefault("browser", {})
+    cur = browser.get("enabled_labs_experiments") or []
+    changed = False
+    for flag in ENABLED_LABS:
+        if flag not in cur:
+            cur.append(flag)
+            changed = True
+    if changed:
+        browser["enabled_labs_experiments"] = cur
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(data, indent=2))
+        log(f"  ↳ seeded {len(ENABLED_LABS)} flags into {p}")
+    else:
+        log("  ↳ Local State already has the required flags")
+
+
 def ensure_profile() -> int:
     if not PROFILE_DIR:
         log("ERR: NANO_CHROME_PROFILE env var not set (see config.example.env)")
@@ -158,6 +207,7 @@ def ensure_profile() -> int:
         log(f"→ creating profile dir {p}")
         p.mkdir(parents=True, exist_ok=True)
     log(f"✓ profile dir {p}")
+    _seed_local_state(PROFILE_DIR)
     return 0
 
 
@@ -187,10 +237,21 @@ def trigger_download() -> int:
     profile (returns immediately when 'available')."""
     from playwright.sync_api import sync_playwright
 
+    # The umbrella + blink-features lines mirror what Chrome's own
+    # built-in-AI docs recommend; the optimization-guide flags push
+    # past the perf check (which always fails on virtualised GPUs).
     launch_args = [
         "--no-sandbox",
         "--disable-dev-shm-usage",
-        "--enable-features=OptimizationGuideOnDeviceModel,PromptAPIForGeminiNano",
+        "--enable-features=OptimizationGuideOnDeviceModel,"
+        "PromptAPIForGeminiNano,BuiltInAIAPI",
+        "--enable-blink-features=AIPromptAPI",
+        "--optimization-guide-on-device-model-execution-validation",
+        # Software GL keeps the on-device-model service from refusing
+        # to start on headless boxes without a real GPU; on a desktop
+        # box Chrome auto-uses the real GPU anyway.
+        "--use-gl=swiftshader",
+        "--enable-unsafe-swiftshader",
     ]
     chrome = _detect_chrome()
     if not chrome:
