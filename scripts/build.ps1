@@ -55,7 +55,14 @@ function Build-One($triplet) {
     $docsOut = Join-Path $out "docs"
     if (-not (Test-Path $docsOut)) { New-Item -ItemType Directory -Path $docsOut | Out-Null }
     Copy-Item "docs/ACTIVATION.md","docs/TARGETS.md","docs/SCHEMA.md","docs/QUICKSTART.md" $docsOut
-    Copy-Item "README.md" $out
+    Copy-Item "README.md","LICENSE" $out
+
+    # Ship the install scripts inside the archive so the README's
+    # `.\scripts\install.ps1` (or `./scripts/install.sh`) line works
+    # right after extraction. Both flavors ship in every bundle.
+    $scriptsOut = Join-Path $out "scripts"
+    if (-not (Test-Path $scriptsOut)) { New-Item -ItemType Directory -Path $scriptsOut | Out-Null }
+    Copy-Item "scripts/install.sh","scripts/install.ps1" $scriptsOut
 
     if (-not $NoArchive) {
         $archiveBase = "clade-$Version-$triplet"

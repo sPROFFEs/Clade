@@ -63,7 +63,15 @@ build_one() {
   cp -R samples "$out/"
   mkdir -p "$out/docs"
   cp docs/ACTIVATION.md docs/TARGETS.md docs/SCHEMA.md docs/QUICKSTART.md "$out/docs/"
-  cp README.md "$out/"
+  cp README.md LICENSE "$out/"
+
+  # Drop the install scripts into a scripts/ subdir so the README's
+  # `./scripts/install.sh` snippet works straight out of the archive.
+  # Both .sh and .ps1 ship in every bundle — easier than special-casing
+  # by OS, and barely any size.
+  mkdir -p "$out/scripts"
+  cp scripts/install.sh scripts/install.ps1 "$out/scripts/"
+  chmod +x "$out/scripts/install.sh" 2>/dev/null || true
 
   if [ "$ARCHIVE" = "1" ]; then
     case "$goos" in

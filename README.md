@@ -97,14 +97,23 @@ want to survive even if the agent's session store is wiped.
 ```sh
 # Linux / macOS
 tar -xzf clade-0.1.0-linux-amd64.tar.gz
-cd linux-amd64 && ./clade
+cd linux-amd64
+./scripts/install.sh        # copies clade + wpc to a dir on $PATH
+clade -version              # confirm it's globally callable
 ```
 
 ```powershell
 # Windows
 Expand-Archive clade-0.1.0-windows-amd64.zip
-.\windows-amd64\clade.exe
+cd windows-amd64
+.\scripts\install.ps1       # copies clade.exe + wpc.exe + updates PATH
+# open a new terminal, then:
+clade -version
 ```
+
+If you don't want to install globally yet, you can also just run the
+binary in place from the extracted folder (`./clade` on Linux/macOS,
+`.\clade.exe` on Windows).
 
 ### From source (Go ≥ 1.21)
 
@@ -112,15 +121,35 @@ Expand-Archive clade-0.1.0-windows-amd64.zip
 git clone https://github.com/sPROFFEs/Clade.git
 cd Clade
 go build -o clade ./cmd/clade
-./clade
+go build -o wpc   ./cmd/wpc
+./scripts/install.sh        # optional: drop both binaries on $PATH
 ```
 
-Optional `wpc` binary (the workpath compiler — useful for authoring
-templates outside the launcher):
+`wpc` is the workpath compiler — useful for authoring templates
+outside the launcher (`wpc --help`).
+
+### Make `clade` globally callable (manual paths)
+
+If you'd rather not run the installer, here's what it would have
+done. Pick the row that matches your shell / OS.
+
+| Platform              | Where to put `clade`                        | How to make it findable                                                                                                  |
+|-----------------------|---------------------------------------------|--------------------------------------------------------------------------------------------------------------------------|
+| Linux / macOS (system)| `/usr/local/bin/clade` (needs `sudo`)        | Already on `$PATH` for every shell. `sudo install -m 0755 clade /usr/local/bin/`                                          |
+| Linux / macOS (user)  | `~/.local/bin/clade` (no `sudo`)             | Add `export PATH="$PATH:$HOME/.local/bin"` to `~/.bashrc` or `~/.zshrc`. (Many modern distros already include it.)        |
+| macOS Homebrew users  | anywhere in `$(brew --prefix)/bin/`          | Already on `$PATH`. `cp clade "$(brew --prefix)/bin/"`                                                                   |
+| Windows (per-user)    | `%LOCALAPPDATA%\Programs\Clade\clade.exe`    | `setx PATH "%PATH%;%LOCALAPPDATA%\Programs\Clade"` (close + reopen terminal afterwards).                                  |
+| Windows (all users)   | `%ProgramFiles%\Clade\clade.exe`             | From an admin PowerShell: `[Environment]::SetEnvironmentVariable("PATH","$env:PATH;$env:ProgramFiles\Clade","Machine")`. |
+
+Do the same for `wpc` next to `clade` — both binaries are tiny
+(~6 MB) and need to be on `$PATH` together if you use `wpc` for
+template authoring.
+
+After install, **open a new terminal** (so the new PATH propagates),
+then verify:
 
 ```sh
-go build -o wpc ./cmd/wpc
-wpc --help
+clade -version   # prints e.g. "clade 0.1.0 linux/amd64"
 ```
 
 ## Quick start
