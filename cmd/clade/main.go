@@ -29,11 +29,16 @@ import (
 
 func main() {
 	versionFlag := flag.Bool("version", false, "print version and exit")
+	noSplash := flag.Bool("no-splash", false, "skip the boot animation")
 	flag.Parse()
 	if *versionFlag {
 		fmt.Printf("clade 0.1.0 %s/%s\n", runtime.GOOS, runtime.GOARCH)
 		return
 	}
+	// screen_splash.go reads this to decide whether to show the
+	// reveal animation. Also disabled when CLADE_NO_SPLASH=1 or
+	// stdout isn't a terminal.
+	noSplashFlag = *noSplash
 
 	// If pnpm setup ran in a prior session, the user-level env vars it
 	// wrote (registry on Windows, shell rc on Unix) won't have propagated
@@ -52,11 +57,18 @@ func main() {
 		die(err)
 	}
 
-	var initial tea.Model
+	var firstScreen tea.Model
 	if cfg == nil {
-		initial = newFirstRun()
+		firstScreen = newFirstRun()
 	} else {
-		initial = newChatListModel(cfg)
+		firstScreen = newChatListModel(cfg)
+	}
+
+	// Wrap the first screen in the boot splash unless we've opted
+	// out (--no-splash, env var, non-TTY).
+	var initial tea.Model = firstScreen
+	if splashEnabled() {
+		initial = newSplashModel(firstScreen)
 	}
 
 	root := &rootModel{screen: initial}

@@ -95,6 +95,43 @@ chats/
 - **Clean TTY hand-off** — Bubble Tea releases the terminal, the agent
   inherits stdio uniformly on every OS.
 
+## Boot splash
+
+When you start `clade`, the wordmark draws in column-by-column and
+the **λ** above it pulses briefly before the chat list opens —
+Codex-CLI-style boot animation. Skip with any key, or disable via:
+
+- `--no-splash` command-line flag
+- `CLADE_NO_SPLASH=1` env var
+- non-interactive stdout (CI, piping `clade --help` somewhere, etc.) —
+  detected automatically
+
+The animation runs in cyan/magenta in a real terminal; here's the
+final frame (colour stripped):
+
+```
+                       ╲ │ ╱
+                        ╲│╱
+                         λ
+                        ╱│╲
+                       ╱ │ ╲
+
+     ██████╗ ██╗      █████╗ ██████╗ ███████╗
+    ██╔════╝ ██║     ██╔══██╗██╔══██╗██╔════╝
+    ██║      ██║     ███████║██║  ██║█████╗
+    ██║      ██║     ██╔══██║██║  ██║██╔══╝
+    ╚██████╗ ███████╗██║  ██║██████╔╝███████╗
+     ╚═════╝ ╚══════╝╚═╝  ╚═╝╚═════╝ ╚══════╝
+
+         fork agent chats from one common template
+
+                  press any key to skip
+```
+
+(Capture a real GIF on your box with [`vhs`](https://github.com/charmbracelet/vhs):
+`vhs docs/splash.tape` — once that file is added it'll replace this
+static frame.)
+
 ## Screens
 
 > The launcher renders with [Bubble Tea](https://github.com/charmbracelet/bubbletea)
