@@ -1,3 +1,0 @@
-# Only the Gemini Nano bridge subprocess needs these.
-playwright>=1.49
-aiohttp>=3.10
