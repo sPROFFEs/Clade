@@ -153,6 +153,34 @@ def unload(name: str) -> None:
     load(name, keep_alive="0")
 
 
+def chat(model: str, messages: list[dict],
+         keep_alive: str = DEFAULT_KEEP_ALIVE) -> str:
+    """POST /api/chat (non-streaming) — returns the assistant's reply
+    as plain text. messages is the standard OpenAI-shape list of
+    {"role": ..., "content": ...}. Auto-loads the model if it isn't
+    already in VRAM (that's just how Ollama behaves)."""
+    payload = {
+        "model": model,
+        "messages": messages,
+        "stream": False,
+        "keep_alive": keep_alive,
+    }
+    try:
+        # No upper bound on cold-start: a 70B model can take >60s to
+        # load on a slow disk. Streaming would be nicer for UX but the
+        # bot doesn't need it — we send the final reply in one Telegram
+        # message (chunked).
+        r = requests.post(f"{OLLAMA_URL}/api/chat", json=payload, timeout=None)
+    except requests.RequestException as e:
+        raise OllamaError(f"chat: {e}") from e
+    if r.status_code != 200:
+        raise OllamaError(f"chat http {r.status_code}: {r.text[:200]}")
+    try:
+        return r.json()["message"]["content"]
+    except (KeyError, ValueError) as e:
+        raise OllamaError(f"chat bad payload: {e}") from e
+
+
 def humanize(m: Model) -> str:
     bits = [m.name, _humanize_mb(m.size_mb)]
     if m.parameters:

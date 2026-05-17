@@ -98,10 +98,13 @@ short description — no need to memorise them.
 | `/load <name> [TTL]` | Pin into VRAM, default TTL = `OLLAMA_KEEP_ALIVE` env      |
 | `/unload <name>`     | Flush from VRAM right away                                |
 | `/keepalive <dur>`   | `5m` `1h` `24h` `-1` (pin) `0` (unload). Applied to every currently-loaded model and used as the new default for `/load` |
-| **Chat with Nano**   |                                                           |
-| `/ask <text>`        | One-shot question to Gemini Nano (no memory)              |
-| `/chat`              | Toggle "chat mode" — every non-command message goes to Nano with rolling history |
-| `/reset`             | Clear the in-memory Nano chat history                     |
+| **Chat with a model** |                                                          |
+| `/ask <text>`        | One-shot question to the current target (no memory)       |
+| `/chat`              | Toggle "chat mode" — every non-command message goes to the current target with rolling history |
+| `/use <model>`       | Switch chat target to an Ollama model (`/use llama3.1:8b`) |
+| `/use_nano`          | Switch chat target back to Gemini Nano                    |
+| `/reset`             | Clear chat history for the current target                 |
+| _(also)_             | Tap **💬 chat** on any model's action sheet — sets target + flips chat mode in one tap |
 | **Nano bridge**      |                                                           |
 | `/nano_setup`        | One-time install: deps + Chromium + Nano model download   |
 | `/nano_update`       | Upgrade bridge deps + Chromium, re-prime Nano             |
@@ -120,6 +123,26 @@ built-in `window.LanguageModel` (Gemini Nano). Chrome **does not
 expose** the model as a downloadable file or over HTTP; you can only
 reach it via a JavaScript API inside a browser tab. That's why a
 headless Chrome stays running for the duration of the bridge.
+
+> **You must have Google Chrome installed, not just Playwright's
+> Chromium.** Gemini Nano is downloaded by Chrome's *Optimization
+> Guide on-device model service*, which is a closed-source Google
+> component absent from upstream Chromium. The bridge auto-detects
+> `/usr/bin/google-chrome` (and a few common aliases); set
+> `NANO_CHROME_EXECUTABLE` to override.
+>
+> ```sh
+> # Debian/Ubuntu — add Google's apt repo + install:
+> wget -qO- https://dl.google.com/linux/linux_signing_key.pub \
+>   | sudo gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg
+> echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] \
+>   http://dl.google.com/linux/chrome/deb/ stable main" \
+>   | sudo tee /etc/apt/sources.list.d/google-chrome.list
+> sudo apt update && sudo apt install -y google-chrome-stable
+> ```
+>
+> Symptom when Chromium is used instead of Chrome:
+> `Chrome LanguageModel API not available in this profile`.
 
 ### Recommended path: run `/nano_setup` from Telegram
 

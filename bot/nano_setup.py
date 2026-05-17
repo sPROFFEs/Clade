@@ -161,8 +161,28 @@ def ensure_profile() -> int:
     return 0
 
 
+def _detect_chrome() -> Optional[str]:
+    """Find a *real* Google Chrome — Playwright's bundled Chromium
+    does NOT ship the on-device-model service, so Nano won't ever
+    download into it. Operator override wins."""
+    if CHROME_BIN:
+        return CHROME_BIN
+    for candidate in (
+        "/usr/bin/google-chrome",
+        "/usr/bin/google-chrome-stable",
+        "/usr/bin/google-chrome-beta",
+        "/usr/bin/google-chrome-unstable",
+        "/opt/google/chrome/chrome",
+        "/snap/bin/google-chrome",
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    ):
+        if Path(candidate).exists():
+            return candidate
+    return None
+
+
 def trigger_download() -> int:
-    """Launch Chromium, prime Nano (downloads if needed), report
+    """Launch Chrome, prime Nano (downloads if needed), report
     availability, exit. Idempotent — safe to re-run on an already-set-up
     profile (returns immediately when 'available')."""
     from playwright.sync_api import sync_playwright
@@ -172,12 +192,20 @@ def trigger_download() -> int:
         "--disable-dev-shm-usage",
         "--enable-features=OptimizationGuideOnDeviceModel,PromptAPIForGeminiNano",
     ]
-    log(f"→ launching chromium (headless={HEADLESS}, profile={PROFILE_DIR})")
+    chrome = _detect_chrome()
+    if not chrome:
+        log("ERR: no Google Chrome found on this system.")
+        log("     Playwright's bundled Chromium does NOT include the")
+        log("     on-device-model service — Nano cannot download into it.")
+        log("     install with: apt install google-chrome-stable")
+        log("     or set NANO_CHROME_EXECUTABLE=/path/to/google-chrome")
+        return 4
+    log(f"→ launching {chrome} (headless={HEADLESS}, profile={PROFILE_DIR})")
     with sync_playwright() as pw:
         ctx = pw.chromium.launch_persistent_context(
             PROFILE_DIR,
             headless=HEADLESS,
-            executable_path=CHROME_BIN,
+            executable_path=chrome,
             args=launch_args,
         )
         try:
@@ -209,8 +237,18 @@ def cmd_check() -> int:
     log(f"python:    {sys.version.split()[0]}")
     log(f"pip:       {'OK' if shutil.which('pip') else 'missing'}")
     log(f"deps:      {'OK' if deps_ok() else 'missing — run /nano_setup'}")
-    chrome = chromium_path()
-    log(f"chromium:  {chrome or 'not installed — run /nano_setup'}")
+    chrome = _detect_chrome()
+    if chrome:
+        log(f"chrome:    {chrome}  (real Google Chrome — Nano supported)")
+    else:
+        cm = chromium_path()
+        if cm:
+            log(f"chrome:    NOT FOUND. (Playwright bundles Chromium at {cm}, "
+                "but it lacks the on-device-model service Gemini Nano needs.)")
+        else:
+            log("chrome:    NOT FOUND.")
+        log("           install with: apt install google-chrome-stable")
+        log("           or set NANO_CHROME_EXECUTABLE=/path/to/google-chrome")
     log(f"profile:   {PROFILE_DIR or '(NANO_CHROME_PROFILE not set)'}")
     if PROFILE_DIR and Path(PROFILE_DIR).exists():
         log("           dir exists")

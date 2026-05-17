@@ -153,15 +153,41 @@ class Bridge:
                 f"sudo chown -R $USER {prof}")
 
         self.pw = await async_playwright().start()
-        # Resolve the actual chromium binary up front so a missing
-        # install fails loudly here instead of inside playwright's
-        # opaque "browserType.launch" error.
-        resolved = CHROME_BIN or self.pw.chromium.executable_path
+        # Resolve the chrome binary. Playwright bundles upstream
+        # *Chromium*, which does NOT ship Google's on-device-model
+        # service — that's a closed-source component only present in
+        # Google Chrome / Chrome Beta / Chrome Dev. If Nano is the
+        # goal we need a real Chrome binary; we try to discover one
+        # automatically and fall back to Playwright's Chromium only
+        # if the operator explicitly forces it.
+        resolved = CHROME_BIN
+        if not resolved:
+            for candidate in (
+                "/usr/bin/google-chrome",
+                "/usr/bin/google-chrome-stable",
+                "/usr/bin/google-chrome-beta",
+                "/usr/bin/google-chrome-unstable",
+                "/opt/google/chrome/chrome",
+                "/snap/bin/google-chrome",
+                "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            ):
+                if os.path.exists(candidate):
+                    resolved = candidate
+                    log.info("auto-detected Google Chrome at %s", resolved)
+                    break
+        if not resolved:
+            resolved = self.pw.chromium.executable_path
+            log.warning(
+                "no Google Chrome found — falling back to Playwright's "
+                "Chromium at %s. Gemini Nano almost certainly will NOT "
+                "work because the on-device-model service is Chrome-only. "
+                "apt install google-chrome-stable, or set "
+                "NANO_CHROME_EXECUTABLE=/path/to/google-chrome.", resolved)
         if not resolved or not os.path.exists(resolved):
             raise RuntimeError(
-                f"chromium binary not found ({resolved!r}). "
-                f"run from Telegram: /nano_setup  — or manually: "
-                f"playwright install chromium")
+                f"chrome binary not found ({resolved!r}). install Google "
+                f"Chrome (apt install google-chrome-stable) or set "
+                f"NANO_CHROME_EXECUTABLE.")
         log.info("launching chrome (profile=%s, headless=%s, exec=%s)",
                  prof, HEADLESS, resolved)
 

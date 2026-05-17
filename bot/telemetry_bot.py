@@ -157,9 +157,11 @@ def model_actions_kb(idx: int, is_loaded: bool) -> InlineKeyboardMarkup:
     'load' when already loaded — no dead actions."""
     kb = InlineKeyboardMarkup(row_width=2)
     if is_loaded:
-        kb.add(InlineKeyboardButton("❄️ unload", callback_data=f"m:unload:{idx}"))
+        kb.add(InlineKeyboardButton("💬 chat", callback_data=f"m:chat:{idx}"),
+               InlineKeyboardButton("❄️ unload", callback_data=f"m:unload:{idx}"))
     else:
-        kb.add(InlineKeyboardButton("🔥 load", callback_data=f"m:load:{idx}"))
+        kb.add(InlineKeyboardButton("💬 chat", callback_data=f"m:chat:{idx}"),
+               InlineKeyboardButton("🔥 load", callback_data=f"m:load:{idx}"))
     kb.add(InlineKeyboardButton("🗑 delete", callback_data=f"m:delask:{idx}"))
     kb.add(InlineKeyboardButton("← back", callback_data="oll:browse"))
     return kb
@@ -555,10 +557,13 @@ def cmd_help(m):
         "  /unload <name>\n"
         "  /keepalive [duration] — `5m` `1h` `24h` `-1` (pin) `0` (unload),\n"
         "    no arg → shows quick-pick buttons\n"
-        "\n*chat with gemini nano*\n"
-        "  /ask <text> — one-shot question (no memory)\n"
-        "  /chat — toggle chat mode (every message → Nano, with history)\n"
-        "  /reset — clear nano chat history\n"
+        "\n*chat with a model (nano or any ollama)*\n"
+        "  /ask <text> — one-shot to the current target (no memory)\n"
+        "  /chat — toggle chat mode (every message → model, with history)\n"
+        "  /use <model> — switch target to an Ollama model\n"
+        "  /use_nano — switch target to Gemini Nano\n"
+        "  /reset — clear chat history for the current target\n"
+        "  _(also: 💬 chat on any model's action sheet — one tap to talk)_\n"
         "\n*nano bridge* — tap *🤖 nano bridge* for state-aware buttons\n"
         "  /nano_setup — one-time: install Playwright + Chromium + download Nano\n"
         "  /nano_update — upgrade bridge deps + Chromium + re-prime Nano\n"
@@ -609,6 +614,8 @@ def btn_help(m):
 @bot.message_handler(func=lambda m: m.text == "💬 chat nano")
 @auth
 def btn_chat_nano(m):
+    global _CHAT_TARGET
+    _CHAT_TARGET = "nano"
     cmd_chat(m)
 
 
@@ -863,63 +870,103 @@ def cmd_nano_check(m):
     _run_setup_streaming(m, "check")
 
 
-# ---------- chat with nano from Telegram ----------
+# ---------- chat from Telegram (Nano or any Ollama model) ----------
 #
-# Two ways to use it:
-#   /ask <text>     — one-shot, no memory between calls.
-#   💬 chat nano    — toggle "chat mode" so every non-command message
-#                      goes to Nano; bot replies with the model output.
-# History is per-process and short — a handful of recent turns, capped
-# to avoid blowing past Nano's context window.
+# One unified flow with a switchable target:
+#   target = "nano"            -> headless-Chrome bridge (/v1/chat/completions)
+#   target = "ollama:<model>"  -> local Ollama (/api/chat)
+#
+# Switch with `/use_nano` or `/use <model>` (or the buttons:
+# 💬 chat nano on the keyboard / 💬 chat on the model action sheet).
+# History is per-target so swapping models doesn't mix conversations.
 
 import requests as _requests  # local alias keeps the top imports tidy
 
 _CHAT_MODE = False
-_CHAT_HISTORY: list[dict] = []
+_CHAT_TARGET = "nano"  # "nano" | "ollama:<name>"
+_CHAT_HISTORY: dict[str, list[dict]] = {}  # target -> messages
 _CHAT_MAX_TURNS = 8  # user+assistant pairs we keep around
 
 
-def _nano_ask(prompt: str, keep_history: bool = False) -> str:
-    """POST to the local bridge; raises on failure with a readable
-    message. We always hit localhost regardless of NANO_BRIDGE_HOST
-    because the bot lives on the same box as the bridge."""
+def _target_label(target: str = "") -> str:
+    """Human-friendly label for the current (or given) chat target."""
+    tgt = target or _CHAT_TARGET
+    if tgt == "nano":
+        return "Gemini Nano"
+    if tgt.startswith("ollama:"):
+        return f"Ollama · {tgt[len('ollama:'):]}"
+    return tgt
+
+
+def _history_for(target: str) -> list[dict]:
+    return _CHAT_HISTORY.setdefault(target, [])
+
+
+def _trim_history(target: str) -> None:
+    hist = _history_for(target)
+    max_msgs = _CHAT_MAX_TURNS * 2
+    if len(hist) > max_msgs:
+        del hist[: len(hist) - max_msgs]
+
+
+def _nano_send(messages: list[dict]) -> str:
+    """POST to the local bridge. Always hits localhost — the bot
+    lives on the same box as the bridge."""
     if not bridge.running():
         raise RuntimeError("nano bridge isn't running — tap *🤖 nano bridge* → ▶️ start.")
-    msgs: list[dict] = []
-    if keep_history and _CHAT_HISTORY:
-        msgs.extend(_CHAT_HISTORY)
-    msgs.append({"role": "user", "content": prompt})
-    payload = {"model": "gemini-nano", "messages": msgs}
     try:
-        # Long timeout — Nano can take a while on long prompts.
         r = _requests.post(f"http://127.0.0.1:{NANO_PORT}/v1/chat/completions",
-                           json=payload, timeout=120)
+                           json={"model": "gemini-nano", "messages": messages},
+                           timeout=120)
     except _requests.RequestException as e:
         raise RuntimeError(f"bridge unreachable: {e}") from e
     if r.status_code != 200:
-        # Bridge returns JSON {"error": "..."} on 4xx/5xx.
         try:
             err = r.json().get("error", r.text[:200])
         except ValueError:
             err = r.text[:200]
         raise RuntimeError(f"bridge http {r.status_code}: {err}")
     try:
-        reply = r.json()["choices"][0]["message"]["content"]
+        return r.json()["choices"][0]["message"]["content"]
     except (KeyError, IndexError, ValueError) as e:
-        raise RuntimeError(f"bridge returned bad payload: {e}") from e
+        raise RuntimeError(f"bridge bad payload: {e}") from e
+
+
+def _ollama_send(model: str, messages: list[dict]) -> str:
+    if not oc.reachable():
+        raise RuntimeError("ollama unreachable — check `OLLAMA_URL` + service state.")
+    try:
+        return oc.chat(model, messages)
+    except oc.OllamaError as e:
+        raise RuntimeError(f"ollama chat failed: {e}") from e
+
+
+def _dispatch(prompt: str, target: str, keep_history: bool) -> str:
+    """Single entry point used by /ask and chat-mode. Routes to the
+    right backend, manages per-target history."""
+    msgs: list[dict] = []
     if keep_history:
-        _CHAT_HISTORY.append({"role": "user", "content": prompt})
-        _CHAT_HISTORY.append({"role": "assistant", "content": reply})
-        # Trim oldest turns first so the history stays bounded.
-        max_msgs = _CHAT_MAX_TURNS * 2
-        if len(_CHAT_HISTORY) > max_msgs:
-            del _CHAT_HISTORY[: len(_CHAT_HISTORY) - max_msgs]
+        msgs.extend(_history_for(target))
+    msgs.append({"role": "user", "content": prompt})
+
+    if target == "nano":
+        reply = _nano_send(msgs)
+    elif target.startswith("ollama:"):
+        reply = _ollama_send(target[len("ollama:"):], msgs)
+    else:
+        raise RuntimeError(f"unknown chat target: {target}")
+
+    if keep_history:
+        hist = _history_for(target)
+        hist.append({"role": "user", "content": prompt})
+        hist.append({"role": "assistant", "content": reply})
+        _trim_history(target)
     return reply
 
 
 def _send_long(text: str, prefix: str = "") -> None:
-    """Telegram caps message bodies at 4096 chars; Nano can exceed
-    that on a verbose answer, so chunk before sending."""
+    """Telegram caps message bodies at 4096 chars; verbose answers can
+    exceed that, so chunk before sending."""
     body = (prefix + text).strip() or "(empty reply)"
     LIMIT = 3800
     if len(body) <= LIMIT:
@@ -929,17 +976,30 @@ def _send_long(text: str, prefix: str = "") -> None:
         bot.send_message(CHAT_ID, body[i:i + LIMIT])
 
 
+def _set_target(new_target: str, source_msg) -> None:
+    """Switch the active chat target and notify the user. Resets
+    chat-mode only if the switch can't actually serve traffic."""
+    global _CHAT_TARGET
+    _CHAT_TARGET = new_target
+    bot.send_message(CHAT_ID, f"🎯 chat target: *{_target_label()}*",
+                     parse_mode="Markdown")
+
+
 @bot.message_handler(commands=["ask"])
 @auth
 def cmd_ask(m):
     # Everything after "/ask " is the prompt. No history.
+    # Uses the currently-selected target (default: nano).
     parts = (m.text or "").split(" ", 1)
     if len(parts) < 2 or not parts[1].strip():
-        bot.reply_to(m, "usage: `/ask <your question>`", parse_mode="Markdown")
+        bot.reply_to(m,
+                     f"usage: `/ask <your question>` (current target: "
+                     f"*{_target_label()}*)",
+                     parse_mode="Markdown")
         return
-    typing = bot.send_message(CHAT_ID, "🤔 asking nano…")
+    typing = bot.send_message(CHAT_ID, f"🤔 asking {_target_label()}…")
     try:
-        reply = _nano_ask(parts[1].strip(), keep_history=False)
+        reply = _dispatch(parts[1].strip(), _CHAT_TARGET, keep_history=False)
     except RuntimeError as e:
         bot.edit_message_text(f"❌ {e}", CHAT_ID, typing.message_id,
                               parse_mode="Markdown")
@@ -948,23 +1008,52 @@ def cmd_ask(m):
     _send_long(reply, prefix="🤖 ")
 
 
+@bot.message_handler(commands=["use_nano"])
+@auth
+def cmd_use_nano(m):
+    _set_target("nano", m)
+
+
+@bot.message_handler(commands=["use"])
+@auth
+def cmd_use(m):
+    parts = (m.text or "").split(" ", 1)
+    if len(parts) < 2 or not parts[1].strip():
+        bot.reply_to(m,
+                     "usage: `/use <ollama-model>` — e.g. `/use llama3.1:8b`\n"
+                     "or `/use_nano` for Gemini Nano.",
+                     parse_mode="Markdown")
+        return
+    _set_target(f"ollama:{parts[1].strip()}", m)
+
+
 @bot.message_handler(commands=["chat"])
 @auth
 def cmd_chat(m):
     global _CHAT_MODE
     _CHAT_MODE = not _CHAT_MODE
     if _CHAT_MODE:
-        if not bridge.running():
+        # Validate the target can actually serve traffic before
+        # silently dropping every subsequent message into a black hole.
+        if _CHAT_TARGET == "nano" and not bridge.running():
             _CHAT_MODE = False
             bot.send_message(CHAT_ID,
-                             "❌ nano bridge isn't running — start it from "
-                             "*🤖 nano bridge* first.",
+                             "❌ chat target is Gemini Nano but the bridge "
+                             "isn't running — start it from *🤖 nano bridge*, "
+                             "or `/use <ollama-model>` first.",
+                             parse_mode="Markdown")
+            return
+        if _CHAT_TARGET.startswith("ollama:") and not oc.reachable():
+            _CHAT_MODE = False
+            bot.send_message(CHAT_ID,
+                             "❌ chat target is Ollama but it's unreachable.",
                              parse_mode="Markdown")
             return
         bot.send_message(CHAT_ID,
-                         "💬 *chat mode ON* — every message (that isn't a "
-                         "command) goes to Gemini Nano. `/chat` to turn off, "
-                         "`/reset` to clear history.",
+                         f"💬 *chat mode ON* — target: *{_target_label()}*\n"
+                         "every non-command message goes to the model. "
+                         "`/chat` to turn off, `/reset` to clear history, "
+                         "`/use <model>` or `/use_nano` to swap target.",
                          parse_mode="Markdown")
     else:
         bot.send_message(CHAT_ID, "💬 chat mode OFF.")
@@ -973,8 +1062,9 @@ def cmd_chat(m):
 @bot.message_handler(commands=["reset"])
 @auth
 def cmd_reset(m):
-    _CHAT_HISTORY.clear()
-    bot.reply_to(m, "🧹 nano chat history cleared.")
+    _history_for(_CHAT_TARGET).clear()
+    bot.reply_to(m, f"🧹 cleared history for *{_target_label()}*.",
+                 parse_mode="Markdown")
 
 
 # Fallback handler — only fires when chat mode is on and the user sent
@@ -990,13 +1080,12 @@ def _register_chat_fallback() -> None:
         text = (m.text or "").strip()
         if not text:
             return
-        # Send a typing indicator so the user sees the bot is working.
         try:
             bot.send_chat_action(CHAT_ID, "typing")
         except Exception:
             pass
         try:
-            reply = _nano_ask(text, keep_history=True)
+            reply = _dispatch(text, _CHAT_TARGET, keep_history=True)
         except RuntimeError as e:
             bot.reply_to(m, f"❌ {e}", parse_mode="Markdown")
             return
@@ -1114,6 +1203,25 @@ def on_cb(c):
             _safe_edit(c, f"❌ unload failed: {e}", model_actions_kb(int(idx_s), True))
             return
         _safe_edit(c, f"❄️ `{name}` unloaded", model_actions_kb(int(idx_s), False))
+        return
+
+    elif data.startswith("m:chat:"):
+        idx_s = data[len("m:chat:"):]
+        name = _cached_name(idx_s)
+        if not name:
+            _safe_edit(c, "menu expired — tap *📦 browse models* again.", ollama_kb())
+            return
+        # One-tap: switch target + flip chat mode on (if it wasn't).
+        global _CHAT_MODE, _CHAT_TARGET
+        _CHAT_TARGET = f"ollama:{name}"
+        was_on = _CHAT_MODE
+        _CHAT_MODE = True
+        suffix = "" if was_on else " (chat mode → ON)"
+        bot.answer_callback_query(c.id, f"chatting with {name}")
+        _safe_edit(c,
+                   f"💬 chatting with *{name}*{suffix}\n"
+                   "send any text to talk; `/chat` to stop, `/reset` to clear.",
+                   model_actions_kb(int(idx_s), name in _loaded_names()))
         return
 
     elif data.startswith("m:delask:"):
@@ -1239,9 +1347,11 @@ SLASH_COMMANDS = [
     BotCommand("load",          "pin a model into VRAM"),
     BotCommand("unload",        "flush a model from VRAM"),
     BotCommand("keepalive",     "set TTL for loaded models"),
-    BotCommand("ask",           "one-shot question to Gemini Nano"),
-    BotCommand("chat",          "toggle nano chat mode on/off"),
-    BotCommand("reset",         "clear nano chat history"),
+    BotCommand("ask",           "one-shot question to the current target"),
+    BotCommand("chat",          "toggle chat mode on/off"),
+    BotCommand("use",           "switch chat target to an Ollama model"),
+    BotCommand("use_nano",      "switch chat target to Gemini Nano"),
+    BotCommand("reset",         "clear chat history for current target"),
     BotCommand("nano_setup",    "first-time Nano bridge setup"),
     BotCommand("nano_update",   "update Nano bridge"),
     BotCommand("nano_check",    "report Nano prereq state"),
