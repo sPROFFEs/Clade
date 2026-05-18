@@ -183,10 +183,13 @@ func TestDetectAgents_PopulatesEntries(t *testing.T) {
 	// host; just check the catalog comes back with the expected IDs and
 	// that Available is a deterministic bool (not panicking, etc.).
 	agents := DetectAgents(t.Context())
-	if len(agents) != 4 {
-		t.Fatalf("expected 4 agents, got %d", len(agents))
+	if len(agents) != 5 {
+		t.Fatalf("expected 5 agents, got %d", len(agents))
 	}
-	wantIDs := map[AgentID]bool{AgentClaude: true, AgentCodex: true, AgentOpenCode: true, AgentGemini: true}
+	wantIDs := map[AgentID]bool{
+		AgentClaude: true, AgentCodex: true, AgentOpenCode: true,
+		AgentGemini: true, AgentDeepSeek: true,
+	}
 	for _, a := range agents {
 		if !wantIDs[a.ID] {
 			t.Errorf("unexpected agent ID %q", a.ID)

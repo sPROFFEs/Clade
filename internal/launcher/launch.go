@@ -162,6 +162,15 @@ func Plan(ws Workspace, agent Agent) (LaunchPlan, error) {
 		// its default Google auth — and refuse to pass --model with
 		// the Ollama model name, which would just produce the same
 		// "not found" error you'd otherwise get.
+
+	case AgentDeepSeek:
+		// DeepSeek-TUI reads ~/.deepseek/config.toml at startup, which
+		// the Ollama screen already wrote (provider="ollama" +
+		// base_url + model). Nothing to inject at launch — that's the
+		// whole point of the file-config path. We keep the case here
+		// to make the dispatch explicit and to leave a hook in case
+		// future DeepSeek versions add a per-launch override flag we
+		// want to surface.
 	}
 	return plan, nil
 }

@@ -18,10 +18,10 @@
 ```
 
 A terminal launcher for agent CLIs — **Claude Code**, **Codex CLI**,
-**OpenCode**, **Gemini CLI** — that pairs each session with a
-self-contained *template* (mission, playbook, rules, tools,
-subagents, persona) and clones it into a fresh isolated *chat*
-every time you start working on something new.
+**OpenCode**, **Gemini CLI**, **DeepSeek-TUI** — that pairs each
+session with a self-contained *template* (mission, playbook, rules,
+tools, subagents, persona) and clones it into a fresh isolated
+*chat* every time you start working on something new.
 
 Single static Go binary per OS. No runtime deps.
 
@@ -226,12 +226,13 @@ syncing the file; existing notes stay on disk.
 config. It probes a remote endpoint, lists installed models, and
 writes per-agent config for whichever agents you tick.
 
-| Agent      | What gets written                                                   |
-|------------|---------------------------------------------------------------------|
-| Claude     | `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` per chat (env-only)   |
-| Codex      | `[model_providers.ollama_remote]` + profile in `~/.codex/config.toml` — launched with `-p ollama_remote` |
-| OpenCode   | `provider.ollama_remote` block in `~/.config/opencode/opencode.json` — set as the default model |
-| Gemini     | **Not auto-configured.** See below.                                 |
+| Agent       | What gets written                                                   |
+|-------------|---------------------------------------------------------------------|
+| Claude      | `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` per chat (env-only)   |
+| Codex       | `[model_providers.ollama_remote]` + profile in `~/.codex/config.toml` — launched with `-p ollama_remote` |
+| OpenCode    | `provider.ollama_remote` block in `~/.config/opencode/opencode.json` — set as the default model |
+| DeepSeek-TUI | `[providers.ollama]` block in `~/.deepseek/config.toml` with `provider = "ollama"` + default model set; wrapped in marker comments so re-applies don't touch surrounding config |
+| Gemini      | **Not auto-configured.** See below.                                 |
 
 ### Gemini + Ollama
 
@@ -325,12 +326,13 @@ my-workpath/
 The launcher compiles a chat's workpath into its sandbox using the
 matching wpc target:
 
-| Agent      | Target  | Output                                                                                |
-|------------|---------|---------------------------------------------------------------------------------------|
-| Claude     | `claude`| `.claude/skills/<template>/SKILL.md` + `scripts/` + `.claude/agents/<template>__<agent>.md` |
-| Codex      | `codex` | `AGENTS.md` + `AGENTS.assets/`                                                        |
-| OpenCode   | `codex` | `AGENTS.md` + `AGENTS.assets/` (OpenCode reads `AGENTS.md` too)                       |
-| Gemini     | `gemini`| `GEMINI.md` (single-file digest the Gemini CLI reads on every prompt)                 |
+| Agent        | Target  | Output                                                                                |
+|--------------|---------|---------------------------------------------------------------------------------------|
+| Claude       | `claude`| `.claude/skills/<template>/SKILL.md` + `scripts/` + `.claude/agents/<template>__<agent>.md` |
+| Codex        | `codex` | `AGENTS.md` + `AGENTS.assets/`                                                        |
+| OpenCode     | `codex` | `AGENTS.md` + `AGENTS.assets/` (OpenCode reads `AGENTS.md` too)                       |
+| Gemini       | `gemini`| `GEMINI.md` (single-file digest the Gemini CLI reads on every prompt)                 |
+| DeepSeek-TUI | `claude`| Same `.claude/skills/<template>/SKILL.md` layout — DeepSeek lists `.claude/skills/` in its discovery fallbacks, so one compile feeds both Claude Code and DeepSeek-TUI |
 
 Two extra targets are useful when authoring templates for tools the
 launcher doesn't directly drive:
@@ -381,6 +383,7 @@ bottom. Colour-stripped snippets follow.
 │   codex        ✓ installed   0.42.1  (OpenAI Codex CLI)              │
 │   opencode     ✗ missing             [press i to install]            │
 │   gemini       ✓ installed   0.42.0  (Google Gemini CLI)             │
+│   deepseek     ✓ installed   0.7.0   (DeepSeek-TUI)                  │
 │ ──────────────────────────────────────────────────────────────────── │
 │ enter launch · i install · o ollama · esc back                       │
 ╰──────────────────────────────────────────────────────────────────────╯

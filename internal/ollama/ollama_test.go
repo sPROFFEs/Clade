@@ -359,6 +359,126 @@ func TestDisableOpenCode_RemovesProvider(t *testing.T) {
 	}
 }
 
+func TestApplyDeepSeek_WritesManagedBlock(t *testing.T) {
+	tmp := t.TempDir()
+	redirectHome(t, tmp)
+
+	path, err := ApplyDeepSeek(Settings{
+		Endpoint: "192.168.1.10:11434",
+		Model:    "deepseek-coder:1.3b",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(path, filepath.Join(".deepseek", "config.toml")) {
+		t.Errorf("config path %q doesn't end in .deepseek/config.toml", path)
+	}
+	body, _ := os.ReadFile(path)
+	for _, want := range []string{
+		"# >>> clade ollama config",
+		`provider = "ollama"`,
+		`model = "deepseek-coder:1.3b"`,
+		"[providers.ollama]",
+		`base_url = "http://192.168.1.10:11434/v1"`,
+		"# <<< clade ollama config",
+	} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("config missing %q\n%s", want, body)
+		}
+	}
+
+	// Re-apply should be idempotent — exactly one managed block.
+	if _, err := ApplyDeepSeek(Settings{
+		Endpoint: "192.168.1.10:11434",
+		Model:    "deepseek-coder:1.3b",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	body2, _ := os.ReadFile(path)
+	if got := strings.Count(string(body2), "# >>> clade ollama config"); got != 1 {
+		t.Errorf("expected exactly one managed block after re-apply, got %d:\n%s", got, body2)
+	}
+}
+
+func TestApplyDeepSeek_PreservesSurroundingConfig(t *testing.T) {
+	tmp := t.TempDir()
+	redirectHome(t, tmp)
+	dsDir := filepath.Join(tmp, ".deepseek")
+	_ = os.MkdirAll(dsDir, 0o755)
+	preexisting := `# user notes
+theme = "dark"
+
+[providers.openai]
+api_key_env = "OPENAI_API_KEY"
+`
+	cfgPath := filepath.Join(dsDir, "config.toml")
+	if err := os.WriteFile(cfgPath, []byte(preexisting), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ApplyDeepSeek(Settings{Endpoint: "host:11434", Model: "qwen"}); err != nil {
+		t.Fatal(err)
+	}
+	body, _ := os.ReadFile(cfgPath)
+	for _, want := range []string{
+		`theme = "dark"`,
+		"[providers.openai]",
+		`api_key_env = "OPENAI_API_KEY"`,
+		"# >>> clade ollama config",
+		`[providers.ollama]`,
+	} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("config missing %q after apply:\n%s", want, body)
+		}
+	}
+}
+
+func TestDeepSeekConfigured_ReflectsDiskState(t *testing.T) {
+	tmp := t.TempDir()
+	redirectHome(t, tmp)
+
+	if DeepSeekConfigured() {
+		t.Error("DeepSeekConfigured should be false before Apply")
+	}
+	if _, err := ApplyDeepSeek(Settings{Endpoint: "h:1", Model: "m"}); err != nil {
+		t.Fatal(err)
+	}
+	if !DeepSeekConfigured() {
+		t.Error("DeepSeekConfigured should be true after Apply")
+	}
+	if _, err := DisableDeepSeek(); err != nil {
+		t.Fatal(err)
+	}
+	if DeepSeekConfigured() {
+		t.Error("DeepSeekConfigured should be false after Disable")
+	}
+}
+
+func TestDisableDeepSeek_RemovesOnlyManagedBlock(t *testing.T) {
+	tmp := t.TempDir()
+	redirectHome(t, tmp)
+	dsDir := filepath.Join(tmp, ".deepseek")
+	_ = os.MkdirAll(dsDir, 0o755)
+	other := "theme = \"dark\"\n[providers.openai]\nkey = \"x\"\n"
+	cfgPath := filepath.Join(dsDir, "config.toml")
+	_ = os.WriteFile(cfgPath, []byte(other), 0o644)
+
+	if _, err := ApplyDeepSeek(Settings{Endpoint: "h:1", Model: "m"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DisableDeepSeek(); err != nil {
+		t.Fatal(err)
+	}
+	body, _ := os.ReadFile(cfgPath)
+	if strings.Contains(string(body), "# >>> clade ollama config") {
+		t.Error("Disable should remove the managed block")
+	}
+	for _, keep := range []string{`theme = "dark"`, "[providers.openai]"} {
+		if !strings.Contains(string(body), keep) {
+			t.Errorf("Disable removed unrelated config %q:\n%s", keep, body)
+		}
+	}
+}
+
 // Ensure the io.Copy helper compiles + works (covers a tiny export).
 func TestCopyTo(t *testing.T) {
 	var buf strings.Builder

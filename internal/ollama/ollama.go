@@ -436,6 +436,119 @@ func DisableOpenCode() (string, error) {
 	return configPath, atomicWrite(configPath, out)
 }
 
+// DeepSeekConfigPath is ~/.deepseek/config.toml (the user-level file
+// DeepSeek-TUI reads on startup).
+func DeepSeekConfigPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".deepseek", "config.toml"), nil
+}
+
+const (
+	// Marker comments wrap our managed block in ~/.deepseek/config.toml
+	// so re-applies can find and replace the block without touching
+	// any hand-edited config the user wrote around it. The wrapper
+	// approach matches what the bot scripts use for ~/.bashrc edits
+	// and is more forgiving than the codex stripTomlTable approach
+	// when the user has multiple [providers.*] blocks.
+	deepseekBlockStart = "# >>> clade ollama config"
+	deepseekBlockEnd   = "# <<< clade ollama config"
+)
+
+// ApplyDeepSeek writes the [providers.ollama] block + top-level
+// provider/model defaults to ~/.deepseek/config.toml. The block is
+// wrapped in marker comments so re-applies are clean and the user
+// can keep their own config above and below the managed section.
+//
+// DeepSeek-TUI accepts the OpenAI-compat API on /v1, same as
+// Codex/OpenCode, so the endpoint format matches.
+func ApplyDeepSeek(s Settings) (string, error) {
+	configPath, err := DeepSeekConfigPath()
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		return configPath, err
+	}
+	existing, _ := os.ReadFile(configPath)
+	stripped := stripDeepSeekBlock(string(existing))
+
+	block := fmt.Sprintf(`
+%s
+provider = "ollama"
+model = "%s"
+
+[providers.ollama]
+base_url = "%s/v1"
+%s
+`,
+		deepseekBlockStart,
+		s.Model,
+		NormalizeEndpoint(s.Endpoint),
+		deepseekBlockEnd,
+	)
+	final := strings.TrimRight(stripped, "\n") + "\n" + block
+	return configPath, atomicWrite(configPath, []byte(final))
+}
+
+// DisableDeepSeek strips the managed block from ~/.deepseek/config.toml.
+// No-op when the file doesn't exist.
+func DisableDeepSeek() (string, error) {
+	configPath, err := DeepSeekConfigPath()
+	if err != nil {
+		return "", err
+	}
+	raw, err := os.ReadFile(configPath)
+	if errors.Is(err, fs.ErrNotExist) {
+		return configPath, nil
+	}
+	if err != nil {
+		return configPath, err
+	}
+	return configPath, atomicWrite(configPath, []byte(stripDeepSeekBlock(string(raw))))
+}
+
+// DeepSeekConfigured reports whether ~/.deepseek/config.toml has our
+// managed block. Surfaces the pre-checked state on the Ollama screen
+// when reopened.
+func DeepSeekConfigured() bool {
+	path, err := DeepSeekConfigPath()
+	if err != nil {
+		return false
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(raw), deepseekBlockStart)
+}
+
+// stripDeepSeekBlock removes everything between our marker comments
+// (inclusive). Lines outside the markers are preserved verbatim — no
+// TOML parsing needed because we control the markers.
+func stripDeepSeekBlock(body string) string {
+	lines := strings.Split(body, "\n")
+	var kept []string
+	skip := false
+	for _, line := range lines {
+		trim := strings.TrimSpace(line)
+		if trim == deepseekBlockStart {
+			skip = true
+			continue
+		}
+		if skip && trim == deepseekBlockEnd {
+			skip = false
+			continue
+		}
+		if !skip {
+			kept = append(kept, line)
+		}
+	}
+	return strings.Join(kept, "\n")
+}
+
 func atomicWrite(path string, data []byte) error {
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o644); err != nil {

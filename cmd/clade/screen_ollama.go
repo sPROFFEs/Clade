@@ -43,11 +43,14 @@ type ollamaModel struct {
 	probedModels []string
 	modelCursor  int
 
-	// agent multi-select
+	// agent multi-select. agentCursor indexes into the entries list
+	// rendered below, in this order: claude / codex / opencode /
+	// deepseek. Bump the comment + bounds when you add another agent.
 	pickClaude   bool
 	pickCodex    bool
 	pickOpenCode bool
-	agentCursor  int // 0..2
+	pickDeepSeek bool
+	agentCursor  int // 0..3
 
 	// returnTo, when set, names the Cmd to fire after the user
 	// dismisses the apply screen. New-chat uses this to immediately
@@ -90,6 +93,7 @@ func newOllamaModel(cfg *launcher.Config, ws launcher.Workspace) ollamaModel {
 		pickClaude:   ws.Settings.Ollama.Endpoint != "",
 		pickCodex:    ollama.CodexConfigured(),
 		pickOpenCode: ollama.OpenCodeConfigured(),
+		pickDeepSeek: ollama.DeepSeekConfigured(),
 	}
 }
 
@@ -102,10 +106,10 @@ func newOllamaModel(cfg *launcher.Config, ws launcher.Workspace) ollamaModel {
 func newOllamaModelWithReturn(cfg *launcher.Config, ws launcher.Workspace, returnTo func() tea.Cmd) ollamaModel {
 	m := newOllamaModel(cfg, ws)
 	m.returnTo = returnTo
-	if !m.pickClaude && !m.pickCodex && !m.pickOpenCode {
+	if !m.pickClaude && !m.pickCodex && !m.pickOpenCode && !m.pickDeepSeek {
 		// Brand-new chat: assume the chat's locked agent benefits, and
-		// pre-check Claude. The user can flip codex/opencode too if
-		// they want global config writes.
+		// pre-check Claude. The user can flip the others too if they
+		// want global config writes.
 		m.pickClaude = true
 	}
 	return m
@@ -253,7 +257,7 @@ func (m ollamaModel) updateAgents(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.agentCursor--
 		}
 	case "down", "j":
-		if m.agentCursor < 2 {
+		if m.agentCursor < 3 {
 			m.agentCursor++
 		}
 	case " ", "x":
@@ -264,6 +268,8 @@ func (m ollamaModel) updateAgents(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.pickCodex = !m.pickCodex
 		case 2:
 			m.pickOpenCode = !m.pickOpenCode
+		case 3:
+			m.pickDeepSeek = !m.pickDeepSeek
 		}
 	case "enter":
 		settings := ollama.Settings{
@@ -271,23 +277,39 @@ func (m ollamaModel) updateAgents(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			Model:    strings.TrimSpace(m.modelInput.Value()),
 		}
 		ws := m.ws
-		pickClaude, pickCodex, pickOpenCode := m.pickClaude, m.pickCodex, m.pickOpenCode
+		picks := applyPicks{
+			claude:   m.pickClaude,
+			codex:    m.pickCodex,
+			opencode: m.pickOpenCode,
+			deepseek: m.pickDeepSeek,
+		}
 		m.step = ollamaStepApply
 		m.applying = true
 		return m, func() tea.Msg {
 			return ollamaApplyDoneMsg{
-				results: applyOllama(ws, settings, pickClaude, pickCodex, pickOpenCode),
+				results: applyOllama(ws, settings, picks),
 			}
 		}
 	}
 	return m, nil
 }
 
+// applyPicks groups the per-agent checkboxes the apply flow needs.
+// Bundled into a struct so adding another agent doesn't ripple
+// through every signature.
+type applyPicks struct {
+	claude, codex, opencode, deepseek bool
+}
+
+func (p applyPicks) any() bool {
+	return p.claude || p.codex || p.opencode || p.deepseek
+}
+
 // applyOllama performs the actual writes and returns a per-line result
 // log the screen renders.
-func applyOllama(ws launcher.Workspace, s ollama.Settings, claude, codex, opencode bool) []string {
+func applyOllama(ws launcher.Workspace, s ollama.Settings, picks applyPicks) []string {
 	var out []string
-	if claude {
+	if picks.claude {
 		ws.Settings.Ollama = launcher.OllamaSettings{
 			Endpoint: s.Endpoint, Model: s.Model, WireAPI: s.WireAPI,
 		}
@@ -297,21 +319,28 @@ func applyOllama(ws launcher.Workspace, s ollama.Settings, claude, codex, openco
 			out = append(out, "✓ claude: per-chat ANTHROPIC_BASE_URL + --model on next launch")
 		}
 	}
-	if codex {
+	if picks.codex {
 		if path, err := ollama.ApplyCodex(s); err != nil {
 			out = append(out, "✗ codex: "+err.Error())
 		} else {
 			out = append(out, "✓ codex: "+path+" (launched with -p ollama_remote)")
 		}
 	}
-	if opencode {
+	if picks.opencode {
 		if path, err := ollama.ApplyOpenCode(s, true); err != nil {
 			out = append(out, "✗ opencode: "+err.Error())
 		} else {
 			out = append(out, "✓ opencode: "+path)
 		}
 	}
-	if !claude && !codex && !opencode {
+	if picks.deepseek {
+		if path, err := ollama.ApplyDeepSeek(s); err != nil {
+			out = append(out, "✗ deepseek: "+err.Error())
+		} else {
+			out = append(out, "✓ deepseek: "+path+" (provider=ollama; default model set)")
+		}
+	}
+	if !picks.any() {
 		out = append(out, "(nothing selected — pressed apply with no agents checked)")
 	}
 	return out
@@ -375,6 +404,7 @@ func (m ollamaModel) View() string {
 			{"claude   (per-chat env injection)", "ANTHROPIC_BASE_URL + --model on next launch", m.pickClaude},
 			{"codex    (writes ~/.codex/config.toml)", "creates [profiles.ollama_remote] — launch via -p flag", m.pickCodex},
 			{"opencode (writes ~/.config/opencode/opencode.json)", "registers ollama_remote provider, sets default model", m.pickOpenCode},
+			{"deepseek (writes ~/.deepseek/config.toml)", "provider=ollama + [providers.ollama] block + default model", m.pickDeepSeek},
 		}
 		for i, e := range entries {
 			isSel := i == m.agentCursor

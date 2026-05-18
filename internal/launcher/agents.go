@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// AgentID is one of "claude", "codex", "opencode".
+// AgentID is one of "claude", "codex", "opencode", "gemini", "deepseek".
 type AgentID string
 
 const (
@@ -18,6 +18,7 @@ const (
 	AgentCodex    AgentID = "codex"
 	AgentOpenCode AgentID = "opencode"
 	AgentGemini   AgentID = "gemini"
+	AgentDeepSeek AgentID = "deepseek"
 )
 
 // Agent describes one supported CLI agent. WpcTarget is the wpc target
@@ -75,6 +76,20 @@ func KnownAgents() []Agent {
 			Binary:      "gemini",
 			WpcTarget:   "gemini",
 			InstallHint: "pnpm add -g @google/gemini-cli   (npm package; needs Node 20+)",
+		},
+		{
+			ID:    AgentDeepSeek,
+			Label: "DeepSeek-TUI",
+			// Upstream ships both `deepseek` (dispatcher) and
+			// `deepseek-tui`; the dispatcher is what users invoke.
+			Binary: "deepseek",
+			// DeepSeek-TUI reads Claude-style skill bundles from
+			// .claude/skills/ (one of its fallback discovery paths), so
+			// the existing claude wpc target works as-is — chats can
+			// share the same compiled skill between Claude Code and
+			// DeepSeek-TUI without dual-compilation.
+			WpcTarget: "claude",
+			InstallHint: "npm i -g deepseek-tui   |   brew tap Hmbown/deepseek-tui && brew install deepseek-tui   (macOS)   |   scoop install deepseek-tui   (Windows)",
 		},
 	}
 }
