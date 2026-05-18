@@ -1,0 +1,343 @@
+// Package updater checks GitHub Releases for a newer clade build,
+// downloads the matching archive for the current OS/arch, extracts the
+// binary, and swaps it in place of the running executable.
+//
+// Designed to be called from main() before the TUI starts, gated behind
+// the -update / -check-update flags. Never runs implicitly.
+package updater
+
+import (
+	"archive/tar"
+	"archive/zip"
+	"compress/gzip"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path"
+	"path/filepath"
+	"runtime"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/sPROFFEs/Clade/internal/version"
+)
+
+// Release is the slice of the GitHub /releases/latest payload we need.
+type Release struct {
+	TagName string  `json:"tag_name"`
+	Name    string  `json:"name"`
+	HTMLURL string  `json:"html_url"`
+	Body    string  `json:"body"`
+	Assets  []Asset `json:"assets"`
+}
+
+type Asset struct {
+	Name               string `json:"name"`
+	BrowserDownloadURL string `json:"browser_download_url"`
+	Size               int64  `json:"size"`
+}
+
+// httpClient is shared so callers can swap it in tests. Default timeout
+// is generous because release archives can be tens of MB.
+var httpClient = &http.Client{Timeout: 60 * time.Second}
+
+// LatestURL is the GitHub API endpoint queried for the most recent
+// release of the configured repo.
+func LatestURL() string {
+	return "https://api.github.com/repos/" + version.Repo + "/releases/latest"
+}
+
+// FetchLatest hits the GitHub API and returns the most recent release.
+// Returns a not-found error if the repo has no releases yet (GitHub
+// answers 404 in that case).
+func FetchLatest() (*Release, error) {
+	req, err := http.NewRequest("GET", LatestURL(), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", "clade-updater/"+version.Current)
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("github: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == 404 {
+		return nil, errors.New("no releases published yet for " + version.Repo)
+	}
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("github: HTTP %d", resp.StatusCode)
+	}
+
+	var rel Release
+	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
+		return nil, fmt.Errorf("decode release: %w", err)
+	}
+	return &rel, nil
+}
+
+// IsNewer reports whether remote (e.g. "v0.2.0") is strictly newer than
+// local (e.g. "0.1.0"). Leading "v" is tolerated on either side. A
+// non-parseable segment is treated as zero so we never panic on a tag
+// like "v0.2.0-rc1" — that gets compared as 0.2.0 and the user can
+// still see the tag in the printout.
+func IsNewer(remoteTag, localVer string) bool {
+	r := parseSemver(remoteTag)
+	l := parseSemver(localVer)
+	for i := 0; i < 3; i++ {
+		if r[i] != l[i] {
+			return r[i] > l[i]
+		}
+	}
+	return false
+}
+
+func parseSemver(s string) [3]int {
+	s = strings.TrimPrefix(strings.TrimSpace(s), "v")
+	// Strip pre-release suffix ("-rc1", "-beta.2") before splitting.
+	if i := strings.IndexAny(s, "-+"); i >= 0 {
+		s = s[:i]
+	}
+	parts := strings.SplitN(s, ".", 3)
+	var out [3]int
+	for i, p := range parts {
+		if i >= 3 {
+			break
+		}
+		n, err := strconv.Atoi(p)
+		if err == nil {
+			out[i] = n
+		}
+	}
+	return out
+}
+
+// AssetForHost picks the asset whose filename matches the current OS
+// and architecture. Windows builds ship as .zip, everything else as
+// .tar.gz — matching scripts/build.sh's naming.
+func AssetForHost(rel *Release) (*Asset, error) {
+	triplet := runtime.GOOS + "-" + runtime.GOARCH
+	wantExt := ".tar.gz"
+	if runtime.GOOS == "windows" {
+		wantExt = ".zip"
+	}
+	for i := range rel.Assets {
+		a := &rel.Assets[i]
+		if strings.Contains(a.Name, triplet) && strings.HasSuffix(a.Name, wantExt) {
+			return a, nil
+		}
+	}
+	return nil, fmt.Errorf("no release asset for %s found in %s", triplet, rel.TagName)
+}
+
+// Apply downloads the asset, extracts the clade binary, and swaps it
+// in place of the currently-running executable. On success the caller
+// should print a "restart now" line and return — the next invocation
+// runs the new binary.
+//
+// On Windows the running .exe can be renamed but not deleted; we
+// rename the live binary to <name>.old and place the new one at the
+// original path. The .old artifact is harmless and gets overwritten
+// on the next update.
+func Apply(asset *Asset, progress func(stage string)) error {
+	if progress == nil {
+		progress = func(string) {}
+	}
+
+	exePath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("locate own executable: %w", err)
+	}
+	exePath, _ = filepath.EvalSymlinks(exePath)
+
+	progress("downloading " + asset.Name)
+	archivePath, err := downloadToTemp(asset)
+	if err != nil {
+		return err
+	}
+	defer os.Remove(archivePath)
+
+	progress("extracting binary")
+	binName := "clade"
+	if runtime.GOOS == "windows" {
+		binName = "clade.exe"
+	}
+	stagedBin, err := extractBinary(archivePath, binName)
+	if err != nil {
+		return err
+	}
+	defer os.Remove(stagedBin)
+
+	progress("installing")
+	if err := swapBinary(exePath, stagedBin); err != nil {
+		return fmt.Errorf("swap binary: %w", err)
+	}
+	return nil
+}
+
+func downloadToTemp(asset *Asset) (string, error) {
+	req, err := http.NewRequest("GET", asset.BrowserDownloadURL, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "clade-updater/"+version.Current)
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("download: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("download: HTTP %d", resp.StatusCode)
+	}
+
+	f, err := os.CreateTemp("", "clade-update-*"+filepath.Ext(asset.Name))
+	if err != nil {
+		return "", err
+	}
+	if _, err := io.Copy(f, resp.Body); err != nil {
+		f.Close()
+		os.Remove(f.Name())
+		return "", err
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(f.Name())
+		return "", err
+	}
+	return f.Name(), nil
+}
+
+// extractBinary pulls just the clade executable out of the archive,
+// writes it to a temp file marked executable, and returns the path.
+// Archive layout (from scripts/build.sh): <triplet>/<binName> at the
+// top level — we accept the binary at any depth though, in case the
+// layout shifts.
+func extractBinary(archivePath, binName string) (string, error) {
+	if strings.HasSuffix(archivePath, ".zip") {
+		return extractFromZip(archivePath, binName)
+	}
+	return extractFromTarGz(archivePath, binName)
+}
+
+func extractFromZip(archivePath, binName string) (string, error) {
+	zr, err := zip.OpenReader(archivePath)
+	if err != nil {
+		return "", err
+	}
+	defer zr.Close()
+	for _, zf := range zr.File {
+		if path.Base(zf.Name) != binName {
+			continue
+		}
+		rc, err := zf.Open()
+		if err != nil {
+			return "", err
+		}
+		out, err := writeStagedBinary(rc, binName)
+		rc.Close()
+		return out, err
+	}
+	return "", fmt.Errorf("%s not found in archive", binName)
+}
+
+func extractFromTarGz(archivePath, binName string) (string, error) {
+	f, err := os.Open(archivePath)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		return "", err
+	}
+	defer gz.Close()
+	tr := tar.NewReader(gz)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return "", err
+		}
+		if hdr.Typeflag != tar.TypeReg {
+			continue
+		}
+		if path.Base(hdr.Name) != binName {
+			continue
+		}
+		return writeStagedBinary(tr, binName)
+	}
+	return "", fmt.Errorf("%s not found in archive", binName)
+}
+
+func writeStagedBinary(r io.Reader, binName string) (string, error) {
+	out, err := os.CreateTemp("", "clade-staged-*-"+binName)
+	if err != nil {
+		return "", err
+	}
+	if _, err := io.Copy(out, r); err != nil {
+		out.Close()
+		os.Remove(out.Name())
+		return "", err
+	}
+	if err := out.Close(); err != nil {
+		os.Remove(out.Name())
+		return "", err
+	}
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(out.Name(), 0o755); err != nil {
+			os.Remove(out.Name())
+			return "", err
+		}
+	}
+	return out.Name(), nil
+}
+
+// swapBinary places newBin at exePath. On Unix we can simply rename
+// (the running process keeps its inode). On Windows the running .exe
+// is locked for delete but allows rename, so we sidestep with a
+// rename-rename pattern.
+func swapBinary(exePath, newBin string) error {
+	if runtime.GOOS == "windows" {
+		old := exePath + ".old"
+		_ = os.Remove(old) // best-effort: clean up leftover from previous update
+		if err := os.Rename(exePath, old); err != nil {
+			return err
+		}
+		if err := os.Rename(newBin, exePath); err != nil {
+			// Restore on failure so we don't leave the user without a binary.
+			_ = os.Rename(old, exePath)
+			return err
+		}
+		return nil
+	}
+	// Cross-device renames fail on some Linux setups (/tmp on a
+	// different fs). Fall back to copy+replace if so.
+	if err := os.Rename(newBin, exePath); err != nil {
+		return copyOver(newBin, exePath)
+	}
+	return nil
+}
+
+func copyOver(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o755)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
+}

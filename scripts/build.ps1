@@ -2,9 +2,15 @@
 # under dist\<os>-<arch>\ ready for distribution.
 #
 # Usage:
-#   .\scripts\build.ps1                       # all targets
-#   .\scripts\build.ps1 -Targets linux-amd64  # one target
-#   .\scripts\build.ps1 -NoArchive            # skip zip step
+#   .\scripts\build.ps1                            # all targets, default version
+#   .\scripts\build.ps1 -Targets linux-amd64       # one target
+#   .\scripts\build.ps1 -NoArchive                 # skip zip step
+#   .\scripts\build.ps1 -Version 0.2.0             # inject a specific version
+#
+# The version is stamped into the binary at link time via
+# `-X .../internal/version.Current=$Version`, so `clade -version` and
+# the self-updater both report it. Default lives in
+# internal\version\version.go.
 #
 # Requires: Go 1.21+. Uses Compress-Archive (built into PowerShell 5+) for
 # zips; tar.gz on non-Windows targets needs `tar` (built into Windows 10+).
@@ -18,11 +24,17 @@ param(
         "darwin-amd64",
         "darwin-arm64"
     ),
+    [string] $Version = "0.1.6",
     [string] $LdFlags = "-s -w",
     [switch] $NoArchive
 )
 
 $ErrorActionPreference = "Stop"
+
+# Combine strip flags + version injection into one -ldflags string. The
+# Go linker accepts multiple -X entries inside it.
+$FullLdFlags = "$LdFlags -X github.com/sPROFFEs/Clade/internal/version.Current=$Version"
+Write-Host "Building version $Version"
 
 # Repo root is the parent of the scripts dir.
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
@@ -44,9 +56,9 @@ function Build-One($triplet) {
     $env:GOARCH = $goarch
     $env:CGO_ENABLED = "0"
 
-    & go build -trimpath -ldflags $LdFlags -o (Join-Path $out "wpc$ext") "./cmd/wpc"
+    & go build -trimpath -ldflags $FullLdFlags -o (Join-Path $out "wpc$ext") "./cmd/wpc"
     if ($LASTEXITCODE -ne 0) { throw "wpc build failed for $triplet" }
-    & go build -trimpath -ldflags $LdFlags -o (Join-Path $out "clade$ext") "./cmd/clade"
+    & go build -trimpath -ldflags $FullLdFlags -o (Join-Path $out "clade$ext") "./cmd/clade"
     if ($LASTEXITCODE -ne 0) { throw "clade build failed for $triplet" }
 
     # Bundle samples + docs so the binary is self-sufficient at first run.

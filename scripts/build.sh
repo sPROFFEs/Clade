@@ -4,9 +4,16 @@
 # from anywhere — we cd to the script's parent automatically.
 #
 # Usage:
-#   scripts/build.sh                  # all targets
-#   scripts/build.sh linux-amd64      # one target
-#   scripts/build.sh --no-archive     # skip the zip/tar.gz step
+#   scripts/build.sh                       # all targets, default version
+#   scripts/build.sh linux-amd64           # one target
+#   scripts/build.sh --no-archive          # skip the zip/tar.gz step
+#   scripts/build.sh --version=0.2.0       # inject a specific version
+#   VERSION=0.2.0 scripts/build.sh         # same, via env var
+#
+# The version is stamped into the binary at link time via
+# `-X .../internal/version.Current=$VERSION`, so `clade -version` and
+# the self-updater both report it. Default lives in
+# internal/version/version.go.
 #
 # Requires: Go 1.21+, tar + zip (only when archiving).
 
@@ -14,20 +21,28 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-LDFLAGS="${LDFLAGS:--s -w}"  # strip symbols by default — tiny binaries
+VERSION="${VERSION:-0.1.6}"
+EXTRA_LDFLAGS="${LDFLAGS:--s -w}"  # strip symbols by default — tiny binaries
 ARCHIVE=1
 TARGETS=()
 
 for arg in "$@"; do
   case "$arg" in
     --no-archive) ARCHIVE=0 ;;
+    --version=*) VERSION="${arg#--version=}" ;;
     -h|--help)
-      sed -n '2,12p' "$0"
+      sed -n '2,19p' "$0"
       exit 0
       ;;
     *) TARGETS+=("$arg") ;;
   esac
 done
+
+# Combined linker flags: strip + version injection. The Go linker accepts
+# multiple -X entries inside one -ldflags string.
+LDFLAGS="$EXTRA_LDFLAGS -X github.com/sPROFFEs/Clade/internal/version.Current=$VERSION"
+
+echo "Building version $VERSION"
 
 if [ ${#TARGETS[@]} -eq 0 ]; then
   TARGETS=(

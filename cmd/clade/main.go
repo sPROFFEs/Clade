@@ -5,6 +5,8 @@
 //
 //	clade                  (interactive)
 //	clade -version
+//	clade -check-update    (report whether a newer release exists)
+//	clade -update          (download + install the latest release)
 //
 // The launcher detects first run (no config), walks the user through
 // picking a workspaces root, lists / creates workspaces, detects which
@@ -25,15 +27,27 @@ import (
 	"github.com/sPROFFEs/Clade/internal/installer"
 	"github.com/sPROFFEs/Clade/internal/launcher"
 	"github.com/sPROFFEs/Clade/internal/ollama"
+	"github.com/sPROFFEs/Clade/internal/updater"
+	"github.com/sPROFFEs/Clade/internal/version"
 )
 
 func main() {
 	versionFlag := flag.Bool("version", false, "print version and exit")
 	noSplash := flag.Bool("no-splash", false, "skip the boot animation")
+	checkUpdateFlag := flag.Bool("check-update", false, "check GitHub for a newer release and exit")
+	updateFlag := flag.Bool("update", false, "download and install the latest release, then exit")
+	yesFlag := flag.Bool("y", false, "auto-confirm the update prompt (use with -update for non-interactive installs)")
 	flag.Parse()
 	if *versionFlag {
-		fmt.Printf("clade 0.1.0 %s/%s\n", runtime.GOOS, runtime.GOARCH)
+		fmt.Println(version.Banner)
+		fmt.Printf("\nclade %s %s/%s\n", version.Current, runtime.GOOS, runtime.GOARCH)
 		return
+	}
+	if *checkUpdateFlag {
+		os.Exit(runCheckUpdate())
+	}
+	if *updateFlag {
+		os.Exit(runUpdate(*yesFlag))
 	}
 	// screen_splash.go reads this to decide whether to show the
 	// reveal animation. Also disabled when CLADE_NO_SPLASH=1 or
@@ -183,4 +197,66 @@ func execAgent(plan launcher.LaunchPlan) int {
 func die(err error) {
 	fmt.Fprintf(os.Stderr, "clade: %v\n", err)
 	os.Exit(1)
+}
+
+// runCheckUpdate prints whether a newer release exists on GitHub. Used
+// by the -check-update flag; safe to run in scripts (no side effects,
+// no prompts).
+func runCheckUpdate() int {
+	rel, err := updater.FetchLatest()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "clade: %v\n", err)
+		return 1
+	}
+	if updater.IsNewer(rel.TagName, version.Current) {
+		fmt.Printf("update available: %s (currently %s)\n  %s\n", rel.TagName, version.Current, rel.HTMLURL)
+		fmt.Println("\nRun `clade -update` to install it.")
+		return 0
+	}
+	fmt.Printf("up to date (%s is the latest release)\n", version.Current)
+	return 0
+}
+
+// runUpdate fetches the latest release, prompts the user (unless -y is
+// set), and swaps the clade binary in place. Exits 0 on success,
+// non-zero on any failure or user decline.
+func runUpdate(autoYes bool) int {
+	rel, err := updater.FetchLatest()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "clade: %v\n", err)
+		return 1
+	}
+	if !updater.IsNewer(rel.TagName, version.Current) {
+		fmt.Printf("already on the latest release (%s)\n", version.Current)
+		return 0
+	}
+	asset, err := updater.AssetForHost(rel)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "clade: %v\n", err)
+		return 1
+	}
+
+	fmt.Printf("Update available: %s → %s\n", version.Current, rel.TagName)
+	fmt.Printf("Asset: %s (%.1f MB)\n", asset.Name, float64(asset.Size)/(1024*1024))
+	fmt.Printf("Release notes: %s\n\n", rel.HTMLURL)
+
+	if !autoYes {
+		fmt.Print("Install now? [y/N] ")
+		var answer string
+		_, _ = fmt.Scanln(&answer)
+		if answer != "y" && answer != "Y" && answer != "yes" {
+			fmt.Println("cancelled")
+			return 1
+		}
+	}
+
+	err = updater.Apply(asset, func(stage string) {
+		fmt.Println("  …", stage)
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "clade: update failed: %v\n", err)
+		return 1
+	}
+	fmt.Printf("\n✓ installed %s. Re-run `clade` to start the new version.\n", rel.TagName)
+	return 0
 }

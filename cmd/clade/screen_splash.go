@@ -3,7 +3,7 @@ package main
 // Boot splash: a brief animated logo that runs when `clade` starts,
 // then transitions to whatever the real first screen is (first-run
 // wizard or chat list). Codex-CLI-style draw-in: the logo reveals
-// column-by-column from left to right, the lambda pulses, then we
+// column-by-column from left to right, the wordmark pulses, then we
 // hand off.
 //
 // Skip with --no-splash, or set CLADE_NO_SPLASH=1 in the env.
@@ -19,31 +19,21 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// The "clade" wordmark, drawn in box-drawing block letters. Each
-// row is the same width; we reveal characters column-by-column to
-// produce the draw-in effect.
+// The clade wordmark with a cladogram (the slash tree on the left)
+// inlined on each row. Six lines total: hand-drawn cladogram on the
+// left, figlet "ANSI Shadow" CLADE letters on the right. We reveal
+// characters column-by-column to produce the draw-in effect.
 //
-// Generated with figlet "ANSI Shadow" font, hand-tweaked for spacing
-// so the lambda above sits centred. If you regenerate it, keep all
-// rows the same rune-width or the reveal will look uneven.
+// If you regenerate, keep all rows the same rune-width or the
+// reveal will look uneven (the reveal pads each frame to totalCols
+// so the centred layout stays stable across frames).
 var logoWordmark = []string{
-	"██████╗ ██╗      █████╗ ██████╗ ███████╗",
-	"██╔════╝ ██║     ██╔══██╗██╔══██╗██╔════╝",
-	"██║      ██║     ███████║██║  ██║█████╗  ",
-	"██║      ██║     ██╔══██║██║  ██║██╔══╝  ",
-	"╚██████╗ ███████╗██║  ██║██████╔╝███████╗",
-	" ╚═════╝ ╚══════╝╚═╝  ╚═╝╚═════╝ ╚══════╝",
-}
-
-// The lambda + cladogram fork sitting above the wordmark. It's a
-// single block we render in one piece (no draw-in) — the wordmark
-// reveal is the main motion.
-var logoLambda = []string{
-	"      ╲ │ ╱      ",
-	"       ╲│╱       ",
-	"        λ        ",
-	"       ╱│╲       ",
-	"      ╱ │ ╲      ",
+	"            __         ██████╗██╗      █████╗ ██████╗ ███████╗",
+	"            / /        ██╔════╝██║     ██╔══██╗██╔══██╗██╔════╝",
+	"           / /         ██║     ██║     ███████║██║  ██║█████╗  ",
+	"          / / \\        ██║     ██║     ██╔══██║██║  ██║██╔══╝  ",
+	"         / / \\ \\       ╚██████╗███████╗██║  ██║██████╔╝███████╗",
+	"        /_/   \\_\\      ╚═════╝╚══════╝╚═╝  ╚═╝╚═════╝ ╚══════╝",
 }
 
 // Pre-computed wordmark column count, used to drive the reveal.
@@ -165,26 +155,16 @@ func (m splashModel) View() string {
 	// just push down a few lines.
 	b.WriteString("\n\n\n")
 
-	// Lambda block, centred. During holding we cycle its colour
-	// between accent and a slightly brighter shade to suggest a glow.
-	lambdaStyle := lipgloss.NewStyle().Foreground(t.Accent).Bold(true)
-	if m.phase == splashHolding && m.pulse%2 == 1 {
-		// Alternate between Accent and Title to fake a glow. They
-		// happen to be cyan and magenta in the default theme, which
-		// reads as a "pulse" without doing any colour math.
-		lambdaStyle = lipgloss.NewStyle().Foreground(t.Title).Bold(true)
-	}
-	for _, line := range logoLambda {
-		b.WriteString(centre(lambdaStyle.Render(line)))
-		b.WriteString("\n")
-	}
-
-	b.WriteString("\n")
-
 	// Wordmark: reveal m.cols columns of each row from the left,
 	// padding the rest with spaces so trailing-row geometry stays
 	// stable (otherwise the centre() helper rejiggers each frame).
+	// During holding we cycle the wordmark's colour between Accent and
+	// Title (cyan / magenta in the default theme) to fake a "pulse"
+	// glow without doing any colour math.
 	wordStyle := lipgloss.NewStyle().Foreground(t.Accent).Bold(true)
+	if m.phase == splashHolding && m.pulse%2 == 1 {
+		wordStyle = lipgloss.NewStyle().Foreground(t.Title).Bold(true)
+	}
 	for _, row := range logoWordmark {
 		runes := []rune(row)
 		var slice []rune

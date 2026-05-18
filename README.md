@@ -1,20 +1,14 @@
 # Clade
 
 ```
-                       ╲ │ ╱
-                        ╲│╱
-                         λ
-                        ╱│╲
-                       ╱ │ ╲
+            __         ██████╗██╗      █████╗ ██████╗ ███████╗
+            / /        ██╔════╝██║     ██╔══██╗██╔══██╗██╔════╝
+           / /         ██║     ██║     ███████║██║  ██║█████╗
+          / / \        ██║     ██║     ██╔══██║██║  ██║██╔══╝
+         / / \ \       ╚██████╗███████╗██║  ██║██████╔╝███████╗
+        /_/   \_\      ╚═════╝╚══════╝╚═╝  ╚═╝╚═════╝ ╚══════╝
 
-       ██████╗ ██╗      █████╗ ██████╗ ███████╗
-      ██╔════╝ ██║     ██╔══██╗██╔══██╗██╔════╝
-      ██║      ██║     ███████║██║  ██║█████╗
-      ██║      ██║     ██╔══██║██║  ██║██╔══╝
-      ╚██████╗ ███████╗██║  ██║██████╔╝███████╗
-       ╚═════╝ ╚══════╝╚═╝  ╚═╝╚═════╝ ╚══════╝
-
-           fork agent chats from one common template
+                           fork agent chats from one common template
 ```
 
 A terminal launcher for agent CLIs — **Claude Code**, **Codex CLI**,
@@ -54,8 +48,18 @@ run `./scripts/install.sh` (or `.\scripts\install.ps1`) from inside.
 ```sh
 clade                     # interactive — opens with a brief boot splash
 clade --no-splash         # skip the splash (also via CLADE_NO_SPLASH=1)
-clade -version            # print version and exit
+clade -version            # print banner + version and exit
+clade -check-update       # ask GitHub if a newer release exists
+clade -update             # download + install the latest release (prompts y/N)
+clade -update -y          # same, non-interactive (for CI / scripts)
 ```
+
+The updater queries `api.github.com/repos/sPROFFEs/Clade/releases/latest`,
+picks the archive whose name matches your OS+arch
+(`clade-<os>-<arch>.{tar.gz,zip}`), extracts just the `clade` binary,
+and swaps it in place of the running executable. On Windows the
+previous binary is preserved as `clade.exe.old` (a running `.exe`
+can be renamed but not deleted); the next update cleans it up.
 
 First run is two questions:
 
