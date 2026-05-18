@@ -110,8 +110,9 @@ func (m templateListModel) View() string {
 func (m templateListModel) Title() string {
 	return fmt.Sprintf("Templates (%d) · reusable patterns for chats", len(m.items))
 }
-func (m templateListModel) Help() string       { return templateListHelp(m) }
-func (m templateListModel) NavSection() string { return navSectionTemplates }
+func (m templateListModel) Help() string          { return templateListHelp(m) }
+func (m templateListModel) NavSection() string    { return navSectionTemplates }
+func (m templateListModel) CapturingInput() bool  { return false }
 
 func (m templateListModel) Body() string {
 	var b strings.Builder
@@ -319,8 +320,11 @@ func (m newTemplateModel) View() string {
 func (m newTemplateModel) Title() string {
 	return fmt.Sprintf("New template (step %d/5)", m.step+1)
 }
-func (m newTemplateModel) Help() string       { return "enter to continue · esc to go back" }
-func (m newTemplateModel) NavSection() string { return navSectionTemplates }
+func (m newTemplateModel) Help() string          { return "enter to continue · esc to go back" }
+func (m newTemplateModel) NavSection() string    { return navSectionTemplates }
+// All five steps either type into a textinput (name/desc/language/skill)
+// or are y/n toggles — both want `:` and `?` to flow through as-is.
+func (m newTemplateModel) CapturingInput() bool  { return true }
 
 func (m newTemplateModel) Body() string {
 	var b strings.Builder

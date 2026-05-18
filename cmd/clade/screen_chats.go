@@ -166,9 +166,10 @@ func (m chatListModel) View() string {
 	return renderChrome(m.Title(), m.Body(), m.Help())
 }
 
-func (m chatListModel) Title() string      { return chatListTitle(m) }
-func (m chatListModel) Help() string       { return chatListHelp(m) }
-func (m chatListModel) NavSection() string { return navSectionChats }
+func (m chatListModel) Title() string         { return chatListTitle(m) }
+func (m chatListModel) Help() string          { return chatListHelp(m) }
+func (m chatListModel) NavSection() string    { return navSectionChats }
+func (m chatListModel) CapturingInput() bool  { return false }
 
 func (m chatListModel) Body() string {
 	var b strings.Builder

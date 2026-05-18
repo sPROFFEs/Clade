@@ -194,7 +194,8 @@ func (m installModel) Help() string {
 	}
 	return "↑/↓ select · enter run · esc back"
 }
-func (m installModel) NavSection() string { return navSectionAgents }
+func (m installModel) NavSection() string    { return navSectionAgents }
+func (m installModel) CapturingInput() bool  { return false }
 
 func (m installModel) Body() string {
 	var b strings.Builder

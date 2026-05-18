@@ -42,6 +42,15 @@ type Pane interface {
 	// down panes return the parent section so the user still sees
 	// where they are.
 	NavSection() string
+
+	// CapturingInput reports whether this pane currently has a
+	// text-input field focused. The layout uses it to stop
+	// intercepting "shortcut" keys that overlap with normal text
+	// (`:`, `?`) — those defer to the input when true, so the
+	// user can actually type a URL like http://… without the
+	// palette stealing the colon. ctrl-P always opens the palette
+	// regardless; it's the universal fallback.
+	CapturingInput() bool
 }
 
 // Compile-time assertions — keeps the type system honest when we

@@ -368,6 +368,10 @@ func (m ollamaModel) Help() string {
 	return "enter / esc"
 }
 func (m ollamaModel) NavSection() string { return navSectionChats }
+// Endpoint + model input steps need ':' to flow through (URLs!).
+// The agent multi-select and apply screens are list-driven but we
+// keep the claim true throughout the wizard for consistency.
+func (m ollamaModel) CapturingInput() bool { return true }
 
 func (m ollamaModel) Body() string {
 	var b strings.Builder

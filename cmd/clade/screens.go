@@ -441,7 +441,8 @@ func (m agentsModel) Help() string {
 	}
 	return "↑/↓ select · enter launch/install · i install · o ollama · esc back"
 }
-func (m agentsModel) NavSection() string { return navSectionAgents }
+func (m agentsModel) NavSection() string    { return navSectionAgents }
+func (m agentsModel) CapturingInput() bool  { return false }
 
 func (m agentsModel) Body() string {
 	var b strings.Builder

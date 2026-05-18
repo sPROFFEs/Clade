@@ -86,7 +86,8 @@ func (m pickTemplateModel) Title() string { return "New chat · pick a template"
 func (m pickTemplateModel) Help() string {
 	return "↑/↓ select · enter pick · t manage templates · esc back"
 }
-func (m pickTemplateModel) NavSection() string { return navSectionChats }
+func (m pickTemplateModel) NavSection() string    { return navSectionChats }
+func (m pickTemplateModel) CapturingInput() bool  { return false }
 
 func (m pickTemplateModel) Body() string {
 	var b strings.Builder
@@ -315,6 +316,11 @@ func (m newChatFromTemplateModel) Title() string {
 	return fmt.Sprintf("New chat from %q", m.template.Name)
 }
 func (m newChatFromTemplateModel) NavSection() string { return navSectionChats }
+// step 0 is the name text input; later steps are list/toggle. Only the
+// name step truly captures text, but `:` in a chat-name is unusual —
+// being conservative and returning true for the whole wizard avoids
+// the colon-eats-palette gotcha mid-flow.
+func (m newChatFromTemplateModel) CapturingInput() bool { return m.step == 0 }
 func (m newChatFromTemplateModel) Help() string {
 	switch m.step {
 	case 1:

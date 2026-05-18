@@ -148,8 +148,11 @@ func (m settingsModel) View() string {
 func (m settingsModel) Title() string {
 	return fmt.Sprintf("Settings · %s", m.ws.Name)
 }
-func (m settingsModel) Help() string       { return "enter to continue · esc to go back" }
-func (m settingsModel) NavSection() string { return navSectionChats }
+func (m settingsModel) Help() string         { return "enter to continue · esc to go back" }
+func (m settingsModel) NavSection() string   { return navSectionChats }
+// All steps drive textinputs (language, skill URL) or y/n prompts —
+// claim the text so `:` and `?` flow through to the input.
+func (m settingsModel) CapturingInput() bool { return true }
 
 func (m settingsModel) Body() string {
 	var b strings.Builder

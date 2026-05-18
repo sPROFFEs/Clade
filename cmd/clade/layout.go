@@ -8,7 +8,7 @@ package main
 //   - a top tab strip listing opened chats (pinned by the user)
 //   - a right-side detail Pane whose body comes from the active screen
 //   - a bottom statusline with workspaces root + selection context
-//   - two overlays: a `:` command palette and a `?` help sheet
+//   - two overlays: a `ctrl-P` command palette and a `?` help sheet
 //
 // The pane content still comes from the existing screen types (now
 // implementing Pane). The layout intercepts screenDoneMsg{next:...}
@@ -16,8 +16,11 @@ package main
 // up to rootModel.
 //
 // Focus model: keys go to the focused region (nav / pane / palette
-// / help). Globals — ctrl-c, `:`, `?`, ctrl-1..4 — are handled at
-// the layout level before forwarding.
+// / help). Globals — ctrl-c, ctrl-P, ctrl-1..4 — are handled at the
+// layout level before forwarding. The legacy `:` and `?` shortcuts
+// also open palette/help, but only when the active pane reports
+// CapturingInput()=false — so URLs like http://… can be typed into
+// the Ollama endpoint field without the colon being eaten.
 
 import (
 	"fmt"
@@ -188,17 +191,35 @@ func (m *layoutModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		// Whether the active pane has a focused text input.  When
+		// true we let `:` and `?` flow to the pane instead of
+		// stealing them for the palette / help overlay (a URL
+		// like http://… and questions inside descriptions are real
+		// content users type). ctrl-P / F1 always work and are the
+		// universal fallback.
+		paneTyping := m.focus == focusPane && m.pane.CapturingInput()
+
 		// Global keys handled regardless of focus.
 		switch msg.String() {
 		case "ctrl+c":
 			return m, tea.Quit
-		case ":":
+		case "ctrl+p":
 			if m.focus != focusPalette {
 				m.openPalette()
 				return m, textinput.Blink
 			}
-		case "?":
+		case ":":
+			if !paneTyping && m.focus != focusPalette {
+				m.openPalette()
+				return m, textinput.Blink
+			}
+		case "f1":
 			if m.focus != focusPalette {
+				m.toggleHelp()
+				return m, nil
+			}
+		case "?":
+			if !paneTyping && m.focus != focusPalette {
 				m.toggleHelp()
 				return m, nil
 			}
@@ -419,7 +440,7 @@ func (m *layoutModel) renderTopBar(w int) string {
 	app := titleStyle.Render("λ clade")
 	sepStr := lipgloss.NewStyle().Foreground(t.Border).Render(" │ ")
 	root := lipglossDim(m.cfg.WorkspacesRoot)
-	hint := lipgloss.NewStyle().Foreground(t.Muted).Render(": cmd  ? help  ctrl-c quit")
+	hint := lipgloss.NewStyle().Foreground(t.Muted).Render("ctrl-p cmd  F1 help  ctrl-c quit")
 
 	left := app + sepStr + root
 	gap := w - lipgloss.Width(left) - lipgloss.Width(hint)
@@ -695,8 +716,10 @@ func (m *layoutModel) renderHelpOverlay() string {
 	rows := [][2]string{
 		{"tab / shift-tab", "cycle focus between pane / nav / tabs"},
 		{"ctrl-1 .. ctrl-4", "jump to nav section directly"},
-		{":", "open command palette"},
-		{"?", "toggle this help overlay"},
+		{"ctrl-p", "open command palette"},
+		{"F1", "toggle this help overlay"},
+		{":", "palette shortcut (on list-only screens — see note)"},
+		{"?", "help shortcut (on list-only screens — see note)"},
 		{"ctrl-w", "close the active chat tab"},
 		{"ctrl-c", "quit clade"},
 		{"", ""},
@@ -721,6 +744,8 @@ func (m *layoutModel) renderHelpOverlay() string {
 		key := lipgloss.NewStyle().Foreground(t.Accent).Width(20).Render(r[0])
 		b.WriteString(key + " " + lipglossDim(r[1]) + "\n")
 	}
+	b.WriteString("\n" + lipglossDim("Note: `:` and `?` defer to the focused text input when one is active") + "\n")
+	b.WriteString(lipglossDim("(so URLs and free-text descriptions can include them).") + "\n")
 	b.WriteString("\n" + lipglossDim("press any key to dismiss"))
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).

@@ -46,19 +46,66 @@ func TestLayoutSelectNavSwitchesSection(t *testing.T) {
 	}
 }
 
-func TestLayoutPaletteOpensOnColon(t *testing.T) {
+func TestLayoutPaletteOpensOnCtrlP(t *testing.T) {
 	cfg := &launcher.Config{WorkspacesRoot: "/tmp/ws-layout-test3"}
 	setTermSize(120, 30)
 	l := newLayoutModel(cfg)
-	next, _ := l.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{':'}})
+	next, _ := l.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
 	l = next.(*layoutModel)
 	if !l.palette.visible {
-		t.Fatal("palette did not open on ':'")
+		t.Fatal("palette did not open on ctrl-p")
 	}
 	if l.focus != focusPalette {
 		t.Errorf("focus = %v, want focusPalette", l.focus)
 	}
 }
+
+// `:` still opens the palette when the active pane is list-only (no
+// text input focused). The chat list is the boot pane in our test
+// layout, so it qualifies.
+func TestLayoutPaletteOpensOnColonInListPane(t *testing.T) {
+	cfg := &launcher.Config{WorkspacesRoot: "/tmp/ws-layout-colon-list"}
+	setTermSize(120, 30)
+	l := newLayoutModel(cfg)
+	next, _ := l.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{':'}})
+	l = next.(*layoutModel)
+	if !l.palette.visible {
+		t.Fatal("palette did not open on ':' for a list-only pane")
+	}
+}
+
+// `:` is forwarded to the pane (does NOT open the palette) when the
+// active pane reports CapturingInput()=true. We use a fake pane to
+// avoid spinning up an ollama wizard with all its async probing.
+func TestLayoutColonDefersToInputPane(t *testing.T) {
+	cfg := &launcher.Config{WorkspacesRoot: "/tmp/ws-layout-colon-input"}
+	setTermSize(120, 30)
+	l := newLayoutModel(cfg)
+	l.pane = &fakeCapturingPane{}
+	next, _ := l.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{':'}})
+	l = next.(*layoutModel)
+	if l.palette.visible {
+		t.Fatal("palette opened on ':' while pane was capturing input")
+	}
+}
+
+// fakeCapturingPane is a minimal Pane that claims to be capturing
+// text — used only to verify the layout's input-aware routing.
+type fakeCapturingPane struct{ saw string }
+
+func (p *fakeCapturingPane) Init() tea.Cmd { return nil }
+func (p *fakeCapturingPane) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if k, ok := msg.(tea.KeyMsg); ok {
+		p.saw += k.String()
+	}
+	return p, nil
+}
+func (p *fakeCapturingPane) View() string         { return "" }
+func (p *fakeCapturingPane) Title() string        { return "fake" }
+func (p *fakeCapturingPane) Help() string         { return "" }
+func (p *fakeCapturingPane) Body() string         { return "" }
+func (p *fakeCapturingPane) NavSection() string   { return "" }
+func (p *fakeCapturingPane) CapturingInput() bool { return true }
 
 func TestLayoutPinChatMsgAddsTab(t *testing.T) {
 	cfg := &launcher.Config{WorkspacesRoot: "/tmp/ws-layout-test4"}
