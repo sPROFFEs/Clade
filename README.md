@@ -477,10 +477,27 @@ it's there but isn't expected to parse it directly.
 Hidden files / dirs (anything starting with `.`) are skipped.
 Symlinks and entries containing `..` are rejected for safety.
 
-The bundled samples both ship a `knowledge/` directory you can
-read to see the manifest format in action:
+The bundled samples ship a `knowledge/` directory you can read
+to see the manifest format in action:
 [`samples/workpaths/reversing/knowledge/`](samples/workpaths/reversing/knowledge),
 [`samples/workpaths/code-review/knowledge/`](samples/workpaths/code-review/knowledge).
+
+### Meta-template: `workpath-author`
+
+The bundled `workpath-author` template is a chat that already
+knows the workpath system cold — the schema, the per-target
+outputs, the decoration pipeline. Start a chat from it and you
+can say *"make me a template for X"* and the agent will scaffold
+the directory, write `mission.md` / `playbook.md` / `rules.md`,
+ask whether you want memory / persona / knowledge, and validate
+the result against the schema before reporting done.
+
+It ships with the canonical docs in
+[`samples/workpaths/workpath-author/knowledge/`](samples/workpaths/workpath-author/knowledge)
+(schema, targets, activation, quickstart, decoration pipeline)
+plus a `new-workpath.{sh,ps1}` scaffolding tool. Pick it from
+the template list (`t` on home) on first run, or any time you
+need to author a new template.
 
 ## Per-chat agent override
 

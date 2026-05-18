@@ -1,0 +1,5 @@
+{
+  "description": "Author new Clade workpaths — knows the schema, targets, decoration pipeline, and bundled samples cold.",
+  "version": "1",
+  "license": "MIT"
+}

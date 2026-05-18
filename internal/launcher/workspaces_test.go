@@ -32,7 +32,7 @@ func TestSeedSamples_SeedsIntoTemplatesDir(t *testing.T) {
 		t.Fatalf("SeedSamples: %v", err)
 	}
 	sort.Strings(seeded)
-	if want := []string{"code-review", "reversing"}; !equalStrings(seeded, want) {
+	if want := []string{"code-review", "reversing", "workpath-author"}; !equalStrings(seeded, want) {
 		t.Errorf("seeded = %v, want %v", seeded, want)
 	}
 
@@ -41,8 +41,8 @@ func TestSeedSamples_SeedsIntoTemplatesDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTemplates: %v", err)
 	}
-	if len(got) != 2 {
-		t.Fatalf("ListTemplates returned %d, want 2", len(got))
+	if len(got) != 3 {
+		t.Fatalf("ListTemplates returned %d, want 3", len(got))
 	}
 	for _, tpl := range got {
 		if _, err := os.Stat(tpl.WorkpathDir); err != nil {
