@@ -1,15 +1,7 @@
 # Clade
-
-```
-            __         ██████╗██╗      █████╗ ██████╗ ███████╗
-            / /        ██╔════╝██║     ██╔══██╗██╔══██╗██╔════╝
-           / /         ██║     ██║     ███████║██║  ██║█████╗
-          / / \        ██║     ██║     ██╔══██║██║  ██║██╔══╝
-         / / \ \       ╚██████╗███████╗██║  ██║██████╔╝███████╗
-        /_/   \_\      ╚═════╝╚══════╝╚═╝  ╚═╝╚═════╝ ╚══════╝
-
-                           fork agent chats from one common template
-```
+<p align="center">
+  <img width="493" height="149" alt="{534C2F7D-0525-4B12-84B6-4F7D9C703413}" src="https://github.com/user-attachments/assets/29b7ab44-6390-43e6-8159-03fbf47d8252" />
+</p>
 
 A terminal launcher for agent CLIs — **Claude Code**, **Codex CLI**,
 **OpenCode**, **Gemini CLI**, **DeepSeek-TUI** — that pairs each
@@ -103,7 +95,7 @@ chats/
 ```
 
 ## Session-start workflow
-
+<img width="2512" height="1191" alt="{1541F765-0203-495E-A7C6-EBA380378653}" src="https://github.com/user-attachments/assets/50a4b190-5761-475e-b96c-42bc0091e9e4" />
 Every time you open or resume a chat, the launcher decorates the
 compiled instructions with **required-reading directives** so the
 agent actually consults the workpath's content instead of riffing
@@ -132,7 +124,7 @@ them in the workpath yourself. Personality, language, tools, and
 subagents follow their own rules and are described below.
 
 ## Personality
-
+<img width="2509" height="1188" alt="{97FA1923-3992-4F80-8508-A81CD5625331}" src="https://github.com/user-attachments/assets/8d5cc677-a339-4ea9-a4a3-d7b9f7cc47e3" />
 Each template (and each cloned chat) can have a `personality.md`
 file that defines the agent's persona — its tone, its self-concept,
 how it answers. The launcher reads it on every launch and **prepends
@@ -189,7 +181,7 @@ home screen). Disabling it stops the launcher from staging /
 syncing the file; existing notes stay on disk.
 
 ## Keys
-
+<img width="2506" height="1190" alt="{5D687895-AE30-461F-AC76-004FA789BFE6}" src="https://github.com/user-attachments/assets/a966d13b-4a62-4ca6-8579-19ec7d2cf909" />
 ### Home (chat list)
 
 | Key       | Effect                              |
@@ -361,56 +353,16 @@ bottom. Colour-stripped snippets follow.
 
 ### Home — chat list
 
-```
-╭──────────────────────────────────────────────────────────────────────╮
-│ clade │ Chats                                          ctrl-c quit   │
-│ ──────────────────────────────────────────────────────────────────── │
-│ › security-audit                (reversing · claude · 2h ago)        │
-│     red-team audit of the auth flow                                  │
-│   pr-123-review                 (code-review · codex · 1d ago)       │
-│   cve-fix                       (code-review · claude · 4d ago)      │
-│                                                                      │
-│   + new chat…                                                        │
-│   Manage templates →                                                 │
-│ ──────────────────────────────────────────────────────────────────── │
-│ ↑↓ select · enter open · n new · d delete · t templates · r refresh  │
-╰──────────────────────────────────────────────────────────────────────╯
-```
+<img width="2509" height="1194" alt="{240DA2B1-66EB-4EE1-8F0F-90F156B49E58}" src="https://github.com/user-attachments/assets/24985863-d756-46f2-8ed1-e355b3f1992a" />
+
 
 ### Agent picker
 
-```
-╭──────────────────────────────────────────────────────────────────────╮
-│ clade │ Pick agent for "cve-fix"                       ctrl-c quit   │
-│ ──────────────────────────────────────────────────────────────────── │
-│ › claude       ✓ installed   1.0.92  (Anthropic Claude Code)         │
-│   codex        ✓ installed   0.42.1  (OpenAI Codex CLI)              │
-│   opencode     ✗ missing             [press i to install]            │
-│   gemini       ✓ installed   0.42.0  (Google Gemini CLI)             │
-│   deepseek     ✓ installed   0.7.0   (DeepSeek-TUI)                  │
-│ ──────────────────────────────────────────────────────────────────── │
-│ enter launch · i install · o ollama · esc back                       │
-╰──────────────────────────────────────────────────────────────────────╯
-```
+<img width="2507" height="1193" alt="{8304EDD7-FA23-416D-B692-20BDCE394075}" src="https://github.com/user-attachments/assets/b5bce049-cd23-4480-9ab2-f536acdba722" />
 
 ### Ollama config
 
-```
-╭──────────────────────────────────────────────────────────────────────╮
-│ clade │ Ollama config for "cve-fix"                    ctrl-c quit   │
-│ ──────────────────────────────────────────────────────────────────── │
-│ endpoint:   http://192.168.1.50:11434                                │
-│ status:     ✓ reachable · 5 models                                   │
-│                                                                      │
-│ model:    › qwen3-coder:14b                                          │
-│             llama3.1:8b                                              │
-│             phi3:mini                                                │
-│                                                                      │
-│ apply to: [x] claude   [x] codex   [ ] opencode                      │
-│ ──────────────────────────────────────────────────────────────────── │
-│ space toggle · enter apply · e edit endpoint · esc back              │
-╰──────────────────────────────────────────────────────────────────────╯
-```
+<img width="2505" height="1195" alt="{F7066226-6E62-4790-A960-ABFC5B14B4EB}" src="https://github.com/user-attachments/assets/e277fbad-fcde-4230-a114-43718dad083e" />
 
 ## Online skills
 
