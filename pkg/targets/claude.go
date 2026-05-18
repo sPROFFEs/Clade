@@ -58,6 +58,13 @@ func (claudeTarget) Compile(wp *workpath.Workpath, outDir string) error {
 		}
 	}
 
+	// Stage knowledge/ at the sandbox root so the agent's file-reading
+	// tools find it at the same relative path the manifest in SKILL.md
+	// advertises.
+	if err := copyKnowledge(wp, outDir); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -71,6 +78,7 @@ func claudeSkillBody(wp *workpath.Workpath) string {
 	b.WriteString(renderMissionBlock(wp))
 	b.WriteString(renderToolList(wp))
 	b.WriteString(renderAgentList(wp))
+	b.WriteString(renderKnowledgeBlock(wp))
 	if len(wp.Tools) > 0 {
 		b.WriteString("\nScripts live in `scripts/` next to this SKILL.md and can be invoked via the Bash tool.\n")
 	}

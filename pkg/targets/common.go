@@ -112,6 +112,81 @@ func renderToolList(wp *workpath.Workpath) string {
 	return b.String()
 }
 
+// copyKnowledge stages every <workpath>/knowledge/** file into
+// outDir at the same relative path. Hidden files and dirs were
+// filtered by the loader already; here we just copy what made it
+// into wp.Knowledge. No-op when there's no knowledge.
+//
+// All targets call this with their own outDir so the agent always
+// finds reference material at `knowledge/...` relative to the
+// sandbox root, regardless of which agent CLI is consuming it.
+func copyKnowledge(wp *workpath.Workpath, outDir string) error {
+	for _, k := range wp.Knowledge {
+		src := filepath.Join(wp.SourceDir, filepath.FromSlash(k.RelPath))
+		dst := filepath.Join(outDir, filepath.FromSlash(k.RelPath))
+		if err := copyFile(src, dst); err != nil {
+			return fmt.Errorf("copy knowledge %s: %w", k.RelPath, err)
+		}
+	}
+	return nil
+}
+
+// renderKnowledgeBlock returns a markdown "Knowledge base" section
+// listing every knowledge file with title + short summary. Returns
+// empty string when wp.Knowledge is empty so the section doesn't
+// appear in compiled instructions for templates that don't use it.
+//
+// The block tells the agent that the files exist + lives under the
+// `knowledge/` dir in its working tree, and that the contents are
+// NOT pre-loaded into context — the agent should use its file-
+// reading tools to open whatever's relevant when it needs detail.
+// That matches how every agent CLI already works with filesystem
+// content (Claude's Read, Codex's view, etc.).
+func renderKnowledgeBlock(wp *workpath.Workpath) string {
+	if len(wp.Knowledge) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n## Knowledge base\n\n")
+	b.WriteString("Reference material lives under `knowledge/` in your " +
+		"working directory. Use your file-reading tools to open what " +
+		"you need — contents are NOT pre-loaded into your context. " +
+		"Available files:\n\n")
+	for _, k := range wp.Knowledge {
+		size := humaniseBytes(k.Bytes)
+		title := strings.TrimSpace(k.Title)
+		if title == "" {
+			title = filepath.Base(k.RelPath)
+		}
+		if k.IsText {
+			fmt.Fprintf(&b, "- `%s` (%s) — **%s**", k.RelPath, size, title)
+			if k.Summary != "" {
+				fmt.Fprintf(&b, "  \n  %s", k.Summary)
+			}
+			b.WriteString("\n")
+		} else {
+			fmt.Fprintf(&b, "- `%s` (%s, binary) — %s\n", k.RelPath, size, title)
+		}
+	}
+	return b.String()
+}
+
+// humaniseBytes returns "12 B" / "3.4 KB" / "2.1 MB" style sizes for
+// the manifest. Kept inline so the targets package doesn't take a
+// dep on a units library.
+func humaniseBytes(n int64) string {
+	switch {
+	case n < 1024:
+		return fmt.Sprintf("%d B", n)
+	case n < 1024*1024:
+		return fmt.Sprintf("%.1f KB", float64(n)/1024)
+	case n < 1024*1024*1024:
+		return fmt.Sprintf("%.1f MB", float64(n)/(1024*1024))
+	default:
+		return fmt.Sprintf("%.1f GB", float64(n)/(1024*1024*1024))
+	}
+}
+
 // renderAgentList returns a markdown bullet list of agents.
 func renderAgentList(wp *workpath.Workpath) string {
 	if len(wp.Agents) == 0 {

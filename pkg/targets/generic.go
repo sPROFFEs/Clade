@@ -32,6 +32,10 @@ func (genericTarget) Compile(wp *workpath.Workpath, outDir string) error {
 		return err
 	}
 
+	if err := copyKnowledge(wp, outDir); err != nil {
+		return err
+	}
+
 	if len(wp.Tools) == 0 && len(wp.Agents) == 0 {
 		return nil
 	}
@@ -70,6 +74,7 @@ func genericBody(wp *workpath.Workpath) string {
 	b.WriteString(renderMissionBlock(wp))
 	b.WriteString(renderToolList(wp))
 	b.WriteString(renderAgentList(wp))
+	b.WriteString(renderKnowledgeBlock(wp))
 	if len(wp.Tools) > 0 || len(wp.Agents) > 0 {
 		fmt.Fprintf(&b, "\nAssets live under `%s.assets/`.\n", wp.Name)
 	}

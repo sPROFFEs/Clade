@@ -1,7 +1,9 @@
 package workpath
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -134,5 +136,88 @@ func TestDeriveDescription(t *testing.T) {
 		if got != c.want {
 			t.Errorf("deriveDescription(%q) = %q, want %q", c.in, got, c.want)
 		}
+	}
+}
+
+// writeWorkpath builds a minimal workpath in a temp dir, writing the
+// provided relative-path → body map. Used by the knowledge loader
+// tests below.
+func writeWorkpath(t *testing.T, files map[string]string) string {
+	t.Helper()
+	dir := t.TempDir()
+	for rel, body := range files {
+		full := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+func TestLoadDir_DiscoversKnowledge(t *testing.T) {
+	dir := writeWorkpath(t, map[string]string{
+		"mission.md":                      "# kn-test\n\ndo a thing.",
+		"knowledge/paper.md":              "# Secure Boot Threat Model\n\nA quick summary of attack surface in the secure-boot path. More detail so the summariser has several sentences to work with.",
+		"knowledge/notes/cheatsheet.txt":  "first line of cheatsheet\nsecond line",
+		"knowledge/datasheets/manual.pdf": "%PDF-fake",
+		"knowledge/.hidden":               "should be skipped",
+		"knowledge/.dotdir/secret.md":     "should be skipped too",
+	})
+	wp, err := LoadDir(dir)
+	if err != nil {
+		t.Fatalf("LoadDir: %v", err)
+	}
+	if len(wp.Knowledge) != 3 {
+		t.Fatalf("Knowledge count = %d, want 3, got %#v", len(wp.Knowledge), wp.Knowledge)
+	}
+	byPath := map[string]KnowledgeFile{}
+	for _, k := range wp.Knowledge {
+		byPath[k.RelPath] = k
+	}
+	paper, ok := byPath["knowledge/paper.md"]
+	if !ok {
+		t.Fatal("knowledge/paper.md not discovered")
+	}
+	if !paper.IsText {
+		t.Errorf("paper.md should be IsText=true")
+	}
+	if paper.Title != "Secure Boot Threat Model" {
+		t.Errorf("paper.Title = %q, want H1 from body", paper.Title)
+	}
+	if !strings.Contains(paper.Summary, "quick summary") {
+		t.Errorf("paper.Summary missing expected text: %q", paper.Summary)
+	}
+	cheat, ok := byPath["knowledge/notes/cheatsheet.txt"]
+	if !ok {
+		t.Fatal("nested .txt not discovered")
+	}
+	if !cheat.IsText {
+		t.Errorf(".txt should be IsText=true")
+	}
+	pdf, ok := byPath["knowledge/datasheets/manual.pdf"]
+	if !ok {
+		t.Fatal("pdf not discovered")
+	}
+	if pdf.IsText {
+		t.Errorf("pdf should be IsText=false")
+	}
+	if pdf.Summary != "" {
+		t.Errorf("binary should have empty Summary, got %q", pdf.Summary)
+	}
+}
+
+func TestLoadDir_NoKnowledgeDirIsFine(t *testing.T) {
+	dir := writeWorkpath(t, map[string]string{
+		"mission.md": "do a thing",
+	})
+	wp, err := LoadDir(dir)
+	if err != nil {
+		t.Fatalf("LoadDir: %v", err)
+	}
+	if len(wp.Knowledge) != 0 {
+		t.Errorf("Knowledge should be empty, got %v", wp.Knowledge)
 	}
 }

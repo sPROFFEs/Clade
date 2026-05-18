@@ -99,7 +99,161 @@ func LoadDir(dir string) (*Workpath, error) {
 		wp.Agents = agents
 	}
 
+	// Auto-discover knowledge files under knowledge/ (recursive).
+	knowledge, err := discoverKnowledge(abs)
+	if err != nil {
+		return nil, err
+	}
+	wp.Knowledge = knowledge
+
 	return wp, nil
+}
+
+// textExts is the set of file extensions we treat as AI-legible
+// during knowledge discovery — used to decide whether to extract a
+// summary preview vs just list by name. Lowercase, leading dot.
+var textExts = map[string]bool{
+	".md": true, ".markdown": true, ".mdown": true,
+	".txt": true, ".text": true,
+	".rst":  true,
+	".org":  true,
+	".json": true, ".yaml": true, ".yml": true, ".toml": true,
+	".csv": true,
+	".log": true,
+}
+
+// discoverKnowledge walks <root>/knowledge/ recursively and returns
+// one KnowledgeFile per regular file. Hidden files (leading ".") and
+// dirs are skipped. Order is deterministic (sorted by RelPath) so
+// the compiled manifest is stable across runs.
+func discoverKnowledge(root string) ([]KnowledgeFile, error) {
+	base := filepath.Join(root, "knowledge")
+	info, err := os.Stat(base)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("stat knowledge/: %w", err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("knowledge/ exists but is not a directory")
+	}
+
+	var out []KnowledgeFile
+	err = filepath.Walk(base, func(path string, fi os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		// Hide dot-files / dot-dirs (.git, .DS_Store, …).
+		name := fi.Name()
+		if strings.HasPrefix(name, ".") {
+			if fi.IsDir() && path != base {
+				return filepath.SkipDir
+			}
+			if !fi.IsDir() {
+				return nil
+			}
+		}
+		if fi.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		ext := strings.ToLower(filepath.Ext(path))
+		isText := textExts[ext]
+		k := KnowledgeFile{
+			RelPath: rel,
+			Title:   strings.TrimSuffix(filepath.Base(path), filepath.Ext(path)),
+			Bytes:   fi.Size(),
+			IsText:  isText,
+		}
+		if isText {
+			title, summary := summariseTextFile(path)
+			if title != "" {
+				k.Title = title
+			}
+			k.Summary = summary
+		}
+		out = append(out, k)
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("walk knowledge/: %w", err)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].RelPath < out[j].RelPath })
+	return out, nil
+}
+
+// summariseTextFile reads the first ~4KB of a text knowledge file
+// and pulls out (1) an H1 heading or first non-blank line as the
+// title, and (2) the first non-trivial paragraph as the summary
+// (capped at ~280 chars so the manifest stays readable). Failures
+// are silent — title falls back to the filename downstream.
+func summariseTextFile(path string) (title, summary string) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", ""
+	}
+	defer f.Close()
+	const max = 4096
+	buf := make([]byte, max)
+	n, _ := f.Read(buf)
+	body := string(buf[:n])
+
+	// Strip a UTF-8 BOM (EF BB BF) if present so first-line detection
+	// works. Written as an explicit byte sequence because a bare
+	// U+FEFF in this source file would itself be a mid-file BOM, which
+	// Go forbids.
+	body = strings.TrimPrefix(body, "\xef\xbb\xbf")
+
+	lines := strings.Split(body, "\n")
+	var firstHeading, firstPara string
+	for _, ln := range lines {
+		t := strings.TrimSpace(ln)
+		if t == "" {
+			if firstPara != "" {
+				break // paragraph complete
+			}
+			continue
+		}
+		// H1 candidate: "# Title" markdown or all-caps first line.
+		if firstHeading == "" && strings.HasPrefix(t, "# ") {
+			firstHeading = strings.TrimSpace(strings.TrimPrefix(t, "#"))
+			continue
+		}
+		if firstPara == "" {
+			firstPara = t
+			continue
+		}
+		// Continue collecting the paragraph until we hit a blank line.
+		firstPara += " " + t
+	}
+	if firstHeading == "" {
+		// Fall back to first non-blank line.
+		for _, ln := range lines {
+			t := strings.TrimSpace(ln)
+			if t != "" {
+				firstHeading = t
+				if strings.HasPrefix(firstHeading, "# ") {
+					firstHeading = strings.TrimSpace(strings.TrimPrefix(firstHeading, "#"))
+				}
+				break
+			}
+		}
+	}
+	// Cap summary length so manifests don't blow up. We trim on a
+	// word boundary when possible.
+	if len(firstPara) > 280 {
+		cut := 280
+		if sp := strings.LastIndexByte(firstPara[:cut], ' '); sp > 200 {
+			cut = sp
+		}
+		firstPara = firstPara[:cut] + "…"
+	}
+	return firstHeading, firstPara
 }
 
 func applyManifest(wp *Workpath, m *Manifest) {

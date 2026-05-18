@@ -213,7 +213,7 @@ experience anyway.
 | `~/.config/clade/config.json` (Linux/XDG)           | `workspacesRoot`, `lastAgent`                           |
 | `~/Library/Application Support/clade/…` (macOS)     | same                                                    |
 | `%AppData%\clade\config.json` (Windows)             | same                                                    |
-| `<root>/templates/<name>/workpath/`                 | wpc source: `mission.md`, `playbook.md`, `rules.md`, `personality.md`, `tools/`, `agents/` |
+| `<root>/templates/<name>/workpath/`                 | wpc source: `mission.md`, `playbook.md`, `rules.md`, `personality.md`, `tools/`, `agents/`, `knowledge/` |
 | `<root>/templates/<name>/template.json`             | defaults inherited by new chats (memory, language, skills) |
 | `<root>/chats/<chat-id>/workpath/`                  | cloned from template at chat creation                   |
 | `<root>/chats/<chat-id>/sandbox/`                   | agent's cwd; compiled artifacts; gitignored             |
@@ -259,8 +259,12 @@ my-workpath/
 ├── tools/             auto-registered shell scripts
 │   ├── file_summary.sh
 │   └── count_lines.ps1
-└── agents/            named subagent prompts
-    └── triage.md
+├── agents/            named subagent prompts
+│   └── triage.md
+└── knowledge/         optional background-reading library (see below)
+    ├── papers/
+    ├── tools/
+    └── references/
 ```
 
 The launcher compiles a chat's workpath into its sandbox using the
@@ -364,6 +368,53 @@ the URL:
 Both transports cache by directory name — re-launching the same chat
 doesn't re-download. Configure the URL list per template in the
 template wizard, or per chat with `e` on the home screen.
+
+## Knowledge base
+
+Each template (and each cloned chat) can ship a `knowledge/`
+directory full of background reading the agent can pull on
+demand — docs, papers, tool descriptions, schema cheat-sheets,
+anything that helps it reason but doesn't belong in the
+mission/playbook/rules trio.
+
+```
+my-workpath/
+└── knowledge/
+    ├── papers/
+    │   └── secure-boot.md
+    ├── tools/
+    │   └── binwalk.md
+    └── datasheets/
+        └── stm32f4.pdf
+```
+
+On every launch, the compiler:
+
+1. **Stages the whole tree** into the chat's sandbox at the same
+   relative path (`<sandbox>/knowledge/...`). The agent's file-
+   reading tools (Claude's `Read`, Codex's `view`, etc.) find it
+   immediately under the working directory.
+2. **Auto-generates a manifest** in the compiled instructions
+   (`SKILL.md` / `AGENTS.md` / `GEMINI.md`) listing every file with
+   its title and a short summary so the agent knows what's there
+   without having to `ls knowledge/` first. Contents are **NOT**
+   pre-loaded into context — the agent decides what to open and
+   when, the same way it interacts with any other file in the
+   project.
+
+Preferred format is **markdown**; the launcher also extracts
+summaries from `.txt`, `.rst`, `.org`, `.json`, `.yaml`, `.toml`,
+and `.csv` files. Anything else (PDFs, images, archives) gets
+listed by name + size with a `(binary)` marker so the agent knows
+it's there but isn't expected to parse it directly.
+
+Hidden files / dirs (anything starting with `.`) are skipped.
+Symlinks and entries containing `..` are rejected for safety.
+
+The bundled samples both ship a `knowledge/` directory you can
+read to see the manifest format in action:
+[`samples/workpaths/reversing/knowledge/`](samples/workpaths/reversing/knowledge),
+[`samples/workpaths/code-review/knowledge/`](samples/workpaths/code-review/knowledge).
 
 ## Per-chat agent override
 

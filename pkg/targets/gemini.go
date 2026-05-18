@@ -36,6 +36,10 @@ func (geminiTarget) Compile(wp *workpath.Workpath, outDir string) error {
 	if err := writeFile(mdPath, geminiBody(wp)); err != nil {
 		return err
 	}
+	// Knowledge always copies, even when there are no tools/agents.
+	if err := copyKnowledge(wp, outDir); err != nil {
+		return err
+	}
 	if len(wp.Tools) == 0 && len(wp.Agents) == 0 {
 		return nil
 	}
@@ -73,6 +77,7 @@ func geminiBody(wp *workpath.Workpath) string {
 	b.WriteString(renderMissionBlock(wp))
 	b.WriteString(renderToolList(wp))
 	b.WriteString(renderAgentList(wp))
+	b.WriteString(renderKnowledgeBlock(wp))
 	if len(wp.Tools) > 0 {
 		b.WriteString("\nTool scripts live under `GEMINI.assets/tools/`. " +
 			"Invoke with the shell tool using the relative path.\n")

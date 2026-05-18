@@ -50,9 +50,39 @@ type Workpath struct {
 	// Auto-discovered from agents/*.md unless overridden.
 	Agents []Agent
 
+	// Knowledge is the reference material under <workpath>/knowledge/ —
+	// docs, papers, tool descriptions the agent can read on demand
+	// when reasoning. Auto-discovered recursively from any files in
+	// that subdir. Text-ish files (md, txt, rst, org, json, yaml,
+	// markdown variants) get a short summary preview extracted at
+	// load time so the agent can decide which to open; everything
+	// else is listed by name only.
+	Knowledge []KnowledgeFile
+
 	// SourceDir is the absolute path the workpath was loaded from. Targets
 	// use this to resolve relative script/agent paths.
 	SourceDir string
+}
+
+// KnowledgeFile is one item from <workpath>/knowledge/. Targets copy
+// it into the sandbox at the same relative path so the agent's
+// file-reading tools find it; the manifest block in the compiled
+// instructions tells the agent what's there.
+type KnowledgeFile struct {
+	// RelPath is the file path relative to the workpath root, e.g.
+	// "knowledge/papers/secure-boot.md". Always uses forward slashes.
+	RelPath string
+	// Title is the H1 heading (for markdown) or the filename base
+	// otherwise. Used in the manifest's display.
+	Title string
+	// Summary is the first paragraph / first non-blank line of a
+	// text file (capped at ~280 chars). Empty for non-text files.
+	Summary string
+	// Bytes is the on-disk size in bytes.
+	Bytes int64
+	// IsText flags whether this file's contents are AI-legible text.
+	// False for PDFs, images, archives, etc. — listed by name only.
+	IsText bool
 }
 
 // Tool is a shell script registered as an agent-callable command.

@@ -274,3 +274,105 @@ func TestKebab(t *testing.T) {
 		}
 	}
 }
+
+// buildKnowledgeWorkpath constructs a minimal workpath in a tempdir
+// with a knowledge/ tree, then loads it through LoadDir so the
+// resulting *workpath.Workpath is shaped exactly as the production
+// loader would shape it. We don't pollute testdata/ — tempdir gets
+// cleaned by t.TempDir's deferred removal.
+func buildKnowledgeWorkpath(t *testing.T) *workpath.Workpath {
+	t.Helper()
+	dir := t.TempDir()
+	files := map[string]string{
+		"mission.md":              "# kn-fixture\n\nExercise the knowledge plumbing.",
+		"knowledge/notes.md":      "# Field Notes\n\nbackground reading about the domain.",
+		"knowledge/datasheet.pdf": "%PDF-1.4",
+	}
+	for rel, body := range files {
+		full := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	wp, err := workpath.LoadDir(dir)
+	if err != nil {
+		t.Fatalf("LoadDir: %v", err)
+	}
+	return wp
+}
+
+func TestCodex_StagesKnowledgeAndManifest(t *testing.T) {
+	wp := buildKnowledgeWorkpath(t)
+	out := t.TempDir()
+	tgt, err := Get("codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tgt.Compile(wp, out); err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+
+	// Both knowledge files should land at <out>/knowledge/<file>.
+	if _, err := os.Stat(filepath.Join(out, "knowledge", "notes.md")); err != nil {
+		t.Errorf("knowledge/notes.md not copied: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(out, "knowledge", "datasheet.pdf")); err != nil {
+		t.Errorf("knowledge/datasheet.pdf not copied: %v", err)
+	}
+
+	// AGENTS.md should advertise both files in a "Knowledge base"
+	// section. The PDF gets a (binary) annotation; the .md gets a
+	// title + summary.
+	body := mustRead(t, filepath.Join(out, "AGENTS.md"))
+	if !strings.Contains(body, "## Knowledge base") {
+		t.Error("AGENTS.md missing Knowledge base section")
+	}
+	if !strings.Contains(body, "knowledge/notes.md") {
+		t.Error("AGENTS.md missing notes.md entry")
+	}
+	if !strings.Contains(body, "Field Notes") {
+		t.Error("AGENTS.md missing title from manifest")
+	}
+	if !strings.Contains(body, "binary") {
+		t.Error("AGENTS.md should mark PDF as (binary)")
+	}
+}
+
+func TestClaude_StagesKnowledgeAndManifest(t *testing.T) {
+	wp := buildKnowledgeWorkpath(t)
+	out := t.TempDir()
+	tgt, _ := Get("claude")
+	if err := tgt.Compile(wp, out); err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(out, "knowledge", "notes.md")); err != nil {
+		t.Errorf("knowledge/notes.md not copied: %v", err)
+	}
+	// SKILL.md lives under <out>/.claude/skills/<kebab-name>/. The
+	// fixture's name is derived from the random tempdir, so look up
+	// the actual file rather than hard-coding "byo".
+	skillDir := filepath.Join(out, ".claude", "skills", kebab(wp.Name))
+	skill := mustRead(t, filepath.Join(skillDir, "SKILL.md"))
+	if !strings.Contains(skill, "## Knowledge base") {
+		t.Error("SKILL.md missing Knowledge base section")
+	}
+}
+
+func TestGemini_StagesKnowledgeAndManifest(t *testing.T) {
+	wp := buildKnowledgeWorkpath(t)
+	out := t.TempDir()
+	tgt, _ := Get("gemini")
+	if err := tgt.Compile(wp, out); err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(out, "knowledge", "notes.md")); err != nil {
+		t.Errorf("knowledge/notes.md not copied: %v", err)
+	}
+	gem := mustRead(t, filepath.Join(out, "GEMINI.md"))
+	if !strings.Contains(gem, "## Knowledge base") {
+		t.Error("GEMINI.md missing Knowledge base section")
+	}
+}

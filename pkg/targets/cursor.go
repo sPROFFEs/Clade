@@ -46,5 +46,10 @@ func cursorBody(wp *workpath.Workpath) string {
 		b.WriteString("\n> Cursor cannot execute these scripts directly. Reference them as commands the user can run.\n")
 	}
 	b.WriteString(renderAgentList(wp))
+	// Cursor has no concept of a sandbox the launcher owns, so we
+	// inline the knowledge manifest as a reference list rather than
+	// copying files. The user keeps the originals wherever the
+	// workpath lives on disk.
+	b.WriteString(renderKnowledgeBlock(wp))
 	return b.String()
 }

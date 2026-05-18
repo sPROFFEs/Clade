@@ -36,6 +36,13 @@ func (codexTarget) Compile(wp *workpath.Workpath, outDir string) error {
 		return err
 	}
 
+	// Knowledge always copies, even when there are no tools/agents,
+	// since templates can ship knowledge-only (research notebooks,
+	// reference packs, etc.).
+	if err := copyKnowledge(wp, outDir); err != nil {
+		return err
+	}
+
 	if len(wp.Tools) == 0 && len(wp.Agents) == 0 {
 		return nil
 	}
@@ -74,6 +81,7 @@ func codexBody(wp *workpath.Workpath) string {
 	b.WriteString(renderMissionBlock(wp))
 	b.WriteString(renderToolList(wp))
 	b.WriteString(renderAgentList(wp))
+	b.WriteString(renderKnowledgeBlock(wp))
 	if len(wp.Tools) > 0 {
 		b.WriteString("\nTool scripts live under `AGENTS.assets/tools/`. " +
 			"Invoke with the Bash tool using the relative path.\n")

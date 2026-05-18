@@ -67,6 +67,27 @@ func (mikaTarget) Compile(wp *workpath.Workpath, outDir string) error {
 		}
 	}
 
+	// Knowledge sits next to the module files so a mika module that
+	// ships reference material has it co-located with module.md.
+	for _, k := range wp.Knowledge {
+		src := filepath.Join(wp.SourceDir, filepath.FromSlash(k.RelPath))
+		dst := filepath.Join(root, filepath.FromSlash(k.RelPath))
+		if err := copyFile(src, dst); err != nil {
+			return fmt.Errorf("copy knowledge %s: %w", k.RelPath, err)
+		}
+	}
+	// Append a manifest section to module.md so the reader / agent
+	// sees the knowledge inventory next to the mission.
+	if block := renderKnowledgeBlock(wp); block != "" {
+		modulePath := filepath.Join(root, "module.md")
+		existing, err := readFile(modulePath)
+		if err == nil {
+			if err := writeFile(modulePath, strings.TrimRight(existing, "\n")+"\n"+block); err != nil {
+				return err
+			}
+		}
+	}
+
 	return nil
 }
 
