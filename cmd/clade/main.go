@@ -75,7 +75,7 @@ func main() {
 	if cfg == nil {
 		firstScreen = newFirstRun()
 	} else {
-		firstScreen = newChatListModel(cfg)
+		firstScreen = newLayoutModel(cfg)
 	}
 
 	// Wrap the first screen in the boot splash unless we've opted
@@ -148,8 +148,16 @@ func (m *rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		if msg.next != nil {
-			m.screen = msg.next
-			return m, m.screen.Init()
+			// Pre-launcher screens (splash, firstRun) don't intercept
+			// screenDoneMsg themselves — they ask root to swap the
+			// whole tree (typically to the layoutModel). Once
+			// layoutModel is in charge, the swap is its responsibility
+			// (it changes the active pane, not the entire tree).
+			if _, isLayout := m.screen.(*layoutModel); !isLayout {
+				m.screen = msg.next
+				return m, m.screen.Init()
+			}
+			// fall through to the inner Update so layoutModel handles it
 		}
 	case errMsg:
 		// Bubble unrecoverable errors up to main() — most screen-level

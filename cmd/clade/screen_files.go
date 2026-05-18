@@ -129,9 +129,17 @@ func (m filesModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m filesModel) View() string {
+	return renderChrome(m.Title(), m.Body(), m.Help())
+}
+
+func (m filesModel) Title() string {
+	return fmt.Sprintf("Edit files · %s", m.label)
+}
+func (m filesModel) Help() string       { return "↑/↓ select · enter edit · esc back" }
+func (m filesModel) NavSection() string { return navSectionChats }
+
+func (m filesModel) Body() string {
 	var b strings.Builder
-	title := fmt.Sprintf("Edit files · %s", m.label)
-	help := "↑/↓ select · enter edit · esc back"
 
 	b.WriteString(subtitleStyle.Render("Workpath: ") + m.workpathDir + "\n\n")
 	for i, e := range m.entries {
@@ -154,7 +162,7 @@ func (m filesModel) View() string {
 	}
 	editor, _ := editorCommand()
 	b.WriteString(hintStyle.Render("Editor: " + editor))
-	return renderChrome(title, b.String(), help)
+	return b.String()
 }
 
 // personalityStarter is the auto-scaffolded contents of a new

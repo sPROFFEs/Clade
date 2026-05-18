@@ -98,13 +98,26 @@ func (m launchingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m launchingModel) View() string {
+	return renderChrome(m.Title(), m.Body(), m.Help())
+}
+
+func (m launchingModel) Title() string {
+	return fmt.Sprintf("Launching · %s", m.chat.Label)
+}
+func (m launchingModel) Help() string {
+	if m.planErr != nil {
+		return "esc to go back"
+	}
+	return "ctrl-c quit"
+}
+func (m launchingModel) NavSection() string { return navSectionChats }
+
+func (m launchingModel) Body() string {
 	var b strings.Builder
-	title := fmt.Sprintf("Launching · %s", m.chat.Label)
-	help := "ctrl-c quit"
 
 	if m.planErr != nil {
 		b.WriteString(errorStyle.Render("✗ Failed: " + m.planErr.Error()))
-		return renderChrome(title, b.String(), "esc to go back")
+		return b.String()
 	}
 
 	spin := titleStyle.Render(spinnerFrames[m.frame])
@@ -115,5 +128,5 @@ func (m launchingModel) View() string {
 	b.WriteString(hintStyle.Render(
 		"Compiling workpath into sandbox, staging MEMORY.md, " +
 			"cloning online skills, recording session metadata..."))
-	return renderChrome(title, b.String(), help)
+	return b.String()
 }

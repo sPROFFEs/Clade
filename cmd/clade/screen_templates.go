@@ -104,12 +104,21 @@ func (m templateListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m templateListModel) View() string {
+	return renderChrome(m.Title(), m.Body(), m.Help())
+}
+
+func (m templateListModel) Title() string {
+	return fmt.Sprintf("Templates (%d) · reusable patterns for chats", len(m.items))
+}
+func (m templateListModel) Help() string       { return templateListHelp(m) }
+func (m templateListModel) NavSection() string { return navSectionTemplates }
+
+func (m templateListModel) Body() string {
 	var b strings.Builder
-	title := fmt.Sprintf("Templates (%d) · reusable patterns for chats", len(m.items))
 
 	if !m.loaded {
 		b.WriteString(hintStyle.Render("Loading templates..."))
-		return renderChrome(title, b.String(), templateListHelp(m))
+		return b.String()
 	}
 	if m.err != "" {
 		b.WriteString(errorStyle.Render("✗ "+m.err) + "\n\n")
@@ -152,7 +161,7 @@ func (m templateListModel) View() string {
 				m.items[m.cursor].Name)) + "\n")
 	}
 
-	return renderChrome(title, b.String(), templateListHelp(m))
+	return b.String()
 }
 
 // templateListHelp omits the per-template keys when no template is
@@ -304,9 +313,17 @@ func (m newTemplateModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m newTemplateModel) View() string {
+	return renderChrome(m.Title(), m.Body(), m.Help())
+}
+
+func (m newTemplateModel) Title() string {
+	return fmt.Sprintf("New template (step %d/5)", m.step+1)
+}
+func (m newTemplateModel) Help() string       { return "enter to continue · esc to go back" }
+func (m newTemplateModel) NavSection() string { return navSectionTemplates }
+
+func (m newTemplateModel) Body() string {
 	var b strings.Builder
-	title := fmt.Sprintf("New template (step %d/5)", m.step+1)
-	help := "enter to continue · esc to go back"
 	b.WriteString(hintStyle.Render("Name + description are required. Language / memory / online skills are optional defaults — each chat created from this template inherits them at creation."))
 	b.WriteString("\n\n")
 	if m.step >= 1 {
@@ -362,5 +379,5 @@ func (m newTemplateModel) View() string {
 	if m.err != "" {
 		b.WriteString("\n" + errorStyle.Render("✗ "+m.err))
 	}
-	return renderChrome(title, b.String(), help)
+	return b.String()
 }

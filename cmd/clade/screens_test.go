@@ -82,8 +82,8 @@ func TestFirstRun_YesSeedsTemplatesAndAdvances(t *testing.T) {
 		t.Fatal("'y' should produce a finalize Cmd")
 	}
 	done := runCmd(t, cmd).(screenDoneMsg)
-	if _, ok := done.next.(chatListModel); !ok {
-		t.Errorf("expected chatListModel, got %T", done.next)
+	if _, ok := done.next.(*layoutModel); !ok {
+		t.Errorf("expected *layoutModel, got %T", done.next)
 	}
 
 	tpls, err := launcher.ListTemplates(wsRoot)
@@ -110,8 +110,8 @@ func TestFirstRun_NoSkipsSeedingAndCreatesEmptyDirs(t *testing.T) {
 		t.Fatal("'n' should also produce a finalize Cmd")
 	}
 	done := runCmd(t, cmd).(screenDoneMsg)
-	if _, ok := done.next.(chatListModel); !ok {
-		t.Errorf("expected chatListModel, got %T", done.next)
+	if _, ok := done.next.(*layoutModel); !ok {
+		t.Errorf("expected *layoutModel, got %T", done.next)
 	}
 
 	// Templates dir exists but empty.

@@ -146,6 +146,15 @@ func (m chatListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "t":
 			return m, wrap(newTemplateListModel(m.cfg))
+		case "p":
+			// Pin the highlighted chat to the tab strip. The layout
+			// intercepts pinChatMsg; this pane just emits.
+			if m.cursor < len(m.items) {
+				c := m.items[m.cursor]
+				return m, func() tea.Msg {
+					return pinChatMsg{chatID: c.ID, label: c.Label}
+				}
+			}
 		case "r":
 			return m, m.Init()
 		}
@@ -154,6 +163,14 @@ func (m chatListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m chatListModel) View() string {
+	return renderChrome(m.Title(), m.Body(), m.Help())
+}
+
+func (m chatListModel) Title() string      { return chatListTitle(m) }
+func (m chatListModel) Help() string       { return chatListHelp(m) }
+func (m chatListModel) NavSection() string { return navSectionChats }
+
+func (m chatListModel) Body() string {
 	var b strings.Builder
 
 	if m.migrateNote != "" {
@@ -165,7 +182,7 @@ func (m chatListModel) View() string {
 
 	if !m.loaded {
 		b.WriteString(hintStyle.Render("Loading chats..."))
-		return renderChrome(chatListTitle(m), b.String(), chatListHelp(m))
+		return b.String()
 	}
 
 	if len(m.items) == 0 {
@@ -218,12 +235,11 @@ func (m chatListModel) View() string {
 				m.items[m.cursor].Label)) + "\n")
 	}
 
-	return renderChrome(chatListTitle(m), b.String(), chatListHelp(m))
+	return b.String()
 }
 
 func chatListTitle(m chatListModel) string {
-	tag := fmt.Sprintf("Chats (%d)", len(m.items))
-	return tag + "  " + chromeContextSegment(m.cfg.WorkspacesRoot)
+	return fmt.Sprintf("Chats (%d)", len(m.items))
 }
 
 // chatListHelp builds the help line from only the keys that apply to
@@ -240,6 +256,7 @@ func chatListHelp(m chatListModel) string {
 			"f files",
 			"o ollama",
 			"a agents",
+			"p pin tab",
 			"d delete",
 		)
 	} else {

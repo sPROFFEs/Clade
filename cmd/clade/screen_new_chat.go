@@ -79,12 +79,20 @@ func (m pickTemplateModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m pickTemplateModel) View() string {
+	return renderChrome(m.Title(), m.Body(), m.Help())
+}
+
+func (m pickTemplateModel) Title() string { return "New chat · pick a template" }
+func (m pickTemplateModel) Help() string {
+	return "↑/↓ select · enter pick · t manage templates · esc back"
+}
+func (m pickTemplateModel) NavSection() string { return navSectionChats }
+
+func (m pickTemplateModel) Body() string {
 	var b strings.Builder
-	title := "New chat · pick a template"
-	help := "↑/↓ select · enter pick · t manage templates · esc back"
 	if !m.loaded {
 		b.WriteString(hintStyle.Render("Loading templates..."))
-		return renderChrome(title, b.String(), help)
+		return b.String()
 	}
 	if m.err != "" {
 		b.WriteString(errorStyle.Render("✗ "+m.err) + "\n\n")
@@ -109,7 +117,7 @@ func (m pickTemplateModel) View() string {
 		marker = "› "
 	}
 	b.WriteString(selectionRow(marker+"+ new template…", isSelNew) + "\n")
-	return renderChrome(title, b.String(), help)
+	return b.String()
 }
 
 // --- step 2: name + pick agent -------------------------------------------
@@ -300,9 +308,26 @@ func (m newChatFromTemplateModel) finalize() tea.Cmd {
 }
 
 func (m newChatFromTemplateModel) View() string {
+	return renderChrome(m.Title(), m.Body(), m.Help())
+}
+
+func (m newChatFromTemplateModel) Title() string {
+	return fmt.Sprintf("New chat from %q", m.template.Name)
+}
+func (m newChatFromTemplateModel) NavSection() string { return navSectionChats }
+func (m newChatFromTemplateModel) Help() string {
+	switch m.step {
+	case 1:
+		return "↑/↓ select · enter pick · esc back"
+	case 2:
+		return "y / n to choose · space to toggle · enter to accept · esc back"
+	default:
+		return "enter to continue · esc back"
+	}
+}
+
+func (m newChatFromTemplateModel) Body() string {
 	var b strings.Builder
-	title := fmt.Sprintf("New chat from %q", m.template.Name)
-	help := "enter to continue · esc back"
 
 	b.WriteString(subtitleStyle.Render("Template: ") + m.template.Name + "\n")
 	if m.template.Description != "" {
@@ -344,7 +369,6 @@ func (m newChatFromTemplateModel) View() string {
 			b.WriteString(selectionRow(line, isSel) + "\n")
 		}
 	case 2:
-		help = "y / n to choose · space to toggle · enter to accept · esc back"
 		b.WriteString(subtitleStyle.Render("Name: ") + m.label.Value() + "\n")
 		b.WriteString(subtitleStyle.Render("Agent: ") + m.pickedAgent.Label + "\n\n")
 		mark := "[ ] No, use the agent's default backend"
@@ -363,5 +387,5 @@ func (m newChatFromTemplateModel) View() string {
 	if m.err != "" {
 		b.WriteString("\n" + errorStyle.Render("✗ "+m.err))
 	}
-	return renderChrome(title, b.String(), help)
+	return b.String()
 }

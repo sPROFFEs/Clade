@@ -347,9 +347,30 @@ func applyOllama(ws launcher.Workspace, s ollama.Settings, picks applyPicks) []s
 }
 
 func (m ollamaModel) View() string {
+	return renderChrome(m.Title(), m.Body(), m.Help())
+}
+
+func (m ollamaModel) Title() string { return "Ollama · local model routing" }
+func (m ollamaModel) Help() string {
+	switch m.step {
+	case ollamaStepEndpoint:
+		return "enter probe · esc back"
+	case ollamaStepModel:
+		if len(m.probedModels) == 0 {
+			return "enter to continue · esc back"
+		}
+		return "↑/↓ select · enter pick · esc back"
+	case ollamaStepAgents:
+		return "↑/↓ select · space/x toggle · enter apply · esc back"
+	case ollamaStepApply:
+		return "enter / esc to return"
+	}
+	return "enter / esc"
+}
+func (m ollamaModel) NavSection() string { return navSectionChats }
+
+func (m ollamaModel) Body() string {
 	var b strings.Builder
-	title := "Ollama · local model routing"
-	help := "enter probe · esc back"
 
 	b.WriteString(hintStyle.Render(
 		"Configure agents to route through an OpenAI-compatible Ollama endpoint.",
@@ -369,7 +390,6 @@ func (m ollamaModel) View() string {
 		}
 
 	case ollamaStepModel:
-		help = "enter to continue · esc back"
 		b.WriteString(subtitleStyle.Render("Endpoint: ") + m.endpoint.Value() + "\n")
 		if m.probeErr != "" {
 			b.WriteString(errorStyle.Render("✗ Probe failed: "+m.probeErr) + "\n")
@@ -380,7 +400,6 @@ func (m ollamaModel) View() string {
 			b.WriteString(inputLabelStyle.Render("Model: "))
 			b.WriteString(m.modelInput.View())
 		} else {
-			help = "↑/↓ select · enter pick · esc back"
 			b.WriteString(hintStyle.Render(fmt.Sprintf("%d model(s) detected:", len(m.probedModels))) + "\n\n")
 			for i, name := range m.probedModels {
 				isSel := i == m.modelCursor
@@ -393,7 +412,6 @@ func (m ollamaModel) View() string {
 		}
 
 	case ollamaStepAgents:
-		help = "↑/↓ select · space/x toggle · enter apply · esc back"
 		b.WriteString(subtitleStyle.Render("Endpoint: ") + m.endpoint.Value() + "\n")
 		b.WriteString(subtitleStyle.Render("Model: ") + m.modelInput.Value() + "\n\n")
 		b.WriteString(hintStyle.Render("Which agents to configure?") + "\n\n")
@@ -425,7 +443,6 @@ func (m ollamaModel) View() string {
 			"gemini-cli — not supported (see README → \"Gemini + Ollama\")"))
 
 	case ollamaStepApply:
-		help = "enter / esc to return"
 		if m.applying {
 			b.WriteString(hintStyle.Render("Applying..."))
 		} else {
@@ -434,5 +451,5 @@ func (m ollamaModel) View() string {
 			}
 		}
 	}
-	return renderChrome(title, b.String(), help)
+	return b.String()
 }

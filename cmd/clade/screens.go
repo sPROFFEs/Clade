@@ -203,7 +203,7 @@ func (m *firstRunModel) finalize() tea.Cmd {
 		if err := launcher.SaveConfig(cfg); err != nil {
 			return errMsg{err: fmt.Errorf("save config: %w", err)}
 		}
-		return screenDoneMsg{next: newChatListModel(cfg)}
+		return screenDoneMsg{next: newLayoutModel(cfg)}
 	}
 }
 
@@ -423,17 +423,32 @@ func (m agentsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m agentsModel) View() string {
-	var b strings.Builder
-	title := fmt.Sprintf("Pick an agent · %s", m.ws.Name)
-	help := "↑/↓ select · enter launch/install · i install · o ollama · esc back"
+	return renderChrome(m.Title(), m.Body(), m.Help())
+}
+
+func (m agentsModel) Title() string {
 	if m.override != nil {
-		title = fmt.Sprintf("Switch agent for chat · %s", m.ws.Name)
-		help = "enter swap+launch · same agent re-launches as-is · i install · esc back"
+		return fmt.Sprintf("Switch agent for chat · %s", m.ws.Name)
 	}
+	if m.ws.Name == "" {
+		return "Agents · browse + install"
+	}
+	return fmt.Sprintf("Pick an agent · %s", m.ws.Name)
+}
+func (m agentsModel) Help() string {
+	if m.override != nil {
+		return "enter swap+launch · same agent re-launches as-is · i install · esc back"
+	}
+	return "↑/↓ select · enter launch/install · i install · o ollama · esc back"
+}
+func (m agentsModel) NavSection() string { return navSectionAgents }
+
+func (m agentsModel) Body() string {
+	var b strings.Builder
 
 	if m.loading {
 		b.WriteString(hintStyle.Render("Scanning PATH for agent CLIs..."))
-		return renderChrome(title, b.String(), help)
+		return b.String()
 	}
 
 	if m.override != nil {
@@ -484,7 +499,15 @@ func (m agentsModel) View() string {
 	b.WriteString(hintStyle.Render(
 		"Grey entries aren't on PATH — press enter (or i) to install them.",
 	))
-	return renderChrome(title, b.String(), help)
+	return b.String()
+}
+
+// newAgentsBrowser is the nav-level Agents pane. No workspace context
+// — Enter on an available agent is a no-op (no chat to launch into);
+// Enter on a missing one routes to the installer. Use the per-chat
+// agent picker (from the chat list) when you want to launch.
+func newAgentsBrowser(cfg *launcher.Config) agentsModel {
+	return agentsModel{cfg: cfg, loading: true}
 }
 
 // --- shared helpers ------------------------------------------------------

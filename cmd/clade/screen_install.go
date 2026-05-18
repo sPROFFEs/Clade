@@ -179,14 +179,30 @@ func tickInstall() tea.Cmd {
 }
 
 func (m installModel) View() string {
+	return renderChrome(m.Title(), m.Body(), m.Help())
+}
+
+func (m installModel) Title() string {
+	return fmt.Sprintf("Install · %s", m.agentID)
+}
+func (m installModel) Help() string {
+	if len(m.methods) == 0 {
+		return "esc to go back"
+	}
+	if m.running {
+		return "enter / esc to continue"
+	}
+	return "↑/↓ select · enter run · esc back"
+}
+func (m installModel) NavSection() string { return navSectionAgents }
+
+func (m installModel) Body() string {
 	var b strings.Builder
-	title := fmt.Sprintf("Install · %s", m.agentID)
-	help := "↑/↓ select · enter run · esc back"
 
 	if len(m.methods) == 0 {
 		b.WriteString(errorStyle.Render("✗ No install method available on this OS for "+string(m.agentID)) + "\n")
 		b.WriteString(hintStyle.Render("Check the agent's vendor docs and install manually."))
-		return renderChrome(title, b.String(), "esc to go back")
+		return b.String()
 	}
 
 	if !m.running {
@@ -223,11 +239,10 @@ func (m installModel) View() string {
 		if m.prereqWarn != "" {
 			b.WriteString("\n" + errorStyle.Render("✗ "+m.prereqWarn))
 		}
-		return renderChrome(title, b.String(), help)
+		return b.String()
 	}
 
 	// Running / done view.
-	help = "enter / esc to continue"
 	b.WriteString(hintStyle.Render("Running...") + "\n\n")
 	lines := m.output.snapshot()
 	for _, l := range lines {
@@ -241,5 +256,5 @@ func (m installModel) View() string {
 			b.WriteString(okStyle.Render("✓ Done — re-detecting agents..."))
 		}
 	}
-	return renderChrome(title, b.String(), help)
+	return b.String()
 }

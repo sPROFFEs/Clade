@@ -142,9 +142,17 @@ func (m settingsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m settingsModel) View() string {
+	return renderChrome(m.Title(), m.Body(), m.Help())
+}
+
+func (m settingsModel) Title() string {
+	return fmt.Sprintf("Settings · %s", m.ws.Name)
+}
+func (m settingsModel) Help() string       { return "enter to continue · esc to go back" }
+func (m settingsModel) NavSection() string { return navSectionChats }
+
+func (m settingsModel) Body() string {
 	var b strings.Builder
-	title := fmt.Sprintf("Settings · %s", m.ws.Name)
-	help := "enter to continue · esc to go back"
 
 	switch m.step {
 	case 0:
@@ -172,5 +180,5 @@ func (m settingsModel) View() string {
 	if m.err != "" {
 		b.WriteString("\n" + errorStyle.Render("✗ "+m.err))
 	}
-	return renderChrome(title, b.String(), help)
+	return b.String()
 }
