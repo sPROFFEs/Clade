@@ -184,6 +184,33 @@ Setup complete. Open a new terminal to start using pnpm.`
 	}
 }
 
+func TestPnpmFailureHint_CorepackEsmBug(t *testing.T) {
+	// Real Node 20.19.2 trace the user hit on Parrot. The hint should
+	// specifically mention corepack so the user knows to bypass it.
+	captured := `node:internal/modules/esm/utils:266
+    throw new ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING();
+    ^
+TypeError [ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING]: A dynamic import callback was not specified.
+    at importModuleDynamicallyCallback (node:internal/modules/esm/utils:266:9)
+Node.js v20.19.2`
+	hint := pnpmFailureHint(captured, "pnpm setup")
+	for _, want := range []string{"corepack", "get.pnpm.io", "ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING"} {
+		if !strings.Contains(hint, want) {
+			t.Errorf("hint missing %q:\n%s", want, hint)
+		}
+	}
+}
+
+func TestPnpmFailureHint_Fallback(t *testing.T) {
+	// Unknown failure mode → still emit the direct-install instructions.
+	hint := pnpmFailureHint("some random pnpm crash", "pnpm setup")
+	for _, want := range []string{"pnpm setup", "get.pnpm.io"} {
+		if !strings.Contains(hint, want) {
+			t.Errorf("fallback hint missing %q:\n%s", want, hint)
+		}
+	}
+}
+
 func TestExtractPnpmHome_UnixLayout(t *testing.T) {
 	out := `Updating /Users/me/.zshrc
 PNPM_HOME=/Users/me/Library/pnpm

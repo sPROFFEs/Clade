@@ -192,7 +192,8 @@ func UnfixableMissing(missing []string) []string {
 
 // AutoInstallPnpm runs `corepack enable` so pnpm becomes available
 // without an extra global install. Requires Node ≥ 16.10, which ships
-// corepack. Returns a clear error if Node isn't on PATH.
+// corepack. Returns a clear error if Node isn't on PATH or corepack
+// is broken on the user's Node build.
 func AutoInstallPnpm(ctx context.Context, w io.Writer) error {
 	if _, err := exec.LookPath("node"); err != nil {
 		return fmt.Errorf("node is required to auto-install pnpm via corepack — install Node ≥ 20 first")
@@ -200,9 +201,55 @@ func AutoInstallPnpm(ctx context.Context, w io.Writer) error {
 	if _, err := exec.LookPath("corepack"); err != nil {
 		return fmt.Errorf("corepack not on PATH — install a Node version that bundles corepack (≥ 16.10)")
 	}
+	var cap bytes.Buffer
 	cmd := exec.CommandContext(ctx, "corepack", "enable")
-	cmd.Stdout, cmd.Stderr = w, w
-	return cmd.Run()
+	cmd.Stdout = io.MultiWriter(w, &cap)
+	cmd.Stderr = io.MultiWriter(w, &cap)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%w\n%s", err, pnpmFailureHint(cap.String(), "corepack enable"))
+	}
+	return nil
+}
+
+// pnpmFailureHint inspects captured stdout+stderr from a corepack or
+// `pnpm setup` invocation and returns a multi-line user-facing string
+// that explains what to do next. We only match on stable substrings
+// from known failure modes; the underlying error is still returned
+// untouched (wrapped with %w) so power users can see the original
+// stack.
+//
+// Known modes we recognise:
+//   - ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING — corepack-bundled pnpm
+//     crashes inside Node's ESM loader on certain Node 20.x builds.
+//     The bug is in corepack (it uses dynamic imports without
+//     registering the importModuleDynamically callback Node now
+//     requires). Tell the user to skip corepack and install pnpm
+//     directly.
+//   - "Cannot find module 'pnpm'" / generic exit — fall through to a
+//     short "install pnpm yourself" hint.
+func pnpmFailureHint(captured, stage string) string {
+	const directInstall = `To work around this, install pnpm directly (skips corepack):
+
+    curl -fsSL https://get.pnpm.io/install.sh | sh -
+    exec $SHELL              # reload PATH
+    clade                    # re-run; installer will skip pnpm setup
+
+Or on Windows / PowerShell:
+
+    iwr https://get.pnpm.io/install.ps1 -useb | iex
+
+Once pnpm is on PATH, Clade's installer detects it and won't invoke ` + "`pnpm setup`" + ` again.`
+
+	if strings.Contains(captured, "ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING") {
+		return "" +
+			"This is a known incompatibility between corepack's bundled pnpm\n" +
+			"shim and certain Node 20.x builds — the corepack wrapper uses a\n" +
+			"dynamic import without registering Node's importModuleDynamically\n" +
+			"callback, and Node aborts with ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING.\n" +
+			"The bug is in corepack, not in pnpm or Clade.\n\n" +
+			directInstall
+	}
+	return "Couldn't run " + stage + ". " + directInstall
 }
 
 // pnpmGlobalBinDir asks pnpm where it puts global bins. Returns an empty
@@ -337,7 +384,7 @@ func EnsurePnpmReady(ctx context.Context, w io.Writer) ([]string, error) {
 		cmd.Stdout = io.MultiWriter(w, &setupCap)
 		cmd.Stderr = io.MultiWriter(w, &setupCap)
 		if err := cmd.Run(); err != nil {
-			return nil, fmt.Errorf("pnpm setup: %w", err)
+			return nil, fmt.Errorf("pnpm setup failed: %w\n\n%s", err, pnpmFailureHint(setupCap.String(), "pnpm setup"))
 		}
 		// pnpm setup writes to user-level env (registry on Windows, rc
 		// files on Unix) — those don't propagate to our running process.
