@@ -325,19 +325,42 @@ func swapBinary(exePath, newBin string) error {
 	return nil
 }
 
+// copyOver is the cross-filesystem fallback for swapBinary. It can't
+// just open(dst, O_WRONLY|O_TRUNC) because on Linux that returns
+// ETXTBSY ("text file busy") whenever dst is the running executable —
+// the very case the self-updater always hits. Instead we copy to a
+// sibling temp file (same filesystem as dst, so the final rename is
+// always intra-fs) and atomic-rename over the running binary. The
+// rename re-points the path; the running process keeps its open file
+// descriptor and finishes happily.
 func copyOver(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {
 		return err
 	}
 	defer in.Close()
-	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o755)
+	tmp, err := os.CreateTemp(filepath.Dir(dst), filepath.Base(dst)+".tmp-*")
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
+	tmpName := tmp.Name()
+	if _, err := io.Copy(tmp, in); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
 		return err
 	}
-	return out.Close()
+	if err := tmp.Chmod(0o755); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	if err := os.Rename(tmpName, dst); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	return nil
 }
