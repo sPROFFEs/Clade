@@ -52,7 +52,9 @@ run `./scripts/install.sh` (or `.\scripts\install.ps1`) from inside.
 ## Quick start
 
 ```sh
-clade
+clade                     # interactive — opens with a brief boot splash
+clade --no-splash         # skip the splash (also via CLADE_NO_SPLASH=1)
+clade -version            # print version and exit
 ```
 
 First run is two questions:
@@ -96,6 +98,35 @@ chats/
 └── 20251017-1500-pr-123-review/
 ```
 
+## Session-start workflow
+
+Every time you open or resume a chat, the launcher decorates the
+compiled instructions with **required-reading directives** so the
+agent actually consults the workpath's content instead of riffing
+off the mission statement alone. Concretely, the agent is told it
+MUST, before answering the first user message:
+
+1. **Read `MEMORY.md`** end-to-end (if memory is enabled) and open
+   its reply with `📒 Recalled: …` if non-trivial notes carried
+   across from a past session.
+2. **Scan the Knowledge-base inventory** in its instructions and
+   open any file under `knowledge/` whose title/summary overlaps
+   with the user's current question.
+3. **Scan the Online-skills list** and open any cloned skill whose
+   name/topic matches the user's question.
+4. **Cite** every file path it draws on inline, so you can audit
+   the sources.
+
+If nothing matches a step, the agent is told to say so briefly
+("nothing relevant in knowledge for this question") rather than
+silently skipping — that way you can tell when the directives are
+working vs being ignored.
+
+These directives are appended automatically to `SKILL.md` /
+`AGENTS.md` / `GEMINI.md` during compilation; you don't author
+them in the workpath yourself. Personality, language, tools, and
+subagents follow their own rules and are described below.
+
 ## Personality
 
 Each template (and each cloned chat) can have a `personality.md`
@@ -128,6 +159,30 @@ cybersecurity field. Be precise and technical.
 Anything inside `<!-- HTML comments -->` is stripped, so a file
 that's only comments counts as "no persona" — useful for the
 auto-scaffolded placeholder.
+
+## Memory
+
+When a template (or chat) has `memoryEnabled: true` in its settings,
+the launcher manages a persistent `MEMORY.md` file that survives
+across launches:
+
+- Lives at `<chat>/MEMORY.md` (canonical) and `<chat>/sandbox/MEMORY.md`
+  (the agent's working copy).
+- Every launch **stages** the workspace copy into the sandbox + appends
+  a `## YYYY-MM-DD HH:MM — Session opened` marker so each session
+  leaves a visible trace even if the agent writes nothing else.
+- On exit, the sandbox copy syncs back to the canonical workspace
+  file (`SyncMemoryBack`).
+- The required-reading directive injected into the compiled
+  instructions tells the agent it MUST read `MEMORY.md` at session
+  start, open its first reply with `📒 Recalled: …` if there's
+  non-trivial context, and **append** new durable facts under that
+  session's marker as `### Title` subsections. Existing entries are
+  never overwritten.
+
+Toggle memory per template (template wizard) or per chat (`e` on the
+home screen). Disabling it stops the launcher from staging /
+syncing the file; existing notes stay on disk.
 
 ## Keys
 
@@ -369,6 +424,16 @@ Both transports cache by directory name — re-launching the same chat
 doesn't re-download. Configure the URL list per template in the
 template wizard, or per chat with `e` on the home screen.
 
+Once cloned, the launcher injects a required-reading directive into
+the compiled instructions: the agent is told the skills exist
+(listed by relative path), and that it MUST scan the list at the
+start of every user turn and open the primary `SKILL.md` /
+`README.md` of any skill whose topic matches the current question.
+On the Claude target, skills also land under `.claude/skills/`
+which Claude Code auto-loads; the directive reinforces the
+auto-load and applies the same workflow to Codex / OpenCode /
+Gemini, which don't auto-load anything.
+
 ## Knowledge base
 
 Each template (and each cloned chat) can ship a `knowledge/`
@@ -394,13 +459,14 @@ On every launch, the compiler:
    relative path (`<sandbox>/knowledge/...`). The agent's file-
    reading tools (Claude's `Read`, Codex's `view`, etc.) find it
    immediately under the working directory.
-2. **Auto-generates a manifest** in the compiled instructions
-   (`SKILL.md` / `AGENTS.md` / `GEMINI.md`) listing every file with
-   its title and a short summary so the agent knows what's there
-   without having to `ls knowledge/` first. Contents are **NOT**
-   pre-loaded into context — the agent decides what to open and
-   when, the same way it interacts with any other file in the
-   project.
+2. **Auto-generates a required-reading manifest** in the compiled
+   instructions (`SKILL.md` / `AGENTS.md` / `GEMINI.md`) listing
+   every file with title + short summary. The instructions tell the
+   agent it MUST scan that list at the start of every user turn,
+   open any file whose title/summary overlaps with the current
+   question, and cite the file path when it draws on the contents.
+   Contents are **not** pre-loaded into context — the agent opens
+   them on demand via its own file-reading tool.
 
 Preferred format is **markdown**; the launcher also extracts
 summaries from `.txt`, `.rst`, `.org`, `.json`, `.yaml`, `.toml`,

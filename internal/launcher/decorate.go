@@ -60,9 +60,23 @@ func applyDecorations(ws Workspace, agent Agent) []string {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 		dir := onlineSkillsDir(ws, agent)
+		var fetched []string
 		for _, r := range skills.FetchAll(ctx, ws.Settings.OnlineSkills, dir) {
 			if r.Err != nil {
 				notes = append(notes, fmt.Sprintf("online-skill %s: %v", r.URL, r.Err))
+				continue
+			}
+			fetched = append(fetched, r.Path)
+		}
+		// Tell the agent the skills exist + that they're required
+		// reading. Without this, codex/opencode/gemini agents have no
+		// idea what's under online-skills/ and never open it. Claude
+		// auto-discovers .claude/skills/ so the directive is redundant
+		// there but harmless — the same "scan and open if relevant"
+		// instruction reinforces the auto-load.
+		if len(fetched) > 0 {
+			if err := appendOnlineSkillsDirective(ws, agent, dir, fetched); err != nil {
+				notes = append(notes, "online-skills directive: "+err.Error())
 			}
 		}
 	}
@@ -258,6 +272,62 @@ func appendMemoryDirective(ws Workspace, agent Agent) error {
 		return nil
 	}
 	body = strings.TrimRight(body, "\n") + "\n" + memoryDirectiveSection
+	return os.WriteFile(path, []byte(body), 0o644)
+}
+
+// appendOnlineSkillsDirective tells the agent that cloned online
+// skills live under <skillsDir> and that it must scan them at the
+// start of every turn the same way it scans the knowledge inventory.
+// Lists each skill by its directory name so the agent has a quick
+// reference without having to ls first.
+func appendOnlineSkillsDirective(ws Workspace, agent Agent, skillsDir string, fetched []string) error {
+	path := agentInstructionsPath(ws, agent)
+	if path == "" {
+		return nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	body := string(raw)
+	if strings.Contains(body, "## Online skills — required reading workflow") {
+		return nil // idempotent
+	}
+
+	// Render skill paths relative to the sandbox root for clarity.
+	rels := make([]string, 0, len(fetched))
+	for _, f := range fetched {
+		if rel, err := filepath.Rel(ws.SandboxDir, f); err == nil {
+			rels = append(rels, filepath.ToSlash(rel))
+		} else {
+			rels = append(rels, filepath.ToSlash(f))
+		}
+	}
+
+	var b strings.Builder
+	b.WriteString("\n## Online skills — required reading workflow\n\n")
+	b.WriteString(
+		"This chat has remote skill bundles cloned into your working " +
+			"directory. Contents are NOT pre-loaded into your context; " +
+			"you MUST consult them yourself before responding.\n\n")
+	b.WriteString("**Required workflow on every user turn:**\n\n")
+	b.WriteString(
+		"1. Scan the list below for skills whose name overlaps with the " +
+			"user's current question (domain, tool, technique).\n")
+	b.WriteString(
+		"2. Open the relevant skill's primary instruction file (typically " +
+			"`SKILL.md`, `README.md`, or the only `.md` at its root) and " +
+			"apply what it tells you. Cite the skill name when you draw " +
+			"on it.\n")
+	b.WriteString(
+		"3. If nothing matches, note that briefly so the user sees you " +
+			"checked. Do NOT silently skip.\n\n")
+	b.WriteString("**Available skills:**\n\n")
+	for _, r := range rels {
+		fmt.Fprintf(&b, "- `%s`\n", r)
+	}
+
+	body = strings.TrimRight(body, "\n") + "\n" + b.String()
 	return os.WriteFile(path, []byte(body), 0o644)
 }
 

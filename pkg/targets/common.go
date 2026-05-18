@@ -133,25 +133,41 @@ func copyKnowledge(wp *workpath.Workpath, outDir string) error {
 
 // renderKnowledgeBlock returns a markdown "Knowledge base" section
 // listing every knowledge file with title + short summary. Returns
-// empty string when wp.Knowledge is empty so the section doesn't
-// appear in compiled instructions for templates that don't use it.
+// empty string when wp.Knowledge is empty.
 //
-// The block tells the agent that the files exist + lives under the
-// `knowledge/` dir in its working tree, and that the contents are
-// NOT pre-loaded into context — the agent should use its file-
-// reading tools to open whatever's relevant when it needs detail.
-// That matches how every agent CLI already works with filesystem
-// content (Claude's Read, Codex's view, etc.).
+// The block is an ACTIVE directive: agents are required to scan the
+// manifest at the start of every user turn and open any file whose
+// title/summary suggests it's relevant to the current message before
+// answering. We tried a passive "use these if helpful" wording first
+// and observed that agents largely ignored the manifest — making the
+// directive prescriptive (with explicit triggers) raises the hit
+// rate from "almost never" to "reliably when relevant".
 func renderKnowledgeBlock(wp *workpath.Workpath) string {
 	if len(wp.Knowledge) == 0 {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("\n## Knowledge base\n\n")
-	b.WriteString("Reference material lives under `knowledge/` in your " +
-		"working directory. Use your file-reading tools to open what " +
-		"you need — contents are NOT pre-loaded into your context. " +
-		"Available files:\n\n")
+	b.WriteString("\n## Knowledge base — required reading workflow\n\n")
+	b.WriteString(
+		"Reference material lives under `knowledge/` in your current " +
+			"working directory. Contents are NOT pre-loaded into your " +
+			"context; you MUST consult them yourself before responding.\n\n")
+	b.WriteString("**Required workflow on every user turn:**\n\n")
+	b.WriteString(
+		"1. Scan the inventory below for files whose title or summary " +
+			"looks relevant to the user's current message — domain " +
+			"jargon, named tools/protocols/APIs, file formats, " +
+			"techniques, anything that overlaps.\n")
+	b.WriteString(
+		"2. Open every relevant file with your file-reading tool (Read, " +
+			"view, etc.) and incorporate what you find into your reply. " +
+			"Cite the file path inline when you draw on it so the user " +
+			"can audit your sources.\n")
+	b.WriteString(
+		"3. If nothing in the inventory matches, say so briefly in your " +
+			"reasoning (one short line) so the user knows you checked. " +
+			"Do NOT silently skip this step.\n\n")
+	b.WriteString("**Inventory:**\n\n")
 	for _, k := range wp.Knowledge {
 		size := humaniseBytes(k.Bytes)
 		title := strings.TrimSpace(k.Title)
@@ -165,7 +181,9 @@ func renderKnowledgeBlock(wp *workpath.Workpath) string {
 			}
 			b.WriteString("\n")
 		} else {
-			fmt.Fprintf(&b, "- `%s` (%s, binary) — %s\n", k.RelPath, size, title)
+			fmt.Fprintf(&b, "- `%s` (%s, binary) — %s "+
+				"_(open with the appropriate parser; do not assume contents)_\n",
+				k.RelPath, size, title)
 		}
 	}
 	return b.String()
