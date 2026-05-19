@@ -22,19 +22,19 @@
 #   --yes              auto-confirm prompts (CI / scripted use)
 #   -h, --help         show this
 #
-# The binary path always pulls from the GitHub release tagged
-# RELEASE_TAG (default: "release"). Override with RELEASE_TAG=<tag>
-# in the environment if you ever need to point at a different one.
+# The binary path resolves the latest GitHub release via the API.
+# Set RELEASE_TAG=<tag> in the environment to pin a specific release.
 
 set -euo pipefail
 
 REPO="sPROFFEs/Clade"
 RAW_REPO_URL="https://github.com/sPROFFEs/Clade"
 SOURCE_BRANCH="main"
-# Single moving release tag we always download from. The user updates
-# the version label / release notes / attached assets on GitHub by
-# hand; the installer doesn't care what's printed there.
-RELEASE_TAG="${RELEASE_TAG:-release}"
+# Release tag to pull assets from. When unset we resolve "latest" via
+# the GitHub API at download time so the installer keeps working as
+# the operator publishes new versioned tags (0.1.7, 0.1.8, ...).
+# Override with RELEASE_TAG=<tag> in the environment to pin a release.
+RELEASE_TAG="${RELEASE_TAG:-}"
 
 MODE=""          # binary | source (empty = ask, default binary in non-tty)
 PREFIX_MODE=""   # user | system (empty = auto)
@@ -222,11 +222,30 @@ fetch() {
   fi
 }
 
+resolve_latest_tag() {
+  local api="https://api.github.com/repos/$REPO/releases/latest"
+  local dl tag
+  dl="$(detect_downloader)"
+  if [[ "$dl" == "curl" ]]; then
+    tag="$(curl -fsSL -H 'User-Agent: clade-installer' "$api" 2>/dev/null \
+      | sed -n 's/^[[:space:]]*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
+  else
+    tag="$(wget -q -O - --header='User-Agent: clade-installer' "$api" 2>/dev/null \
+      | sed -n 's/^[[:space:]]*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
+  fi
+  if [[ -z "$tag" ]]; then
+    c_red "couldn't query GitHub for the latest release."
+    c_red "Set RELEASE_TAG=<tag> in the environment to pin a version and re-run."
+    exit 1
+  fi
+  printf '%s' "$tag"
+}
+
 install_from_release() {
   step "Resolving release"
-  # Asset names are version-less so the operator can re-upload new
-  # builds onto the same "release" tag without breaking the URL the
-  # installer hits.
+  if [[ -z "$RELEASE_TAG" ]]; then
+    RELEASE_TAG="$(resolve_latest_tag)"
+  fi
   local fname="clade-${TRIPLET}.tar.gz"
   local url="https://github.com/$REPO/releases/download/${RELEASE_TAG}/${fname}"
   c_dim "  tag:     $RELEASE_TAG"

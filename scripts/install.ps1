@@ -16,9 +16,8 @@
 #   -AllUsers                   install to %ProgramFiles%\Clade (needs admin)
 #   -Yes                        auto-confirm prompts
 #
-# The binary path always pulls from the GitHub release tagged
-# $env:RELEASE_TAG (default: "release"). Override that env var if
-# you ever need to point at a different tag.
+# The binary path resolves the latest GitHub release via the API.
+# Set $env:RELEASE_TAG=<tag> to pin a specific release instead.
 
 [CmdletBinding()]
 param(
@@ -33,10 +32,11 @@ $ErrorActionPreference = "Stop"
 
 $Repo = "sPROFFEs/Clade"
 $SourceBranch = "main"
-# Single moving release tag we always download from. The operator
-# updates the release notes / attached assets on GitHub by hand; the
-# installer doesn't care what the release is labelled as.
-$ReleaseTag = if ($env:RELEASE_TAG) { $env:RELEASE_TAG } else { "release" }
+# Release tag to pull assets from. When unset we resolve "latest" via
+# the GitHub API at download time so the installer keeps working as
+# the operator publishes new versioned tags (0.1.7, 0.1.8, ...).
+# Override with $env:RELEASE_TAG=<tag> to pin a specific release.
+$ReleaseTag = $env:RELEASE_TAG
 
 # ---------- pretty ----------
 function Step($Text) { Write-Host ""; Write-Host "==> $Text" -ForegroundColor Green }
@@ -145,10 +145,24 @@ if ($AllUsers -and -not (Test-IsAdmin)) {
 }
 
 # ---------- binary path: GitHub release ----------
+function Resolve-LatestTag {
+    $api = "https://api.github.com/repos/$Repo/releases/latest"
+    try {
+        $r = Invoke-RestMethod -Uri $api -UseBasicParsing -Headers @{ "User-Agent" = "clade-installer" } -ErrorAction Stop
+    } catch {
+        Fail "couldn't query GitHub for the latest release ($($_.Exception.Message)). Set `$env:RELEASE_TAG to pin a version and re-run."
+    }
+    if (-not $r.tag_name) {
+        Fail "GitHub API response had no tag_name. Set `$env:RELEASE_TAG to pin a version and re-run."
+    }
+    return $r.tag_name
+}
+
 function Install-Binary {
     Step "Resolving release"
-    # Asset names are version-less so the operator can re-upload new
-    # builds onto the same "release" tag without changing this URL.
+    if (-not $ReleaseTag) {
+        $ReleaseTag = Resolve-LatestTag
+    }
     $fname = "clade-$Triplet.zip"
     $url   = "https://github.com/$Repo/releases/download/$ReleaseTag/$fname"
     Info "tag:   $ReleaseTag"
