@@ -48,6 +48,13 @@ func TestOllamaFlow_FullWizardWritesPerChatClaudeSettings(t *testing.T) {
 	m := newOllamaModel(cfg, ws)
 
 	m.endpoint.SetValue(srv.URL)
+	// Endpoint Enter → API-key step (no probe yet).
+	nx, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = nx.(ollamaModel)
+	if m.step != ollamaStepAPIKey {
+		t.Fatalf("after endpoint Enter, step = %d, want %d (apiKey)", m.step, ollamaStepAPIKey)
+	}
+	// API-key Enter (blank = no auth, Ollama path) → probe → model step.
 	nx, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = nx.(ollamaModel)
 	probe := runCmd(t, cmd)
@@ -170,6 +177,93 @@ func TestOllamaScreen_PreChecksBoxesFromDisk(t *testing.T) {
 // Pull in os/runtime for the new test.
 var _ = runtime.GOOS
 
+// TestOllamaFlow_PersistsAPIKeyAndPlanUsesIt: end-to-end check of the
+// GPUStack-style path. User enters an endpoint, an API key, picks a
+// model from the probe, ticks Claude, applies, then Plan() injects the
+// real key as ANTHROPIC_AUTH_TOKEN / OPENAI_API_KEY.
+func TestOllamaFlow_PersistsAPIKeyAndPlanUsesIt(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		if r.URL.Path == "/api/tags" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]string{{"id": "qwen3-0.6b"}},
+		})
+	}))
+	defer srv.Close()
+
+	tmp := t.TempDir()
+	redirectConfig(t, filepath.Join(tmp, "cfg"))
+	t.Chdir(repoRoot(t))
+	if _, err := launcher.SeedSamples(tmp, []string{filepath.Join(repoRoot(t), "samples", "workpaths")}); err != nil {
+		t.Fatal(err)
+	}
+	tpl, _ := launcher.LoadTemplate(tmp, "reversing")
+	chat, err := launcher.CreateChat(tmp, *tpl, "gpustack-test", launcher.AgentClaude)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := &launcher.Config{WorkspacesRoot: tmp}
+	m := newOllamaModel(cfg, chat.AsWorkspace())
+
+	m.endpoint.SetValue(srv.URL)
+	nx, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = nx.(ollamaModel)
+	// Type a key, then Enter to probe.
+	m.apiKey.SetValue("sk-gpustack-secret")
+	nx, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = nx.(ollamaModel)
+	probe := runCmd(t, cmd)
+	nx, _ = m.Update(probe)
+	m = nx.(ollamaModel)
+
+	if gotAuth != "Bearer sk-gpustack-secret" {
+		t.Errorf("probe Auth header = %q, want Bearer sk-gpustack-secret", gotAuth)
+	}
+	if m.step != ollamaStepModel {
+		t.Fatalf("step = %d, want %d (model)", m.step, ollamaStepModel)
+	}
+
+	// Pick the only model, tick Claude, apply.
+	nx, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = nx.(ollamaModel)
+	nx, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	m = nx.(ollamaModel)
+	nx, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = nx.(ollamaModel)
+	apply := runCmd(t, cmd)
+	nx, _ = m.Update(apply)
+	m = nx.(ollamaModel)
+	if !m.applied {
+		t.Fatal("expected applied=true")
+	}
+
+	// chat.json persists the key.
+	raw, _ := os.ReadFile(filepath.Join(chat.AsWorkspace().Root, "chat.json"))
+	if !strings.Contains(string(raw), "sk-gpustack-secret") {
+		t.Errorf("chat.json should persist the apiKey:\n%s", raw)
+	}
+
+	// Plan() now injects the real key, not the "ollama" placeholder.
+	chat2, _ := launcher.LoadChat(tmp, chat.ID)
+	plan, err := launcher.Plan(chat2.AsWorkspace(), launcher.Agent{
+		ID: launcher.AgentClaude, Label: "Claude", Binary: "claude",
+		WpcTarget: "claude", Available: true,
+	})
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if plan.Env["ANTHROPIC_AUTH_TOKEN"] != "sk-gpustack-secret" {
+		t.Errorf("ANTHROPIC_AUTH_TOKEN = %q, want sk-gpustack-secret", plan.Env["ANTHROPIC_AUTH_TOKEN"])
+	}
+	if plan.Env["OPENAI_API_KEY"] != "sk-gpustack-secret" {
+		t.Errorf("OPENAI_API_KEY = %q, want sk-gpustack-secret", plan.Env["OPENAI_API_KEY"])
+	}
+}
+
 func TestOllamaFlow_FallsBackToManualEntryOnProbeError(t *testing.T) {
 	tmp := t.TempDir()
 	redirectConfig(t, filepath.Join(tmp, "cfg"))
@@ -181,6 +275,9 @@ func TestOllamaFlow_FallsBackToManualEntryOnProbeError(t *testing.T) {
 
 	m := newOllamaModel(cfg, chat.AsWorkspace())
 	m.endpoint.SetValue("http://127.0.0.1:1") // refuses connection
+	// endpoint Enter → API-key step → Enter again triggers probe.
+	nx, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = nx.(ollamaModel)
 	nx, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = nx.(ollamaModel)
 	probe := runCmd(t, cmd)

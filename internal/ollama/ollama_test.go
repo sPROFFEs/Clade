@@ -50,7 +50,7 @@ func TestListModels_PrefersOllamaTags(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	models, err := ListModels(context.Background(), srv.URL)
+	models, err := ListModels(context.Background(), srv.URL, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func TestListModels_FallsBackToOpenAI(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	models, _ := ListModels(context.Background(), srv.URL)
+	models, _ := ListModels(context.Background(), srv.URL, "")
 	if len(models) != 2 {
 		t.Fatalf("got %v", models)
 	}
@@ -97,6 +97,100 @@ func TestClaudeEnv(t *testing.T) {
 func TestClaudeEnv_EmptyOnIncomplete(t *testing.T) {
 	if e := ClaudeEnv(Settings{}); e != nil {
 		t.Errorf("expected nil for empty settings, got %v", e)
+	}
+}
+
+func TestClaudeEnv_UsesAPIKeyWhenSet(t *testing.T) {
+	env := ClaudeEnv(Settings{Endpoint: "h:1", Model: "m", APIKey: "sk-gpustack-xyz"})
+	if env["ANTHROPIC_AUTH_TOKEN"] != "sk-gpustack-xyz" {
+		t.Errorf("ANTHROPIC_AUTH_TOKEN = %q, want sk-gpustack-xyz", env["ANTHROPIC_AUTH_TOKEN"])
+	}
+	if env["OPENAI_API_KEY"] != "sk-gpustack-xyz" {
+		t.Errorf("OPENAI_API_KEY = %q, want sk-gpustack-xyz", env["OPENAI_API_KEY"])
+	}
+}
+
+// TestListModels_SendsBearerWhenKeySet verifies the probe forwards
+// Authorization: Bearer <key> when the user supplied one. GPUStack and
+// other gated providers reject /v1/models without it.
+func TestListModels_SendsBearerWhenKeySet(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		// Refuse /api/tags so we exercise the /v1/models path too.
+		if r.URL.Path == "/api/tags" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]string{{"id": "qwen3-0.6b"}},
+		})
+	}))
+	defer srv.Close()
+
+	if _, err := ListModels(context.Background(), srv.URL, "sk-test-key"); err != nil {
+		t.Fatal(err)
+	}
+	if gotAuth != "Bearer sk-test-key" {
+		t.Errorf("Authorization header = %q, want %q", gotAuth, "Bearer sk-test-key")
+	}
+}
+
+// TestApplyOpenCode_WritesAPIKeyIntoOptions: when a key is configured,
+// it lands inside provider.<name>.options.apiKey where @ai-sdk/openai-
+// compatible expects it.
+func TestApplyOpenCode_WritesAPIKeyIntoOptions(t *testing.T) {
+	tmp := t.TempDir()
+	redirectHome(t, tmp)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmp, "xdg"))
+
+	path, err := ApplyOpenCode(Settings{Endpoint: "10.0.0.1:11434", Model: "qwen3", APIKey: "sk-abc"}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(path)
+	var cfg map[string]any
+	_ = json.Unmarshal(raw, &cfg)
+	prov := cfg["provider"].(map[string]any)
+	entry := prov["ollama_remote"].(map[string]any)
+	opts := entry["options"].(map[string]any)
+	if opts["apiKey"] != "sk-abc" {
+		t.Errorf("options.apiKey = %v, want sk-abc", opts["apiKey"])
+	}
+}
+
+// TestApplyOpenCode_OmitsAPIKeyWhenBlank: vanilla Ollama path — no
+// apiKey field should appear in the options block.
+func TestApplyOpenCode_OmitsAPIKeyWhenBlank(t *testing.T) {
+	tmp := t.TempDir()
+	redirectHome(t, tmp)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmp, "xdg"))
+
+	path, _ := ApplyOpenCode(Settings{Endpoint: "h:1", Model: "m"}, false)
+	raw, _ := os.ReadFile(path)
+	if strings.Contains(string(raw), `"apiKey"`) {
+		t.Errorf("opencode.json should omit apiKey when blank:\n%s", raw)
+	}
+}
+
+// TestApplyDeepSeek_WritesInlineKey: when a key is set, the managed
+// block contains `api_key = "<key>"`. Blank case omits the line.
+func TestApplyDeepSeek_WritesInlineKey(t *testing.T) {
+	tmp := t.TempDir()
+	redirectHome(t, tmp)
+	path, _ := ApplyDeepSeek(Settings{Endpoint: "h:1", Model: "m", APIKey: "sk-deepseek"})
+	body, _ := os.ReadFile(path)
+	if !strings.Contains(string(body), `api_key = "sk-deepseek"`) {
+		t.Errorf("expected inline api_key in managed block:\n%s", body)
+	}
+
+	// Re-apply without a key: the api_key line must disappear.
+	if _, err := ApplyDeepSeek(Settings{Endpoint: "h:1", Model: "m"}); err != nil {
+		t.Fatal(err)
+	}
+	body2, _ := os.ReadFile(path)
+	if strings.Contains(string(body2), "api_key") {
+		t.Errorf("re-apply without key should drop the api_key line:\n%s", body2)
 	}
 }
 

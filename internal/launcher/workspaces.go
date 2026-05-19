@@ -52,6 +52,7 @@ type OllamaSettings struct {
 	Endpoint string `json:"endpoint,omitempty"`
 	Model    string `json:"model,omitempty"`
 	WireAPI  string `json:"wireApi,omitempty"`
+	APIKey   string `json:"apiKey,omitempty"`
 }
 
 // SaveWorkspaceSettings persists ws.Settings to <ws.Root>/workspace.json.

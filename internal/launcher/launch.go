@@ -144,29 +144,45 @@ func Plan(ws Workspace, agent Agent) (LaunchPlan, error) {
 	}
 	o := ws.Settings.Ollama
 	ollamaConfigured := o.Endpoint != "" && o.Model != ""
+	// Pick the auth token once. Empty APIKey ⇒ "ollama" placeholder
+	// (vanilla Ollama ignores it). Non-empty ⇒ real Bearer token for
+	// GPUStack / vLLM-with-key / LiteLLM / etc.
+	authToken := o.APIKey
+	if authToken == "" {
+		authToken = "ollama"
+	}
 
 	switch agent.ID {
 	case AgentClaude:
 		if ollamaConfigured {
 			plan.Env = map[string]string{
-				"ANTHROPIC_AUTH_TOKEN": "ollama",
+				"ANTHROPIC_AUTH_TOKEN": authToken,
 				"ANTHROPIC_API_KEY":    "",
 				"ANTHROPIC_BASE_URL":   o.Endpoint,
-				"OPENAI_API_KEY":       "ollama",
+				"OPENAI_API_KEY":       authToken,
 			}
 			// Without --model Claude sends its default model name to
-			// the Ollama proxy, which doesn't have it → request fails.
+			// the local proxy, which doesn't have it → request fails.
 			plan.Args = []string{"--model", o.Model}
 		}
 	case AgentCodex:
 		if ollamaConfigured {
 			// The Ollama screen wrote [profiles.ollama_remote] into
-			// ~/.codex/config.toml; tell codex to actually use it.
+			// ~/.codex/config.toml with env_key = "OPENAI_API_KEY".
+			// Inject that env so codex's lookup succeeds without the
+			// user having to export it in their shell. Falls back to
+			// the "ollama" placeholder when no real key is set.
+			plan.Env = map[string]string{"OPENAI_API_KEY": authToken}
 			plan.Args = []string{"-p", "ollama_remote"}
 		}
 	case AgentOpenCode:
-		// OpenCode picks up routing from opencode.json's model/provider
-		// fields, set by the Ollama screen — nothing to inject here.
+		if ollamaConfigured {
+			// OpenCode picks up routing from opencode.json. The provider's
+			// `options.apiKey` is the primary auth path, but exporting
+			// OPENAI_API_KEY too is harmless and covers SDK versions
+			// that prefer the env var.
+			plan.Env = map[string]string{"OPENAI_API_KEY": authToken}
+		}
 
 	case AgentGemini:
 		// Intentionally no Ollama handling here. Tried OPENAI_* env
@@ -183,12 +199,14 @@ func Plan(ws Workspace, agent Agent) (LaunchPlan, error) {
 
 	case AgentDeepSeek:
 		// DeepSeek-TUI reads ~/.deepseek/config.toml at startup, which
-		// the Ollama screen already wrote (provider="ollama" +
-		// base_url + model). Nothing to inject at launch — that's the
-		// whole point of the file-config path. We keep the case here
-		// to make the dispatch explicit and to leave a hook in case
-		// future DeepSeek versions add a per-launch override flag we
-		// want to surface.
+		// the Ollama screen wrote (provider="ollama" + base_url + model
+		// + optional api_key inline). We still export OPENAI_API_KEY
+		// when configured so any sub-tool that reads the env (or a
+		// config using `api_key_env = "OPENAI_API_KEY"` instead of an
+		// inline key) authenticates correctly.
+		if ollamaConfigured {
+			plan.Env = map[string]string{"OPENAI_API_KEY": authToken}
+		}
 	}
 	return plan, nil
 }

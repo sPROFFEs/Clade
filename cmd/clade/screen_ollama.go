@@ -1,10 +1,13 @@
 package main
 
-// Ollama config screen. Multi-step:
+// Local-endpoint config screen (Ollama + any OpenAI-compatible backend
+// that requires a Bearer key: GPUStack, vLLM-with-key, LiteLLM, …).
+// Multi-step:
 //   step 0: endpoint input
-//   step 1: model picker (loaded via probe) — falls back to manual entry
-//   step 2: agent multi-select (which agents to configure)
-//   step 3: apply + per-agent result
+//   step 1: API key (optional — leave blank for vanilla Ollama)
+//   step 2: model picker (loaded via probe) — falls back to manual entry
+//   step 3: agent multi-select (which agents to configure)
+//   step 4: apply + per-agent result
 //
 // Claude is configured per-workspace (env injected at launch). Codex
 // and OpenCode get their per-user config files written.
@@ -25,6 +28,7 @@ type ollamaStep int
 
 const (
 	ollamaStepEndpoint ollamaStep = iota
+	ollamaStepAPIKey
 	ollamaStepModel
 	ollamaStepAgents
 	ollamaStepApply
@@ -36,6 +40,7 @@ type ollamaModel struct {
 
 	step       ollamaStep
 	endpoint   textinput.Model
+	apiKey     textinput.Model // optional; empty = no Bearer auth (Ollama)
 	modelInput textinput.Model // used when probe returns no models
 
 	probing      bool
@@ -75,6 +80,16 @@ func newOllamaModel(cfg *launcher.Config, ws launcher.Workspace) ollamaModel {
 	}
 	ep.Focus()
 
+	ak := textinput.New()
+	ak.Placeholder = "Bearer token (blank = no auth / Ollama)"
+	ak.Width = 60
+	ak.CharLimit = 400
+	ak.EchoMode = textinput.EchoPassword
+	ak.EchoCharacter = '•'
+	if ws.Settings.Ollama.APIKey != "" {
+		ak.SetValue(ws.Settings.Ollama.APIKey)
+	}
+
 	mi := textinput.New()
 	mi.Placeholder = "model name (e.g. qwen3-coder)"
 	mi.Width = 50
@@ -89,6 +104,7 @@ func newOllamaModel(cfg *launcher.Config, ws launcher.Workspace) ollamaModel {
 		cfg:          cfg,
 		ws:           ws,
 		endpoint:     ep,
+		apiKey:       ak,
 		modelInput:   mi,
 		pickClaude:   ws.Settings.Ollama.Endpoint != "",
 		pickCodex:    ollama.CodexConfigured(),
@@ -155,6 +171,8 @@ func (m ollamaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch m.step {
 		case ollamaStepEndpoint:
 			return m.updateEndpoint(msg)
+		case ollamaStepAPIKey:
+			return m.updateAPIKey(msg)
 		case ollamaStepModel:
 			return m.updateModel(msg)
 		case ollamaStepAgents:
@@ -177,6 +195,8 @@ func (m ollamaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch m.step {
 	case ollamaStepEndpoint:
 		m.endpoint, cmd = m.endpoint.Update(msg)
+	case ollamaStepAPIKey:
+		m.apiKey, cmd = m.apiKey.Update(msg)
 	case ollamaStepModel:
 		if len(m.probedModels) == 0 {
 			m.modelInput, cmd = m.modelInput.Update(msg)
@@ -194,27 +214,53 @@ func (m ollamaModel) updateEndpoint(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if ep == "" {
 			return m, nil
 		}
-		m.probing = true
-		m.probeErr = ""
 		ep = ollama.NormalizeEndpoint(ep)
 		m.endpoint.SetValue(ep)
-		return m, func() tea.Msg {
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			models, err := ollama.ListModels(ctx, ep)
-			return ollamaProbeDoneMsg{models: models, err: err}
-		}
+		// Advance to the API-key step instead of probing immediately —
+		// providers like GPUStack require the Bearer on /v1/models, so
+		// we have to collect it first.
+		m.step = ollamaStepAPIKey
+		m.endpoint.Blur()
+		m.apiKey.Focus()
+		return m, textinput.Blink
 	}
 	var cmd tea.Cmd
 	m.endpoint, cmd = m.endpoint.Update(msg)
 	return m, cmd
 }
 
+// updateAPIKey handles the optional Bearer-key step. Enter (with or
+// without a value) kicks off the probe. Esc goes back to endpoint.
+// An empty key means "no auth" — vanilla Ollama path.
+func (m ollamaModel) updateAPIKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc:
+		m.step = ollamaStepEndpoint
+		m.apiKey.Blur()
+		m.endpoint.Focus()
+		return m, textinput.Blink
+	case tea.KeyEnter:
+		ep := ollama.NormalizeEndpoint(strings.TrimSpace(m.endpoint.Value()))
+		key := strings.TrimSpace(m.apiKey.Value())
+		m.probing = true
+		m.probeErr = ""
+		return m, func() tea.Msg {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			models, err := ollama.ListModels(ctx, ep, key)
+			return ollamaProbeDoneMsg{models: models, err: err}
+		}
+	}
+	var cmd tea.Cmd
+	m.apiKey, cmd = m.apiKey.Update(msg)
+	return m, cmd
+}
+
 func (m ollamaModel) updateModel(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
-		m.step = ollamaStepEndpoint
-		m.endpoint.Focus()
+		m.step = ollamaStepAPIKey
+		m.apiKey.Focus()
 		return m, textinput.Blink
 	}
 	if len(m.probedModels) == 0 {
@@ -275,6 +321,7 @@ func (m ollamaModel) updateAgents(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		settings := ollama.Settings{
 			Endpoint: m.endpoint.Value(),
 			Model:    strings.TrimSpace(m.modelInput.Value()),
+			APIKey:   strings.TrimSpace(m.apiKey.Value()),
 		}
 		ws := m.ws
 		picks := applyPicks{
@@ -311,7 +358,7 @@ func applyOllama(ws launcher.Workspace, s ollama.Settings, picks applyPicks) []s
 	var out []string
 	if picks.claude {
 		ws.Settings.Ollama = launcher.OllamaSettings{
-			Endpoint: s.Endpoint, Model: s.Model, WireAPI: s.WireAPI,
+			Endpoint: s.Endpoint, Model: s.Model, WireAPI: s.WireAPI, APIKey: s.APIKey,
 		}
 		if err := launcher.SaveWorkspaceLikeSettings(ws); err != nil {
 			out = append(out, "✗ claude (chat settings): "+err.Error())
@@ -350,11 +397,13 @@ func (m ollamaModel) View() string {
 	return renderChrome(m.Title(), m.Body(), m.Help())
 }
 
-func (m ollamaModel) Title() string { return "Ollama · local model routing" }
+func (m ollamaModel) Title() string { return "Local endpoint · Ollama / OpenAI-compat" }
 func (m ollamaModel) Help() string {
 	switch m.step {
 	case ollamaStepEndpoint:
-		return "enter probe · esc back"
+		return "enter next · esc back"
+	case ollamaStepAPIKey:
+		return "enter probe (blank = no auth) · esc back"
 	case ollamaStepModel:
 		if len(m.probedModels) == 0 {
 			return "enter to continue · esc back"
@@ -377,7 +426,7 @@ func (m ollamaModel) Body() string {
 	var b strings.Builder
 
 	b.WriteString(hintStyle.Render(
-		"Configure agents to route through an OpenAI-compatible Ollama endpoint.",
+		"Configure agents to route through any OpenAI-compatible local endpoint (Ollama, GPUStack, vLLM, LiteLLM, …).",
 	))
 	b.WriteString("\n\n")
 
@@ -385,8 +434,15 @@ func (m ollamaModel) Body() string {
 	case ollamaStepEndpoint:
 		b.WriteString(inputLabelStyle.Render("Endpoint: "))
 		b.WriteString(m.endpoint.View())
+
+	case ollamaStepAPIKey:
+		b.WriteString(subtitleStyle.Render("Endpoint: ") + m.endpoint.Value() + "\n\n")
+		b.WriteString(inputLabelStyle.Render("API key: "))
+		b.WriteString(m.apiKey.View())
+		b.WriteString("\n\n" + hintStyle.Render(
+			"Sent as `Authorization: Bearer <key>`. Leave blank for vanilla Ollama (no auth)."))
 		if m.probing {
-			b.WriteString("\n\n" + hintStyle.Render("Probing /api/tags..."))
+			b.WriteString("\n\n" + hintStyle.Render("Probing endpoint..."))
 		}
 		if m.probeErr != "" {
 			b.WriteString("\n\n" + errorStyle.Render("✗ Probe failed: "+m.probeErr))

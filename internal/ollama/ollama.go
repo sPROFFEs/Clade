@@ -24,10 +24,18 @@ import (
 // Settings is what the TUI hands to Apply / ClaudeEnv. Stored as a JSON
 // blob on the workspace (workspace.json's ollama field) so the choice
 // follows the workspace, not the user's shell.
+//
+// APIKey is empty for vanilla Ollama (no auth) and non-empty for any
+// OpenAI-compatible provider that requires Bearer auth (GPUStack,
+// vLLM-with-key, LiteLLM gateways, etc.). When set, it's sent as
+// `Authorization: Bearer <key>` on probe requests, injected into the
+// agent's env as OPENAI_API_KEY at launch, and written into the
+// per-agent config files where the provider expects it inline.
 type Settings struct {
-	Endpoint string `json:"endpoint"`        // e.g. http://192.168.1.50:11434
-	Model    string `json:"model"`           // e.g. qwen3-coder
+	Endpoint string `json:"endpoint"`          // e.g. http://192.168.1.50:11434
+	Model    string `json:"model"`             // e.g. qwen3-coder
 	WireAPI  string `json:"wireApi,omitempty"` // codex: "chat" or "responses"
+	APIKey   string `json:"apiKey,omitempty"`  // Bearer token; empty for Ollama
 }
 
 // NormalizeEndpoint trims, ensures the URL starts with http:// (we do
@@ -60,27 +68,38 @@ func NormalizeEndpoint(raw string) string {
 	return "http://" + s
 }
 
-// ListModels asks the Ollama server what's loaded. Tries /api/tags first
-// (Ollama-native), then /v1/models (OpenAI-compat). Caller decides what
-// to do with the empty-list / error case.
-func ListModels(ctx context.Context, endpoint string) ([]string, error) {
+// ListModels asks the endpoint what's loaded. Tries /api/tags first
+// (Ollama-native), then /v1/models (OpenAI-compat). apiKey, if non-empty,
+// is sent as `Authorization: Bearer <key>` — required by providers like
+// GPUStack that gate /v1/models on auth. Vanilla Ollama ignores the
+// header, so it's safe to always include when set.
+func ListModels(ctx context.Context, endpoint, apiKey string) ([]string, error) {
 	endpoint = NormalizeEndpoint(endpoint)
 	if endpoint == "" {
 		return nil, errors.New("empty endpoint")
 	}
 	cli := &http.Client{Timeout: 8 * time.Second}
 
-	if models, err := tryOllamaTags(ctx, cli, endpoint); err == nil && len(models) > 0 {
+	if models, err := tryOllamaTags(ctx, cli, endpoint, apiKey); err == nil && len(models) > 0 {
 		return models, nil
 	}
-	return tryOpenAIModels(ctx, cli, endpoint)
+	return tryOpenAIModels(ctx, cli, endpoint, apiKey)
 }
 
-func tryOllamaTags(ctx context.Context, cli *http.Client, endpoint string) ([]string, error) {
+// addBearer attaches Authorization: Bearer <key> when key is non-empty.
+// Centralised so every probe path stays consistent.
+func addBearer(req *http.Request, apiKey string) {
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
+	}
+}
+
+func tryOllamaTags(ctx context.Context, cli *http.Client, endpoint, apiKey string) ([]string, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", endpoint+"/api/tags", nil)
 	if err != nil {
 		return nil, err
 	}
+	addBearer(req, apiKey)
 	resp, err := cli.Do(req)
 	if err != nil {
 		return nil, err
@@ -107,11 +126,12 @@ func tryOllamaTags(ctx context.Context, cli *http.Client, endpoint string) ([]st
 	return out, nil
 }
 
-func tryOpenAIModels(ctx context.Context, cli *http.Client, endpoint string) ([]string, error) {
+func tryOpenAIModels(ctx context.Context, cli *http.Client, endpoint, apiKey string) ([]string, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", endpoint+"/v1/models", nil)
 	if err != nil {
 		return nil, err
 	}
+	addBearer(req, apiKey)
 	resp, err := cli.Do(req)
 	if err != nil {
 		return nil, err
@@ -139,18 +159,28 @@ func tryOpenAIModels(ctx context.Context, cli *http.Client, endpoint string) ([]
 }
 
 // ClaudeEnv returns the env vars the launcher should set when spawning
-// Claude Code so it routes to Ollama instead of Anthropic. Empty Settings
-// returns an empty map (no env applied).
+// Claude Code so it routes to the local endpoint instead of Anthropic.
+// Empty Settings returns an empty map (no env applied).
+//
+// When s.APIKey is set, it's used as the Bearer token for both Anthropic-
+// and OpenAI-shaped requests; that covers GPUStack and any other gated
+// OpenAI-compatible backend. When empty, we fall back to the literal
+// "ollama" — vanilla Ollama accepts (and ignores) any token, so this
+// keeps the no-auth path unchanged.
 func ClaudeEnv(s Settings) map[string]string {
 	if s.Endpoint == "" || s.Model == "" {
 		return nil
 	}
 	ep := NormalizeEndpoint(s.Endpoint)
+	token := s.APIKey
+	if token == "" {
+		token = "ollama"
+	}
 	return map[string]string{
-		"ANTHROPIC_AUTH_TOKEN": "ollama",
+		"ANTHROPIC_AUTH_TOKEN": token,
 		"ANTHROPIC_API_KEY":    "",
 		"ANTHROPIC_BASE_URL":   ep,
-		"OPENAI_API_KEY":       "ollama",
+		"OPENAI_API_KEY":       token,
 	}
 }
 
@@ -345,12 +375,19 @@ func ApplyOpenCode(s Settings, makeDefault bool) (string, error) {
 	if providers == nil {
 		providers = map[string]any{}
 	}
+	options := map[string]any{
+		"baseURL": NormalizeEndpoint(s.Endpoint) + "/v1",
+	}
+	if s.APIKey != "" {
+		// @ai-sdk/openai-compatible reads `apiKey` from options and sends
+		// it as `Authorization: Bearer <key>`. Required by GPUStack and
+		// other gated OpenAI-compatible backends.
+		options["apiKey"] = s.APIKey
+	}
 	providers[openCodeProviderName] = map[string]any{
-		"npm":  "@ai-sdk/openai-compatible",
-		"name": "Ollama Remote",
-		"options": map[string]any{
-			"baseURL": NormalizeEndpoint(s.Endpoint) + "/v1",
-		},
+		"npm":     "@ai-sdk/openai-compatible",
+		"name":    "Ollama Remote",
+		"options": options,
 		"models": map[string]any{
 			s.Model: map[string]any{"name": s.Model},
 		},
@@ -475,6 +512,13 @@ func ApplyDeepSeek(s Settings) (string, error) {
 	existing, _ := os.ReadFile(configPath)
 	stripped := stripDeepSeekBlock(string(existing))
 
+	// When the endpoint requires Bearer auth (GPUStack et al.), write the
+	// key inline. DeepSeek-TUI also honours `api_key_env`, but the
+	// inline form is one less moving piece for the user.
+	keyLine := ""
+	if s.APIKey != "" {
+		keyLine = fmt.Sprintf("api_key = %q\n", s.APIKey)
+	}
 	block := fmt.Sprintf(`
 %s
 provider = "ollama"
@@ -482,11 +526,12 @@ model = "%s"
 
 [providers.ollama]
 base_url = "%s/v1"
-%s
+%s%s
 `,
 		deepseekBlockStart,
 		s.Model,
 		NormalizeEndpoint(s.Endpoint),
+		keyLine,
 		deepseekBlockEnd,
 	)
 	final := strings.TrimRight(stripped, "\n") + "\n" + block
