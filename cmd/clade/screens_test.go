@@ -568,6 +568,76 @@ func TestAgentsScreen_OverridePersistsAgentSwap(t *testing.T) {
 	}
 }
 
+// TestAgentsScreen_CursorAgreesWithSortedRender locks in the
+// chat-agent-swap bug fix. When DetectAgents returns the canonical
+// order (claude, codex, opencode, gemini, deepseek) but some agents
+// are unavailable, the picker sorts available-first BEFORE seating
+// the cursor. The Enter handler must resolve to the agent the user
+// visually picked — not to whatever sat at that index in the
+// unsorted detection order.
+//
+// Pre-fix bug: Body() sorted at render time; m.cursor + Enter
+// resolved against unsorted m.items → user clicked an installed
+// agent, got the install screen for a different (uninstalled) one.
+func TestAgentsScreen_CursorAgreesWithSortedRender(t *testing.T) {
+	tmp := seededRoot(t)
+	redirectConfig(t, t.TempDir())
+	tpl, _ := launcher.LoadTemplate(tmp, "reversing")
+	chat, _ := launcher.CreateChat(tmp, *tpl, "swap-sorted", launcher.AgentClaude)
+	cfg := &launcher.Config{WorkspacesRoot: tmp}
+
+	m := newAgentsModelForChatOverride(cfg, chat)
+	// Mid-list available agent: in detection order [claude(✓), codex(✗),
+	// opencode(✓), gemini(✗), deepseek(✗)]. After available-first sort
+	// the user expects [claude, opencode, codex, gemini, deepseek].
+	loaded := agentsLoadedMsg{items: []launcher.Agent{
+		{ID: launcher.AgentClaude, Label: "Claude", Binary: fakeCmd(),
+			WpcTarget: "claude", Available: true, Version: "fake"},
+		{ID: launcher.AgentCodex, Label: "Codex", Binary: "codex",
+			WpcTarget: "codex", Available: false},
+		{ID: launcher.AgentOpenCode, Label: "OpenCode", Binary: fakeCmd(),
+			WpcTarget: "opencode", Available: true, Version: "fake"},
+	}}
+	nx, _ := m.Update(loaded)
+	m = nx.(agentsModel)
+
+	// After load: cursor must seed on Claude (override.current) at
+	// index 0 of the sorted slice.
+	if m.cursor != 0 {
+		t.Fatalf("cursor = %d, want 0 (Claude is current and now at sorted index 0)", m.cursor)
+	}
+	if m.items[0].ID != launcher.AgentClaude {
+		t.Errorf("items[0] = %s, want claude", m.items[0].ID)
+	}
+	// Available-first: index 1 must be OpenCode (the other available),
+	// not Codex (canonical-order neighbor but unavailable).
+	if m.items[1].ID != launcher.AgentOpenCode {
+		t.Fatalf("items[1] = %s, want opencode after available-first sort", m.items[1].ID)
+	}
+
+	// User arrows down to index 1 and hits Enter — they SHOULD launch
+	// OpenCode, not be sent to the Codex install screen.
+	nx, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = nx.(agentsModel)
+	if m.cursor != 1 {
+		t.Fatalf("after Down, cursor = %d, want 1", m.cursor)
+	}
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	msg := runCmd(t, cmd)
+	done, ok := msg.(screenDoneMsg)
+	if !ok {
+		t.Fatalf("expected screenDoneMsg, got %T (would mean Enter routed to install instead of swap+launch)", msg)
+	}
+	if _, isLaunching := done.next.(launchingModel); !isLaunching {
+		t.Errorf("Enter on available OpenCode should route through launchingModel, got %T", done.next)
+	}
+	// And the chat manifest now says opencode, not codex.
+	reloaded, _ := launcher.LoadChat(tmp, chat.ID)
+	if reloaded.AgentID != launcher.AgentOpenCode {
+		t.Errorf("chat.AgentID = %q, want opencode", reloaded.AgentID)
+	}
+}
+
 func TestAgentsScreen_EnterOnUnavailableRoutesToInstall(t *testing.T) {
 	tmp := seededRoot(t)
 	redirectConfig(t, t.TempDir())

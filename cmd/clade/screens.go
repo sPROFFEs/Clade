@@ -324,7 +324,21 @@ func (m agentsModel) Init() tea.Cmd {
 func (m agentsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case agentsLoadedMsg:
-		m.items = msg.items
+		// Sort here, ONCE, so the cursor index, the visual rendering,
+		// and the Enter handler all agree on which agent is at which
+		// position. Body() used to sort a local copy at render time,
+		// which silently desynced from m.cursor whenever the available-
+		// first ordering differed from KnownAgents() order — leading
+		// to "I picked the installed agent but it asked me to install
+		// a different one" on the chat agent-swap flow.
+		items := msg.items
+		sort.SliceStable(items, func(i, j int) bool {
+			if items[i].Available != items[j].Available {
+				return items[i].Available
+			}
+			return false
+		})
+		m.items = items
 		m.loading = false
 		// Cursor seed priority:
 		//   1. Override mode → seed on the chat's CURRENT agent so the
@@ -462,16 +476,11 @@ func (m agentsModel) Body() string {
 				"or Enter on the same agent to re-launch.", m.override.current)) + "\n\n")
 	}
 
-	// Sort: available first, missing last (deterministic UX), but preserve
-	// the canonical agent order within each bucket.
-	items := append([]launcher.Agent(nil), m.items...)
-	sort.SliceStable(items, func(i, j int) bool {
-		if items[i].Available != items[j].Available {
-			return items[i].Available
-		}
-		return false
-	})
-	for i, a := range items {
+	// m.items is already sorted available-first at load time (see the
+	// agentsLoadedMsg branch). Rendering here MUST iterate m.items
+	// directly so the visual cursor and the Enter handler resolve
+	// to the same agent.
+	for i, a := range m.items {
 		isSel := i == m.cursor && a.Available
 		marker := "  "
 		if i == m.cursor {
