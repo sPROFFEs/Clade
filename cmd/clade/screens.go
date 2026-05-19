@@ -186,18 +186,21 @@ func (m *firstRunModel) finalize() tea.Cmd {
 		m.status = "Skipping seed — you can add templates later via 't'."
 	}
 	return func() tea.Msg {
+		// Always create the directory skeleton, even if seed=true and
+		// SeedSamples ends up finding nothing to copy (e.g. the user
+		// installed via a release archive that didn't ship samples to
+		// any of the SampleCandidates locations). Otherwise the home
+		// screen lands on a workspacesRoot that doesn't exist on disk,
+		// confusing the user into thinking nothing happened.
+		if err := os.MkdirAll(filepath.Join(root, launcher.TemplatesDir), 0o755); err != nil {
+			return errMsg{err: fmt.Errorf("mkdir templates: %w", err)}
+		}
+		if err := os.MkdirAll(filepath.Join(root, launcher.ChatsDir), 0o755); err != nil {
+			return errMsg{err: fmt.Errorf("mkdir chats: %w", err)}
+		}
 		if seed {
 			if _, err := launcher.SeedSamples(root, sampleCandidatesFromCwd()); err != nil {
 				return errMsg{err: fmt.Errorf("seed samples: %w", err)}
-			}
-		} else {
-			// Make sure the templates/ + chats/ dirs exist so later
-			// list operations don't choke.
-			if err := os.MkdirAll(filepath.Join(root, launcher.TemplatesDir), 0o755); err != nil {
-				return errMsg{err: fmt.Errorf("mkdir templates: %w", err)}
-			}
-			if err := os.MkdirAll(filepath.Join(root, launcher.ChatsDir), 0o755); err != nil {
-				return errMsg{err: fmt.Errorf("mkdir chats: %w", err)}
 			}
 		}
 		cfg := &launcher.Config{WorkspacesRoot: root}

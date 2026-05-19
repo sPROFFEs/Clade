@@ -186,6 +186,17 @@ function Install-Binary {
         Step "Installing to $Dest"
         Copy-Item -Path (Join-Path $extracted "clade.exe") -Destination $Dest -Force
         Copy-Item -Path (Join-Path $extracted "wpc.exe")   -Destination $Dest -Force
+        # Ship the bundled samples next to the binary at the same path
+        # the launcher probes in SampleCandidates:
+        # "<execDir>\..\share\clade\samples\workpaths". Without this,
+        # the first-run "seed example templates" finds nothing.
+        $samplesSrc = Join-Path $extracted "samples"
+        if (Test-Path $samplesSrc) {
+            $samplesDest = Join-Path (Split-Path $Dest -Parent) "share\clade\samples"
+            New-Item -ItemType Directory -Force -Path $samplesDest | Out-Null
+            Copy-Item -Path (Join-Path $samplesSrc "*") -Destination $samplesDest -Recurse -Force
+            Info "samples -> $samplesDest"
+        }
         Write-Host "  v clade.exe + wpc.exe installed" -ForegroundColor Green
     } finally {
         if (Test-Path $tmp) { Remove-Item -Recurse -Force $tmp }

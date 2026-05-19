@@ -275,6 +275,21 @@ install_from_release() {
   step "Installing to $DEST"
   $SUDO install -m 0755 "$extracted/clade" "$DEST/clade"
   $SUDO install -m 0755 "$extracted/wpc"   "$DEST/wpc"
+  # Ship the bundled samples next to the binary at the XDG-style path
+  # the launcher already probes (see internal/launcher SampleCandidates:
+  # "<execDir>/../share/clade/samples/workpaths"). Without this, the
+  # first-run "seed example templates" step finds nothing and the user
+  # ends up with no workspaces and no clade-workspaces dir created.
+  if [[ -d "$extracted/samples" ]]; then
+    local samples_dest
+    samples_dest="$(dirname "$DEST")/share/clade/samples"
+    $SUDO mkdir -p "$samples_dest"
+    # cp -R preserves the workpaths/ subdir structure the launcher expects.
+    # Use --no-preserve=ownership when running under sudo so the files end
+    # up readable by everyone, not just the invoking user.
+    $SUDO cp -R "$extracted/samples/." "$samples_dest/"
+    c_dim "  samples → $samples_dest"
+  fi
   c_grn "  ✓ clade + wpc installed"
 }
 
