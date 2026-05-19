@@ -171,10 +171,11 @@ func (m newChatFromTemplateModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case tea.KeyEsc:
 				return m, wrap(newPickTemplateModel(m.cfg))
 			case tea.KeyEnter:
-				if strings.TrimSpace(m.label.Value()) == "" {
-					m.err = "name cannot be empty"
+				if err := launcher.ValidateChatLabel(m.label.Value()); err != nil {
+					m.err = err.Error()
 					return m, nil
 				}
+				m.err = ""
 				m.step = 1
 				m.label.Blur()
 				return m, func() tea.Msg {

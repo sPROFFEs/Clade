@@ -251,6 +251,13 @@ func (m newTemplateModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyEnter:
 			switch m.step {
 			case 0:
+				name := strings.TrimSpace(m.name.Value())
+				if err := launcher.ValidateName(name); err != nil {
+					m.err = err.Error()
+					return m, nil
+				}
+				m.err = ""
+				m.name.SetValue(name)
 				m.step = 1
 				m.name.Blur()
 				m.description.Focus()
@@ -303,6 +310,15 @@ func (m newTemplateModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch m.step {
 	case 0:
 		m.name, cmd = m.name.Update(msg)
+		// Names must be lowercase (see launcher.ValidateName). Normalising
+		// as the user types means uppercase keystrokes silently become the
+		// lowercase letter instead of triggering a validation error at
+		// submit time.
+		if v := m.name.Value(); v != strings.ToLower(v) {
+			pos := m.name.Position()
+			m.name.SetValue(strings.ToLower(v))
+			m.name.SetCursor(pos)
+		}
 	case 1:
 		m.description, cmd = m.description.Update(msg)
 	case 2:

@@ -119,6 +119,18 @@ type workpathManifest struct {
 
 var workspaceNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
+// ValidateName returns nil if name is a legal workspace / template
+// identifier (matches workspaceNameRE), otherwise an error explaining
+// the rule. Exported so TUI screens can validate as the user types
+// instead of letting CreateTemplate/CreateWorkspace fail later and
+// bubble a fatal error up to main.
+func ValidateName(name string) error {
+	if !workspaceNameRE.MatchString(name) {
+		return fmt.Errorf("name must match [a-z0-9][a-z0-9_-]*, got %q", name)
+	}
+	return nil
+}
+
 // ListWorkspaces returns every workspace under root, sorted by name.
 // Hidden dirs (leading dot) and dirs without a workpath/ subdir are
 // silently skipped — that's how the picker behaves too.

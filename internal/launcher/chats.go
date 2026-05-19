@@ -254,6 +254,21 @@ func (c Chat) AsWorkspace() Workspace {
 	}
 }
 
+// ValidateChatLabel returns nil if label slugifies to a non-empty
+// identifier (the same transformation CreateChat applies), otherwise
+// an error explaining what's wrong. TUI wizards call this on Enter so
+// users see "no usable characters" inline instead of having the error
+// bubble up and quit the launcher.
+func ValidateChatLabel(label string) error {
+	if strings.TrimSpace(label) == "" {
+		return fmt.Errorf("chat name cannot be empty")
+	}
+	if slugifyLabel(label) == "" {
+		return fmt.Errorf("chat name %q has no usable characters (letters, digits, '-', '_')", label)
+	}
+	return nil
+}
+
 func slugifyLabel(s string) string {
 	s = strings.ToLower(strings.TrimSpace(s))
 	s = chatIDSanitize.ReplaceAllString(s, "-")
