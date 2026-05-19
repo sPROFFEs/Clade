@@ -80,7 +80,10 @@ function Build-One($triplet) {
         if ($goos -eq "windows") {
             $zip = Join-Path "dist" "$archiveBase.zip"
             if (Test-Path $zip) { Remove-Item $zip }
-            Compress-Archive -Path "$out\*" -DestinationPath $zip
+            # Pass the directory itself (not "$out\*") so the archive
+            # contains a top-level <triplet>/ entry matching what
+            # install.ps1's Expand-Archive step expects to find.
+            Compress-Archive -Path $out -DestinationPath $zip
         } else {
             # tar -czf — works on Windows 10+ (bsdtar bundled in System32).
             $tgz = "$archiveBase.tar.gz"
