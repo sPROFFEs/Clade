@@ -226,12 +226,17 @@ resolve_latest_tag() {
   local api="https://api.github.com/repos/$REPO/releases/latest"
   local dl tag
   dl="$(detect_downloader)"
+  # The pattern is intentionally NOT anchored to line-start: GitHub
+  # returns the JSON minified (everything on one line), so an `^…` anchor
+  # would only match a pretty-printed response and silently fail in
+  # production. `.*` on both sides lets sed find "tag_name" anywhere on
+  # the line; the non-greedy [^"]* keeps the capture tight.
   if [[ "$dl" == "curl" ]]; then
     tag="$(curl -fsSL -H 'User-Agent: clade-installer' "$api" 2>/dev/null \
-      | sed -n 's/^[[:space:]]*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
+      | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
   else
     tag="$(wget -q -O - --header='User-Agent: clade-installer' "$api" 2>/dev/null \
-      | sed -n 's/^[[:space:]]*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
+      | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
   fi
   if [[ -z "$tag" ]]; then
     c_red "couldn't query GitHub for the latest release."
@@ -255,7 +260,10 @@ install_from_release() {
   step "Downloading"
   local tmp
   tmp="$(mktemp -d)"
-  trap 'rm -rf "$tmp"' EXIT
+  # Double-quote so $tmp is expanded NOW, while it's still in scope.
+  # Single quotes would defer expansion to EXIT-time, by which point
+  # `local tmp` is gone and `set -u` would error with "tmp: unbound".
+  trap "rm -rf '$tmp'" EXIT
   fetch "$url" "$tmp/$fname" || { c_red "download failed."; exit 1; }
   c_grn "  downloaded $(du -h "$tmp/$fname" | cut -f1)"
 
@@ -321,7 +329,8 @@ install_from_source() {
   step "Cloning repo"
   local tmp
   tmp="$(mktemp -d)"
-  trap 'rm -rf "$tmp"' EXIT
+  # See install_from_release for why this uses double quotes.
+  trap "rm -rf '$tmp'" EXIT
   git clone --depth 1 --branch "$SOURCE_BRANCH" \
     "${RAW_REPO_URL}.git" "$tmp/Clade" \
     || { c_red "git clone failed"; exit 1; }
