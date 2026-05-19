@@ -127,8 +127,14 @@ func Methods(agent AgentID, action Action, current OS) []Method {
 }
 
 // methodAvailable reports whether the package manager named by m.ID is on
-// PATH. The shell wrappers (curl|bash, powershell) only need curl /
-// powershell, which we model as the ID itself.
+// PATH OR is auto-fixable. The shell wrappers (curl|bash, powershell)
+// only need curl / powershell, which we model as the ID itself.
+//
+// Auto-fixable runners (pnpm, today) survive this filter because Run()
+// installs them on demand via corepack. Without this carve-out, a fresh
+// Windows machine without pnpm sees "No install method available" for
+// every Node-based agent (codex, opencode, gemini, deepseek), even
+// though the launcher is capable of installing pnpm itself.
 func methodAvailable(m Method) bool {
 	bin := m.ID
 	switch bin {
@@ -139,8 +145,15 @@ func methodAvailable(m Method) bool {
 		_, err := exec.LookPath("powershell")
 		return err == nil
 	default:
-		_, err := exec.LookPath(bin)
-		return err == nil
+		if _, err := exec.LookPath(bin); err == nil {
+			return true
+		}
+		// Keep the method visible if the missing runner is something the
+		// launcher knows how to install. The TUI's prereq line ("will
+		// auto-fix: pnpm" / "you must install: node") tells the user
+		// what'll happen, which is far more helpful than silently
+		// hiding every option.
+		return autoFixablePrereqs[bin]
 	}
 }
 
@@ -188,6 +201,84 @@ func UnfixableMissing(missing []string) []string {
 		}
 	}
 	return out
+}
+
+// InstallNodePossible reports whether the launcher can offer to install
+// Node automatically on the current host. Currently true only on Windows
+// when winget is on PATH. The TUI uses this to decide whether to render
+// the "Also install Node.js" opt-in toggle on the install screen.
+func InstallNodePossible() bool {
+	if runtime.GOOS != "windows" {
+		return false
+	}
+	for _, name := range []string{"winget.exe", "winget"} {
+		if _, err := exec.LookPath(name); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// AutoInstallNodeWindows installs Node.js LTS via winget. Opt-in:
+// callers should only invoke this when the user has explicitly toggled
+// "also install Node" on the install screen. Returns env additions
+// (updated PATH including the new node bin dir) so the immediately-
+// following pnpm setup in the same process can find node + corepack
+// without a shell restart.
+//
+// Windows-only by design — node install paths on macOS / Linux are too
+// varied to auto-handle safely (homebrew vs nvm vs nodesource vs distro
+// packages). Other OSes return an error pointing the user at nodejs.org.
+func AutoInstallNodeWindows(ctx context.Context, w io.Writer) ([]string, error) {
+	if runtime.GOOS != "windows" {
+		return nil, fmt.Errorf("auto-install Node is Windows-only; on %s install Node yourself from https://nodejs.org", runtime.GOOS)
+	}
+	wingetBin := ""
+	for _, name := range []string{"winget.exe", "winget"} {
+		if p, err := exec.LookPath(name); err == nil {
+			wingetBin = p
+			break
+		}
+	}
+	if wingetBin == "" {
+		return nil, fmt.Errorf("winget not on PATH — install App Installer from the Microsoft Store (https://aka.ms/getwinget) or install Node manually from https://nodejs.org")
+	}
+	fmt.Fprintln(w, "→ installing Node.js LTS via winget...")
+	cmd := exec.CommandContext(ctx, wingetBin,
+		"install", "--id", "OpenJS.NodeJS.LTS",
+		"--silent",
+		"--accept-source-agreements",
+		"--accept-package-agreements")
+	cmd.Stdout = w
+	cmd.Stderr = w
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("winget install OpenJS.NodeJS.LTS failed: %w", err)
+	}
+
+	// Winget writes the new node bin dir to user/machine PATH in the
+	// registry — that doesn't propagate to our running process. Probe
+	// the standard locations and prepend the one we find to PATH so
+	// later exec.LookPath("node") / exec.LookPath("corepack") succeed
+	// immediately.
+	candidates := []string{
+		`C:\Program Files\nodejs`,
+		os.ExpandEnv(`${LOCALAPPDATA}\Programs\nodejs`),
+		os.ExpandEnv(`${ProgramFiles}\nodejs`),
+	}
+	nodeDir := ""
+	for _, c := range candidates {
+		if _, err := os.Stat(filepath.Join(c, "node.exe")); err == nil {
+			nodeDir = c
+			break
+		}
+	}
+	if nodeDir == "" {
+		return nil, fmt.Errorf("Node installed via winget but its bin dir wasn't in the standard locations; restart Clade after the install completes")
+	}
+	fmt.Fprintf(w, "✓ Node bin dir: %s\n", nodeDir)
+	return []string{
+		"PATH=" + nodeDir + ";" + os.Getenv("PATH"),
+	}, nil
 }
 
 // AutoInstallPnpm runs `corepack enable` so pnpm becomes available
@@ -425,14 +516,53 @@ func EnsurePnpmReady(ctx context.Context, w io.Writer) ([]string, error) {
 // (pnpm not installed, pnpm setup not run) and injects PNPM_HOME + PATH
 // into the install command's env. That makes `pnpm add -g …` work
 // end-to-end without a shell restart.
+// RunOptions are the per-invocation knobs for Run. Today only InstallNode
+// is meaningful — the opt-in toggle on the install screen sets it.
+// Other potential knobs (force re-install, skip prereq checks, etc.) can
+// land here later without churning the signature again.
+type RunOptions struct {
+	// InstallNode opts the user into the Windows winget-based Node
+	// install. Only honored when (a) we're on Windows and (b) the
+	// method has node in Prereqs and node isn't already on PATH.
+	InstallNode bool
+}
+
+// Run executes m with default options. Equivalent to RunWithOptions with
+// a zero-valued RunOptions. Kept as a thin wrapper so callers that don't
+// care about the opt-ins keep working unchanged.
 func Run(ctx context.Context, m Method, stdout, stderr io.Writer) error {
+	return RunWithOptions(ctx, m, RunOptions{}, stdout, stderr)
+}
+
+// RunWithOptions is Run + caller-supplied opt-ins. Streams stdout/stderr
+// to the writers so the TUI can render output live.
+func RunWithOptions(ctx context.Context, m Method, opts RunOptions, stdout, stderr io.Writer) error {
 	var extraEnv []string
+	// Honor the Node opt-in first — if pnpm setup follows, it needs
+	// node on PATH or it can't run corepack at all.
+	if opts.InstallNode && runtime.GOOS == "windows" {
+		if _, err := exec.LookPath("node"); err != nil {
+			env, err := AutoInstallNodeWindows(ctx, stdout)
+			if err != nil {
+				return err
+			}
+			extraEnv = append(extraEnv, env...)
+			// Mirror onto our process env so the subsequent
+			// EnsurePnpmReady's LookPath("node") / LookPath("corepack")
+			// see the new bin dir.
+			for _, kv := range env {
+				if i := strings.Index(kv, "="); i > 0 {
+					_ = os.Setenv(kv[:i], kv[i+1:])
+				}
+			}
+		}
+	}
 	if strings.HasPrefix(m.Command, "pnpm ") {
 		env, err := EnsurePnpmReady(ctx, stdout)
 		if err != nil {
 			return err
 		}
-		extraEnv = env
+		extraEnv = append(extraEnv, env...)
 	}
 	cmd := buildCmd(ctx, m)
 	cmd.Stdout = stdout

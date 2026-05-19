@@ -151,6 +151,35 @@ func TestAutoFixable_EmptyInputs(t *testing.T) {
 	}
 }
 
+// TestMethods_KeepsPnpmMethodsWhenPnpmMissing locks in the Windows-bug
+// fix: a fresh box without pnpm on PATH should still see the pnpm-based
+// methods, because pnpm is auto-fixable. Previously methodAvailable
+// hid them, leaving every Node-based agent with "No install method
+// available on this OS".
+func TestMethods_KeepsPnpmMethodsWhenPnpmMissing(t *testing.T) {
+	// Build a minimal PATH that has neither pnpm nor any other runner.
+	// We don't actually run anything — Methods() just looks them up.
+	t.Setenv("PATH", t.TempDir())
+
+	for _, agent := range []AgentID{AgentCodex, AgentGemini} {
+		got := Methods(agent, ActionInstall, OSWindows)
+		if len(got) == 0 {
+			t.Errorf("%s/windows with empty PATH: got 0 methods, want pnpm method to survive (auto-fixable)", agent)
+			continue
+		}
+		foundPnpm := false
+		for _, m := range got {
+			if m.ID == "pnpm" {
+				foundPnpm = true
+				break
+			}
+		}
+		if !foundPnpm {
+			t.Errorf("%s/windows: pnpm method should be present despite missing pnpm; got %+v", agent, got)
+		}
+	}
+}
+
 func TestAutoFixable_OnlyPnpmMissing_NothingToBlock(t *testing.T) {
 	// This is the exact scenario from the user bug report: pnpm is
 	// auto-fixable, so the install screen should NOT block on it.

@@ -37,6 +37,12 @@ type installModel struct {
 	// empty-sandbox error).
 	returnTo func() tea.Model
 
+	// installNodeOptIn is the user's explicit OK to also install
+	// Node.js (Windows winget). Only meaningful when the selected
+	// method declares node as a prereq and node isn't already on PATH.
+	// Toggled with the 'n' key.
+	installNodeOptIn bool
+
 	// running state
 	running    bool
 	output     *runningOutput
@@ -136,6 +142,14 @@ func (m installModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.cursor < len(m.methods)-1 {
 				m.cursor++
 			}
+		case "n":
+			// Toggle the "also install Node.js" opt-in. Only meaningful
+			// when (a) the selected method needs node, (b) node isn't
+			// on PATH, and (c) the OS supports auto-install (Windows +
+			// winget). The keybinding stays cheap to leave on; the flag
+			// won't affect anything if those conditions aren't all met
+			// by the time Enter is pressed.
+			m.installNodeOptIn = !m.installNodeOptIn
 		case "enter":
 			if m.cursor >= len(m.methods) {
 				return m, nil
@@ -145,17 +159,37 @@ func (m installModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Only block on prereqs that need real user action (e.g. Node).
 			// pnpm-style ones are auto-installed by Run().
 			if unfix := installer.UnfixableMissing(missing); len(unfix) > 0 {
-				m.prereqWarn = "missing prereq: " + strings.Join(unfix, ", ") +
-					" — install it first, or pick another method"
-				return m, nil
+				// Treat node as fixable when the user has explicitly
+				// opted in AND the runtime supports auto-install. The
+				// opt-in is gated behind a key press (`n`), so reaching
+				// this branch means deliberate consent.
+				blockers := make([]string, 0, len(unfix))
+				for _, p := range unfix {
+					if p == "node" && m.installNodeOptIn && installer.InstallNodePossible() {
+						continue
+					}
+					blockers = append(blockers, p)
+				}
+				if len(blockers) > 0 {
+					hint := " — install it first, or pick another method"
+					for _, p := range blockers {
+						if p == "node" && installer.InstallNodePossible() {
+							hint = " — press `n` to install Node.js via winget, or install it manually"
+							break
+						}
+					}
+					m.prereqWarn = "missing prereq: " + strings.Join(blockers, ", ") + hint
+					return m, nil
+				}
 			}
 			m.prereqWarn = ""
 			m.running = true
 			m.output = &runningOutput{}
 			out := m.output
+			opts := installer.RunOptions{InstallNode: m.installNodeOptIn}
 			return m, tea.Batch(
 				func() tea.Msg {
-					err := installer.Run(context.Background(), chosen, out, out)
+					err := installer.RunWithOptions(context.Background(), chosen, opts, out, out)
 					return installDoneMsg{err: err}
 				},
 				tickInstall(),
@@ -192,7 +226,7 @@ func (m installModel) Help() string {
 	if m.running {
 		return "enter / esc to continue"
 	}
-	return "↑/↓ select · enter run · esc back"
+	return "↑/↓ select · n toggle Node opt-in · enter run · esc back"
 }
 func (m installModel) NavSection() string    { return navSectionAgents }
 func (m installModel) CapturingInput() bool  { return false }
@@ -234,6 +268,16 @@ func (m installModel) Body() string {
 					if len(fixable) > 0 {
 						b.WriteString(descStyle.Render(availableStyle.Render("will auto-fix: "+strings.Join(fixable, ", ")+" (corepack + pnpm setup)")) + "\n")
 					}
+					// Render the Node opt-in checkbox when this method
+					// needs node, node is the blocker, and the runtime
+					// can actually install it. Stays a no-op otherwise.
+					if containsString(unfix, "node") && installer.InstallNodePossible() {
+						check := "[ ]"
+						if m.installNodeOptIn {
+							check = availableStyle.Render("[x]")
+						}
+						b.WriteString(descStyle.Render(check+" Also install Node.js LTS via winget  (press `n` to toggle)") + "\n")
+					}
 				}
 			}
 		}
@@ -258,4 +302,13 @@ func (m installModel) Body() string {
 		}
 	}
 	return b.String()
+}
+
+func containsString(xs []string, x string) bool {
+	for _, s := range xs {
+		if s == x {
+			return true
+		}
+	}
+	return false
 }
