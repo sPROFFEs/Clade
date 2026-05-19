@@ -67,6 +67,8 @@ func TestE2E_PlanForRealInstalledAgents(t *testing.T) {
 				marker = filepath.Join(plan.Dir, ".claude", "skills", "reversing", "SKILL.md")
 			case "codex":
 				marker = filepath.Join(plan.Dir, "AGENTS.md")
+			case "gemini":
+				marker = filepath.Join(plan.Dir, "GEMINI.md")
 			default:
 				t.Fatalf("unknown wpc target %q", a.WpcTarget)
 			}

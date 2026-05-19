@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/sPROFFEs/Clade/pkg/targets"
 	"github.com/sPROFFEs/Clade/pkg/workpath"
@@ -68,6 +69,19 @@ func PrepareSandbox(ws Workspace, agent Agent) error {
 // failed, etc.) on the launching screen.
 var LastDecorationNotes []string
 
+// LastSessionDir holds the per-launch <chat>/sessions/<ts>-<agent>/
+// directory recordChatSession most recently created. Set during
+// applyDecorations; consumed by main() after the agent exits so the
+// post-exit transcript capture knows where to write summary.md /
+// transcript.jsonl. Cleared on the next Plan() call.
+var LastSessionDir string
+
+// LastSessionStartedAt is the wall-clock moment recordChatSession
+// stamped the session manifest. Used by transcript locators as the
+// "ignore files modified before this" cutoff so we don't accidentally
+// grab a previous session's artifact for the same cwd.
+var LastSessionStartedAt time.Time
+
 // writeSandboxReadme drops an orientation file on first compile so the
 // user lands in something self-explanatory when they cd into the sandbox.
 func writeSandboxReadme(ws Workspace, agent Agent) error {
@@ -116,6 +130,10 @@ type LaunchPlan struct {
 // routing from their own config files (written via the Ollama screen);
 // the launcher doesn't override their env.
 func Plan(ws Workspace, agent Agent) (LaunchPlan, error) {
+	// Clear per-launch globals so a partial run on a prior chat
+	// doesn't leak state into this one.
+	LastSessionDir = ""
+	LastSessionStartedAt = time.Time{}
 	if err := PrepareSandbox(ws, agent); err != nil {
 		return LaunchPlan{}, err
 	}

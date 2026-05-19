@@ -157,6 +157,8 @@ func (m chatListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "r":
 			return m, m.Init()
+		case "/":
+			return m, wrap(newSearchModel(m.cfg))
 		}
 	}
 	return m, nil
@@ -211,8 +213,11 @@ func (m chatListModel) Body() string {
 			line += "  " + lipglossDimRender("("+strings.Join(meta, " · ")+")", isSel)
 		}
 		b.WriteString(selectionRow(line, isSel) + "\n")
-		if isSel && c.Description != "" {
-			b.WriteString(descStyle.Render(c.Description) + "\n")
+		if isSel {
+			if c.Description != "" {
+				b.WriteString(descStyle.Render(c.Description) + "\n")
+			}
+			b.WriteString(renderResumeDiagnostics(c) + "\n")
 		}
 	}
 
@@ -269,7 +274,7 @@ func chatListHelp(m chatListModel) string {
 			parts = append(parts, "enter manage templates")
 		}
 	}
-	parts = append(parts, "n new", "t templates", "r refresh")
+	parts = append(parts, "n new", "/ search", "t templates", "r refresh")
 	return strings.Join(parts, " · ")
 }
 

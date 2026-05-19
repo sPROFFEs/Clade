@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -99,12 +100,27 @@ func main() {
 		if root.updateCfg != nil {
 			_ = launcher.SaveConfig(root.updateCfg)
 		}
+		sessionStart := launcher.LastSessionStartedAt
+		if sessionStart.IsZero() {
+			sessionStart = time.Now().UTC()
+		}
 		code := execAgent(*root.launch)
+		sessionEnd := time.Now().UTC()
 		// Sync MEMORY.md back from the sandbox so the agent's writes
 		// persist across launches. Best-effort — failures don't change
 		// the exit code.
 		if root.launchedWS != nil {
 			_ = launcher.SyncMemoryBack(*root.launchedWS)
+		}
+		// Capture the just-ended session's transcript out of the
+		// agent's own store and write a markdown summary into the
+		// chat's sessions/<ts>-<agent>/ dir. Both are best-effort —
+		// any failure is swallowed so the user's exit code reflects
+		// the agent's exit code, nothing else.
+		if root.launchedWS != nil && root.launchedAgent != "" {
+			if agent, ok := launcher.ResolveAgentForChat(root.launchedAgent, 2*time.Second); ok {
+				_, _ = launcher.CapturePostExit(*root.launchedWS, agent, sessionStart, sessionEnd)
+			}
 		}
 		os.Exit(code)
 	}
@@ -117,11 +133,12 @@ func main() {
 // outer main() needs after Bubble Tea has finished: the launch plan and a
 // fatal error (if any).
 type rootModel struct {
-	screen     tea.Model
-	launch     *launcher.LaunchPlan
-	updateCfg  *launcher.Config
-	launchedWS *launcher.Workspace // remembered for post-launch sync-back
-	fatal      error
+	screen        tea.Model
+	launch        *launcher.LaunchPlan
+	updateCfg     *launcher.Config
+	launchedWS    *launcher.Workspace // remembered for post-launch sync-back
+	launchedAgent launcher.AgentID    // remembered for post-launch transcript capture
+	fatal         error
 }
 
 func (m *rootModel) Init() tea.Cmd { return m.screen.Init() }
@@ -145,6 +162,7 @@ func (m *rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.launch = msg.launch
 			m.updateCfg = msg.updateCfg
 			m.launchedWS = msg.launchedWS
+			m.launchedAgent = msg.launchedAgent
 			return m, tea.Quit
 		}
 		if msg.next != nil {

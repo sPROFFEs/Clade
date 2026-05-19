@@ -85,6 +85,14 @@ func applyDecorations(ws Workspace, agent Agent) []string {
 		notes = append(notes, "chat-log: "+err.Error())
 	}
 
+	// Inject a "Recent sessions" digest of the last few summaries into
+	// the compiled instructions. Runs after recordChatSession so the
+	// brand-new (empty) session dir isn't included. No-op when there
+	// are no prior summaries on disk yet.
+	if err := appendRecentSessionsDirective(ws, agent); err != nil {
+		notes = append(notes, "recent-sessions: "+err.Error())
+	}
+
 	return notes
 }
 
@@ -331,6 +339,95 @@ func appendOnlineSkillsDirective(ws Workspace, agent Agent, skillsDir string, fe
 	return os.WriteFile(path, []byte(body), 0o644)
 }
 
+// recentSessionsLimit caps how many prior session summaries we replay
+// into the compiled instructions. Three is enough to give the agent
+// continuity without bloating the system prompt.
+const recentSessionsLimit = 3
+
+// appendRecentSessionsDirective scans <chat>/sessions/ for any prior
+// summary.json files, sorts by StartedAt descending, and appends a
+// "## Recent sessions" block to the compiled instructions so the
+// agent has a deterministic recap before turn one — even if it's a
+// different agent than ran the prior session(s).
+//
+// Idempotent (guarded by a section marker) and a no-op when there
+// are no summaries yet.
+func appendRecentSessionsDirective(ws Workspace, agent Agent) error {
+	summaries, err := LoadRecentSummaries(ws.ChatsDir, recentSessionsLimit+1) // +1 because the slot we just created might already be in the list (it won't have summary.json yet, but be safe)
+	if err != nil {
+		return err
+	}
+	// Filter out any summary that belongs to the just-created session
+	// dir (it has no transcript yet; including it would tell the
+	// agent "look at yourself" which is unhelpful).
+	filtered := summaries[:0]
+	for _, s := range summaries {
+		if s.SessionDir != LastSessionDir {
+			filtered = append(filtered, s)
+		}
+	}
+	summaries = filtered
+	if len(summaries) > recentSessionsLimit {
+		summaries = summaries[:recentSessionsLimit]
+	}
+	if len(summaries) == 0 {
+		return nil
+	}
+
+	path := agentInstructionsPath(ws, agent)
+	if path == "" {
+		return nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	body := string(raw)
+	if strings.Contains(body, "## Recent sessions — required reading before turn 1") {
+		return nil // idempotent
+	}
+
+	var b strings.Builder
+	b.WriteString("\n## Recent sessions — required reading before turn 1\n\n")
+	b.WriteString(
+		"The launcher captured digests of the prior sessions in this chat. " +
+			"Read them BEFORE responding so you have continuity with what was " +
+			"already discussed — even if the previous turns were with a different " +
+			"agent CLI. Files referenced below sit under `sessions/` in your cwd.\n\n")
+	for _, s := range summaries {
+		stamp := s.StartedAt
+		if stamp.IsZero() {
+			stamp = s.GeneratedAt
+		}
+		rel := s.SessionDir
+		if r, err := filepath.Rel(ws.SandboxDir, s.SessionDir); err == nil {
+			rel = filepath.ToSlash(r)
+		}
+		fmt.Fprintf(&b, "### %s · %s\n", stamp.Local().Format("2006-01-02 15:04"), s.Agent)
+		if s.Headline != "" {
+			fmt.Fprintf(&b, "_%s_\n\n", s.Headline)
+		}
+		if s.Duration != "" || s.UserTurns > 0 || s.AssistantTurns > 0 {
+			fmt.Fprintf(&b, "- Duration: %s · %d user · %d assistant · %d tool calls\n",
+				s.Duration, s.UserTurns, s.AssistantTurns, s.ToolCalls)
+		}
+		if s.FirstUserExcerpt != "" {
+			fmt.Fprintf(&b, "- Opened with: %q\n", excerpt(s.FirstUserExcerpt, 160))
+		}
+		if s.LastAssistantExcerpt != "" {
+			fmt.Fprintf(&b, "- Last reply: %q\n", excerpt(s.LastAssistantExcerpt, 160))
+		}
+		fmt.Fprintf(&b, "- Files: `%s/summary.md`, `%s/transcript.jsonl` (if captured)\n\n", rel, rel)
+	}
+	b.WriteString(
+		"If anything above matches the user's question, open the matching " +
+			"`summary.md` (and `transcript.jsonl` if you need detail) before " +
+			"replying. Cite the session date when you draw on it.\n")
+
+	body = strings.TrimRight(body, "\n") + "\n" + b.String()
+	return os.WriteFile(path, []byte(body), 0o644)
+}
+
 // stageMemory copies workspace/MEMORY.md → sandbox/MEMORY.md before
 // launch and APPENDS a session-start marker. The marker has two
 // purposes:
@@ -434,13 +531,14 @@ type SessionRecord struct {
 }
 
 func recordChatSession(ws Workspace, agent Agent) error {
-	stamp := time.Now().UTC().Format("20060102-150405")
+	started := time.Now().UTC()
+	stamp := started.Format("20060102-150405")
 	dir := filepath.Join(ws.ChatsDir, stamp+"-"+string(agent.ID))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
 	rec := SessionRecord{
-		StartedAt:   time.Now().UTC(),
+		StartedAt:   started,
 		Agent:       string(agent.ID),
 		Binary:      agent.Binary,
 		WpcTarget:   agent.WpcTarget,
@@ -452,7 +550,14 @@ func recordChatSession(ws Workspace, agent Agent) error {
 		return err
 	}
 	raw = append(raw, '\n')
-	return os.WriteFile(filepath.Join(dir, "session.json"), raw, 0o644)
+	if err := os.WriteFile(filepath.Join(dir, "session.json"), raw, 0o644); err != nil {
+		return err
+	}
+	// Publish so main() can find this session's slot after the agent
+	// exits and write transcript.jsonl + summary.md into it.
+	LastSessionDir = dir
+	LastSessionStartedAt = started
+	return nil
 }
 
 // copyFileLib avoids name clash with the existing copyFile in workspaces.go.

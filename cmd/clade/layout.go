@@ -675,6 +675,10 @@ func (m *layoutModel) runCommand(c string) tea.Cmd {
 		m.pane = newPickTemplateModel(m.cfg)
 		m.navCurrent = navSectionChats
 		return m.pane.Init()
+	case "search", "/", "find":
+		m.pane = newSearchModel(m.cfg)
+		m.navCurrent = navSectionChats
+		return m.pane.Init()
 	}
 	for i, e := range navEntries {
 		if c == e.id || c == strings.ToLower(e.label) {

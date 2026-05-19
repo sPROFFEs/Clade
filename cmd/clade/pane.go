@@ -69,5 +69,6 @@ var (
 	_ Pane = installModel{}
 	_ Pane = launchingModel{}
 	_ Pane = helpPaneModel{}
+	_ Pane = searchModel{}
 )
 

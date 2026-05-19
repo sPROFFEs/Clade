@@ -85,8 +85,14 @@ func (m launchingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cfg.LastAgent = string(m.chat.AgentID)
 		_ = launcher.TouchChat(&m.chat)
 		wsCopy := m.chat.AsWorkspace()
+		agentID := m.chat.AgentID
 		return m, func() tea.Msg {
-			return screenDoneMsg{launch: m.plan, updateCfg: &cfg, launchedWS: &wsCopy}
+			return screenDoneMsg{
+				launch:        m.plan,
+				updateCfg:     &cfg,
+				launchedWS:    &wsCopy,
+				launchedAgent: agentID,
+			}
 		}
 
 	case tea.KeyMsg:

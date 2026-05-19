@@ -25,10 +25,11 @@ import (
 
 type (
 	screenDoneMsg struct {
-		next       tea.Model
-		launch     *launcher.LaunchPlan // when set, root quits and execs after Run
-		updateCfg  *launcher.Config     // when set, root persists it before transitioning
-		launchedWS *launcher.Workspace  // for post-launch hooks (memory sync-back)
+		next          tea.Model
+		launch        *launcher.LaunchPlan // when set, root quits and execs after Run
+		updateCfg     *launcher.Config     // when set, root persists it before transitioning
+		launchedWS    *launcher.Workspace  // for post-launch hooks (memory sync-back)
+		launchedAgent launcher.AgentID     // so post-exit can run transcript capture
 	}
 	errMsg struct{ err error }
 )
