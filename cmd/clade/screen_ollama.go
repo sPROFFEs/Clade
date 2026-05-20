@@ -139,19 +139,19 @@ func preTickAgentForChat(m *ollamaModel, agent launcher.AgentID) {
 
 // newOllamaModelWithReturn is the variant the new-chat flow uses so
 // "apply then dismiss" launches the just-created chat rather than
-// dropping the user back at the home list. Defaults all checkboxes to
-// pre-checked on the basis of disk state but, for a brand-new chat
-// with no prior config anywhere, tick Claude as the most useful
-// default (the user picked Ollama with intent, after all).
+// dropping the user back at the home list. Checkbox defaults are the
+// disk-state ones from newOllamaModel — callers that have the chat's
+// locked agent in hand should follow up with preTickAgentForChat so
+// only the agent that THIS chat will actually run gets pre-ticked.
+//
+// We used to always pre-tick claude as a "no agent configured yet?
+// claude is the most useful default" fallback, which produced two
+// boxes ticked when preTickAgentForChat then ticked the chat's real
+// agent on top. Removed — preTickAgentForChat is now the only place
+// that augments the disk-state defaults.
 func newOllamaModelWithReturn(cfg *launcher.Config, ws launcher.Workspace, returnTo func() tea.Cmd) ollamaModel {
 	m := newOllamaModel(cfg, ws)
 	m.returnTo = returnTo
-	if !m.pickClaude && !m.pickCodex && !m.pickOpenCode && !m.pickDeepSeek {
-		// Brand-new chat: assume the chat's locked agent benefits, and
-		// pre-check Claude. The user can flip the others too if they
-		// want global config writes.
-		m.pickClaude = true
-	}
 	return m
 }
 
@@ -377,7 +377,12 @@ func (p applyPicks) any() bool {
 }
 
 // applyOllama performs the actual writes and returns a per-line result
-// log the screen renders.
+// log the screen renders. The checkbox state means CURRENT desired
+// state, not just "things to add" — so unticking an agent that was
+// previously configured actively disables it (clears chat settings
+// for claude; calls Disable* for the global-config agents). Without
+// this round-trip the wizard re-ticks everything on re-open because
+// the disk state still reflects the prior apply.
 func applyOllama(ws launcher.Workspace, s ollama.Settings, picks applyPicks) []string {
 	var out []string
 	if picks.claude {
@@ -388,6 +393,16 @@ func applyOllama(ws launcher.Workspace, s ollama.Settings, picks applyPicks) []s
 			out = append(out, "✗ claude (chat settings): "+err.Error())
 		} else {
 			out = append(out, "✓ claude: per-chat ANTHROPIC_BASE_URL + --model on next launch")
+		}
+	} else if ws.Settings.Ollama.Endpoint != "" || ws.Settings.Ollama.Model != "" {
+		// User unticked claude on a chat that previously had Ollama
+		// routing. Clear the chat-level Ollama block so the next
+		// launch doesn't inject ANTHROPIC_BASE_URL etc.
+		ws.Settings.Ollama = launcher.OllamaSettings{}
+		if err := launcher.SaveWorkspaceLikeSettings(ws); err != nil {
+			out = append(out, "✗ claude (clear chat settings): "+err.Error())
+		} else {
+			out = append(out, "↺ claude: cleared per-chat Ollama settings (claude unticked)")
 		}
 	}
 	if picks.codex {
@@ -430,11 +445,23 @@ func applyOllama(ws launcher.Workspace, s ollama.Settings, picks applyPicks) []s
 			}
 		}
 	}
+	if !picks.codex && ollama.CodexConfigured() {
+		// User unticked codex on a setup where it was previously
+		// applied. Strip the global block so the wizard's disk-state
+		// init won't re-tick it next time.
+		if path, err := ollama.DisableCodex(); err == nil {
+			out = append(out, "↺ codex: removed ollama_remote block from "+path+" (codex unticked)")
+		}
+	}
 	if picks.opencode {
 		if path, err := ollama.ApplyOpenCode(s, true); err != nil {
 			out = append(out, "✗ opencode: "+err.Error())
 		} else {
 			out = append(out, "✓ opencode: "+path)
+		}
+	} else if ollama.OpenCodeConfigured() {
+		if path, err := ollama.DisableOpenCode(); err == nil {
+			out = append(out, "↺ opencode: removed ollama_remote provider from "+path+" (opencode unticked)")
 		}
 	}
 	if picks.deepseek {
@@ -442,6 +469,10 @@ func applyOllama(ws launcher.Workspace, s ollama.Settings, picks applyPicks) []s
 			out = append(out, "✗ deepseek: "+err.Error())
 		} else {
 			out = append(out, "✓ deepseek: "+path+" (provider=ollama; default model set)")
+		}
+	} else if ollama.DeepSeekConfigured() {
+		if path, err := ollama.DisableDeepSeek(); err == nil {
+			out = append(out, "↺ deepseek: removed managed block from "+path+" (deepseek unticked)")
 		}
 	}
 	if !picks.any() {

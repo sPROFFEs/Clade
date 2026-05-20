@@ -264,6 +264,103 @@ func TestOllamaFlow_PersistsAPIKeyAndPlanUsesIt(t *testing.T) {
 	}
 }
 
+// TestApplyOllama_UntickingRemovesPreviouslyConfigured pins the bug
+// where the wizard's checkboxes re-ticked themselves on re-open: the
+// previous apply wrote a global config, the un-tick was a silent
+// no-op, and the disk-state-based init read "still configured" and
+// re-ticked the box.
+//
+// With the fix, unticking an agent that was previously configured
+// actively strips the global block (Disable*) — or clears the
+// chat-level Ollama block (claude). Round-trip works.
+func TestApplyOllama_UntickingRemovesPreviouslyConfigured(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmpHome, "xdg"))
+
+	root := seededRoot(t)
+	tpl, _ := launcher.LoadTemplate(root, "reversing")
+	chat, _ := launcher.CreateChat(root, *tpl, "untick-test", launcher.AgentClaude)
+	cfg := &launcher.Config{WorkspacesRoot: root}
+
+	// First apply: tick everything. Writes the chat-level claude block
+	// + every global agent config.
+	settings := ollama.Settings{Endpoint: "http://host:1234", Model: "qwen"}
+	all := applyPicks{claude: true, codex: true, opencode: true, deepseek: true}
+	// Skip codex (would block on the network probe). Drive the other
+	// three through the actual applier.
+	tickedNoCodex := applyPicks{claude: true, opencode: true, deepseek: true}
+	_ = applyOllama(chat.AsWorkspace(), settings, tickedNoCodex)
+	_ = all // keep symbol live for the test-reader
+
+	// Confirm everything's on disk now.
+	loaded, _ := launcher.LoadChat(root, chat.ID)
+	if loaded.Settings.Ollama.Endpoint == "" {
+		t.Fatal("baseline: claude chat-level Ollama settings should be set")
+	}
+	if !ollama.OpenCodeConfigured() {
+		t.Fatal("baseline: opencode should report configured")
+	}
+	if !ollama.DeepSeekConfigured() {
+		t.Fatal("baseline: deepseek should report configured")
+	}
+
+	// Second apply: untick all three. Should actively disable each.
+	out := applyOllama(loaded.AsWorkspace(), settings, applyPicks{})
+	joined := strings.Join(out, "\n")
+	for _, want := range []string{"claude: cleared", "opencode: removed", "deepseek: removed"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("apply log should mention %q after unticking; got:\n%s", want, joined)
+		}
+	}
+
+	// Re-read disk: nothing should still claim to be configured.
+	loaded2, _ := launcher.LoadChat(root, chat.ID)
+	if loaded2.Settings.Ollama.Endpoint != "" {
+		t.Errorf("claude chat settings should be cleared; got %+v", loaded2.Settings.Ollama)
+	}
+	if ollama.OpenCodeConfigured() {
+		t.Error("opencode should report unconfigured after untick")
+	}
+	if ollama.DeepSeekConfigured() {
+		t.Error("deepseek should report unconfigured after untick")
+	}
+
+	// And a fresh wizard opens with all boxes off — the round-trip the
+	// user actually cares about.
+	wsFresh := loaded2.AsWorkspace()
+	wiz := newOllamaModelWithReturn(cfg, wsFresh, nil)
+	if wiz.pickClaude || wiz.pickOpenCode || wiz.pickDeepSeek {
+		t.Errorf("re-opened wizard re-ticked unconfigured agents: claude=%v opencode=%v deepseek=%v",
+			wiz.pickClaude, wiz.pickOpenCode, wiz.pickDeepSeek)
+	}
+}
+
+// TestOllamaModelWithReturn_NoUnconditionalClaudePreTick: the old
+// fallback ("nothing configured? pre-tick claude") was removed. A
+// brand-new chat with no Ollama config anywhere should open the
+// wizard with EVERY box off. preTickAgentForChat is the only thing
+// that should add ticks now, and only for the chat's locked agent.
+func TestOllamaModelWithReturn_NoUnconditionalClaudePreTick(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmpHome, "xdg"))
+
+	root := seededRoot(t)
+	tpl, _ := launcher.LoadTemplate(root, "reversing")
+	chat, _ := launcher.CreateChat(root, *tpl, "no-pretick", launcher.AgentCodex)
+	cfg := &launcher.Config{WorkspacesRoot: root}
+
+	wiz := newOllamaModelWithReturn(cfg, chat.AsWorkspace(), nil)
+	if wiz.pickClaude {
+		t.Error("claude should NOT be pre-ticked on a brand-new chat with nothing configured")
+	}
+	if wiz.pickCodex || wiz.pickOpenCode || wiz.pickDeepSeek {
+		t.Errorf("nothing should be pre-ticked; got codex=%v opencode=%v deepseek=%v",
+			wiz.pickCodex, wiz.pickOpenCode, wiz.pickDeepSeek)
+	}
+}
+
 func TestOllamaFlow_FallsBackToManualEntryOnProbeError(t *testing.T) {
 	tmp := t.TempDir()
 	redirectConfig(t, filepath.Join(tmp, "cfg"))
