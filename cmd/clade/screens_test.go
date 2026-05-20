@@ -6,6 +6,7 @@ package main
 // chatListModel, new chats clone from templates via newPickTemplateModel.
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -174,6 +175,47 @@ func TestFirstRun_MethodEmpty_LeavesBackupDormant(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(wsRoot, leaked)); err == nil {
 			t.Errorf("backup left %s in the workspaces root despite never being enabled", leaked)
 		}
+	}
+}
+
+// TestFirstRun_CloneFailurePreservesURL pins the round-trip: a user
+// who picks option [3], types a URL, but whose URL fails the
+// connection test should land on an empty folder with the URL still
+// recorded in config (backup off). Re-opening the Backup tab shows
+// the URL pre-filled for retry.
+func TestFirstRun_CloneFailurePreservesURL(t *testing.T) {
+	tmp := t.TempDir()
+	wsRoot := filepath.Join(tmp, "ws")
+	redirectConfig(t, filepath.Join(tmp, "cfg"))
+
+	// Drive the fallback path directly by feeding the model a
+	// failing clone result. We bypass the live network so the test
+	// is hermetic.
+	m := newFirstRun()
+	m.input.SetValue(wsRoot)
+	m.root = wsRoot
+	m.cloneURL = "https://invalid.example.test/repo.git"
+	m.method = firstRunMethodClone
+	_, cmd := m.Update(firstRunCloneResultMsg{
+		err: fmt.Errorf("remote repository is not reachable"),
+	})
+	if cmd == nil {
+		t.Fatal("clone failure should still produce a finalize Cmd (fallback to empty)")
+	}
+	msg := runCmd(t, cmd)
+	if _, ok := msg.(screenDoneMsg); !ok {
+		t.Fatalf("expected screenDoneMsg from fallback finalize, got %T", msg)
+	}
+
+	cfg, err := launcher.LoadConfig()
+	if err != nil || cfg == nil {
+		t.Fatalf("LoadConfig: %v %v", err, cfg)
+	}
+	if cfg.BackupEnabled {
+		t.Error("BackupEnabled must remain false when the clone failed")
+	}
+	if cfg.BackupRemoteURL != "https://invalid.example.test/repo.git" {
+		t.Errorf("BackupRemoteURL should be preserved for retry, got %q", cfg.BackupRemoteURL)
 	}
 }
 

@@ -641,9 +641,8 @@ func (m *backupModel) renderList() string {
 	var b strings.Builder
 	// Header.
 	b.WriteString(hintStyle.Render(
-		"OPT-IN cloud backup via git. When disabled (default) the workspaces root behaves "+
-			"as a regular directory — no .git, no managed files, nothing pushed anywhere. "+
-			"Flip the master switch below to enable the feature and unlock everything else.") + "\n\n")
+		"Optional cloud backup over git. When disabled, the workspaces root remains a "+
+			"plain directory: no .git, no managed files, no traffic to any remote.") + "\n\n")
 
 	statusLine := descStyle.Render("disabled (master switch is off)")
 	if m.cfg.BackupEnabled {
@@ -688,9 +687,9 @@ func (m *backupModel) renderList() string {
 		hint  string
 	}{
 		{"Backup enabled (master switch)", boolValue(enabled),
-			"OFF by default — Clade behaves exactly as it did pre-0.1.11. Turning ON " +
-				"initialises the workspaces root as a git repo, writes the managed " +
-				".gitignore + .gitattributes, and unlocks the rest of this tab."},
+			"Off by default. Turning it on initialises the workspaces root as a git " +
+				"repo, writes the managed .gitignore + .gitattributes, and unlocks the " +
+				"rest of this tab."},
 		{"Remote URL", emptyOr(m.cfg.BackupRemoteURL, "(none)"),
 			"Press Enter to edit. Public repos work without auth; private repos need " +
 				"your git credentials configured."},

@@ -164,9 +164,9 @@ func (m firstRunModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case firstRunCloneResultMsg:
 		// Came back from the clone attempt on the working step.
 		if msg.err == nil {
-			// Clone succeeded — backup is implicitly enabled (the
-			// user explicitly chose to clone a remote into this
-			// workspaces root).
+			// Test passed AND clone succeeded — backup is
+			// implicitly enabled (the user explicitly chose to
+			// clone a remote into this workspaces root).
 			cfg := &launcher.Config{
 				WorkspacesRoot:  m.root,
 				BackupEnabled:   true,
@@ -179,8 +179,10 @@ func (m firstRunModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, wrap(newLayoutModel(cfg))
 		}
-		// Clone failed — fall back to "empty folder" with a
-		// breadcrumb so the user knows what happened.
+		// Connection test or clone failed — fall back to empty
+		// folder, but **preserve the URL the user typed** so the
+		// Backup tab opens with it pre-filled and they can fix +
+		// retry without retyping. Backup itself stays disabled.
 		m.cloneFallback = msg.err.Error()
 		m.method = firstRunMethodEmpty
 		return m, m.finalize()
@@ -304,6 +306,14 @@ func (m *firstRunModel) finalize() tea.Cmd {
 		// from remote" first-run option, which sets the switch on as
 		// part of the clone).
 		cfg := &launcher.Config{WorkspacesRoot: root}
+		// If the user typed a URL during the clone step but the
+		// connection test or clone itself failed, preserve the URL
+		// so the Backup tab opens pre-filled. Backup remains
+		// DISABLED — the user has to flip the master switch to
+		// engage it.
+		if m.cloneURL != "" {
+			cfg.BackupRemoteURL = m.cloneURL
+		}
 		if err := launcher.SaveConfig(cfg); err != nil {
 			return errMsg{err: fmt.Errorf("save config: %w", err)}
 		}
@@ -318,16 +328,26 @@ func (m *firstRunModel) finalize() tea.Cmd {
 	}
 }
 
-// startClone fires the background `git clone <url> <root>` and
-// returns a firstRunCloneResultMsg when done. On success, the
-// Update handler saves the remote URL into the config and routes
-// to the layout. On failure, falls back to method=Empty with a
-// breadcrumb.
+// startClone runs the first-run clone path in two stages:
+//
+//  1. Connection test (`git ls-remote`) — lightweight, no disk
+//     writes. Confirms the URL is reachable AND that the user's
+//     credentials can read it. Failures here mean "the URL is
+//     wrong, the network is down, or auth isn't set up"; we fall
+//     back without ever touching the filesystem.
+//
+//  2. If the test passes, the actual `git clone` into the
+//     workspaces root. Failures here mean "the remote is reachable
+//     but something else went wrong" (disk error, partial transfer,
+//     etc.). Caller still falls back, with the URL preserved.
+//
+// On either failure, the URL the user typed is preserved in the
+// fallback config so the Backup tab opens pre-filled for retry.
 func (m *firstRunModel) startClone() tea.Cmd {
 	root := m.root
 	url := m.cloneURL
 	m.step = firstRunStepWorking
-	m.status = "Cloning " + url + " into " + root + "..."
+	m.status = "Testing connection to " + url + "..."
 	return func() tea.Msg {
 		// The clone target must not exist (or must be empty). If
 		// the user's root already exists with files, fail with a
@@ -337,6 +357,14 @@ func (m *firstRunModel) startClone() tea.Cmd {
 				"%s already has files in it; clone target must be empty. "+
 					"Remove the directory or pick a different workspaces root.", root)}
 		}
+		// Step 1: lightweight reachability test.
+		testCtx, testCancel := context.WithTimeout(context.Background(), 15*time.Second)
+		if _, lsErr := backup.LsRemote(testCtx, url); lsErr != nil {
+			testCancel()
+			return firstRunCloneResultMsg{err: classifyCloneError(lsErr)}
+		}
+		testCancel()
+		// Step 2: the actual clone.
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 		if err := backup.Clone(ctx, url, root); err != nil {
