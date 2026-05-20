@@ -113,6 +113,29 @@ func newOllamaModel(cfg *launcher.Config, ws launcher.Workspace) ollamaModel {
 	}
 }
 
+// preTickAgentForChat ensures the chat's locked agent is pre-ticked
+// when the user opens the Local-endpoint wizard from a chat. Without
+// this, configuring Ollama for a codex-locked chat needed the user to
+// remember to tick the codex checkbox — easy to miss, with the
+// payoff being that Plan() injects `-p ollama_remote` even though the
+// codex config file never got the profile, silently falling back to
+// the default (OpenAI) provider. The chat-level setting gets saved
+// either way (the claude checkbox writes it), creating a mismatch
+// between "chat wants Ollama" and "agent's config knows nothing
+// about it."
+func preTickAgentForChat(m *ollamaModel, agent launcher.AgentID) {
+	switch agent {
+	case launcher.AgentClaude:
+		m.pickClaude = true
+	case launcher.AgentCodex:
+		m.pickCodex = true
+	case launcher.AgentOpenCode:
+		m.pickOpenCode = true
+	case launcher.AgentDeepSeek:
+		m.pickDeepSeek = true
+	}
+}
+
 // newOllamaModelWithReturn is the variant the new-chat flow uses so
 // "apply then dismiss" launches the just-created chat rather than
 // dropping the user back at the home list. Defaults all checkboxes to

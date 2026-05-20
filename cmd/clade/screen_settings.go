@@ -266,15 +266,23 @@ func (m settingsModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// Local endpoint (Ollama / OpenAI-compat) config. Hand off
 			// to the existing multi-step wizard but route Esc/apply
 			// back here instead of to the chat list — keeps the user
-			// inside settings while they tweak related options.
+			// inside settings while they tweak related options. Also
+			// pre-tick the chat's locked agent so the user doesn't
+			// have to remember to check that box (forgetting it
+			// silently writes the chat-level setting but skips the
+			// agent's own config file, leaving Plan() with a stale
+			// `-p ollama_remote` and no profile to find).
 			cfg := m.cfg
 			ws := m.ws
-			return m, wrap(newOllamaModelWithReturn(cfg, ws, func() tea.Cmd {
-				// Reload settings from disk so the values we render
-				// reflect what the Ollama wizard just wrote.
-				reloaded := newSettingsModel(cfg, freshWorkspace(cfg, ws))
-				return wrap(reloaded)
-			}))
+			currentAgent := m.currentAgent
+			return m, wrap(func() ollamaModel {
+				om := newOllamaModelWithReturn(cfg, ws, func() tea.Cmd {
+					reloaded := newSettingsModel(cfg, freshWorkspace(cfg, ws))
+					return wrap(reloaded)
+				})
+				preTickAgentForChat(&om, currentAgent)
+				return om
+			}())
 		case settingsItemSkills:
 			m.mode = settingsModeEditSkills
 			m.skillInput.SetValue("")

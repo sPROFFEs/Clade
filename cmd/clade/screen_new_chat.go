@@ -295,6 +295,15 @@ func (m newChatFromTemplateModel) finalize() tea.Cmd {
 				}
 			}
 			ollama := newOllamaModelWithReturn(&cfgCopy, chat.AsWorkspace(), returnTo)
+			// Pre-tick the chat's locked agent so the wizard writes
+			// that agent's config alongside the chat-level setting.
+			// Without this, the chat-level Ollama setting gets saved
+			// (claude is on by default) but the agent's home-dir
+			// config is left untouched, so Plan() injects flags that
+			// reference a profile that doesn't exist → silent fall-
+			// back to the agent's default vendor (OpenAI for codex,
+			// etc.). See settings → endpoint for the same fix.
+			preTickAgentForChat(&ollama, chat.AgentID)
 			return screenDoneMsg{next: ollama}
 		}
 
