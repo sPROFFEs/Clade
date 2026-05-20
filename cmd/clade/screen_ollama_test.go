@@ -308,7 +308,7 @@ func TestApplyOllama_UntickingRemovesPreviouslyConfigured(t *testing.T) {
 	// Second apply: untick all three. Should actively disable each.
 	out := applyOllama(loaded.AsWorkspace(), settings, applyPicks{})
 	joined := strings.Join(out, "\n")
-	for _, want := range []string{"claude: cleared", "opencode: removed", "deepseek: removed"} {
+	for _, want := range []string{"chat: cleared", "opencode: removed", "deepseek: removed"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("apply log should mention %q after unticking; got:\n%s", want, joined)
 		}

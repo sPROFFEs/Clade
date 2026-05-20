@@ -171,9 +171,16 @@ func Plan(ws Workspace, agent Agent) (LaunchPlan, error) {
 		authToken = "ollama"
 	}
 
+	// Per-agent injection is gated by ws.Settings.Ollama.HasAgent(id):
+	// "did the user tick this agent in the Local-endpoint wizard?"
+	// We check per agent instead of a flat `ollamaConfigured` so a
+	// chat configured for codex-only doesn't also inject claude env
+	// (and vice versa). The chat-level Ollama block is the source of
+	// truth for "this chat opts into the local endpoint at all,"
+	// independent of which agents.
 	switch agent.ID {
 	case AgentClaude:
-		if ollamaConfigured {
+		if ollamaConfigured && o.HasAgent(AgentClaude) {
 			plan.Env = map[string]string{
 				"ANTHROPIC_AUTH_TOKEN": authToken,
 				"ANTHROPIC_API_KEY":    "",
@@ -185,7 +192,7 @@ func Plan(ws Workspace, agent Agent) (LaunchPlan, error) {
 			plan.Args = []string{"--model", o.Model}
 		}
 	case AgentCodex:
-		if ollamaConfigured {
+		if ollamaConfigured && o.HasAgent(AgentCodex) {
 			// The Ollama screen wrote [profiles.ollama_remote] into
 			// ~/.codex/config.toml with env_key = "OPENAI_API_KEY".
 			// Inject that env so codex's lookup succeeds without the
@@ -195,7 +202,7 @@ func Plan(ws Workspace, agent Agent) (LaunchPlan, error) {
 			plan.Args = []string{"-p", "ollama_remote"}
 		}
 	case AgentOpenCode:
-		if ollamaConfigured {
+		if ollamaConfigured && o.HasAgent(AgentOpenCode) {
 			// OpenCode picks up routing from opencode.json. The provider's
 			// `options.apiKey` is the primary auth path, but exporting
 			// OPENAI_API_KEY too is harmless and covers SDK versions
@@ -223,7 +230,7 @@ func Plan(ws Workspace, agent Agent) (LaunchPlan, error) {
 		// when configured so any sub-tool that reads the env (or a
 		// config using `api_key_env = "OPENAI_API_KEY"` instead of an
 		// inline key) authenticates correctly.
-		if ollamaConfigured {
+		if ollamaConfigured && o.HasAgent(AgentDeepSeek) {
 			plan.Env = map[string]string{"OPENAI_API_KEY": authToken}
 		}
 	}

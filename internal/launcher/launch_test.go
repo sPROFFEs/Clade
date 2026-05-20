@@ -121,10 +121,78 @@ func TestPlan_GeminiIgnoresOllamaSettings(t *testing.T) {
 	}
 }
 
+// TestPlan_PerAgentGatingViaHasAgent: the chat-level Ollama block
+// can opt some agents in and others out via the Agents list. A chat
+// configured for codex-only should NOT inject claude env if you swap
+// the chat's agent to claude.
+func TestPlan_PerAgentGatingViaHasAgent(t *testing.T) {
+	chat := chatFromSeededReversing(t)
+	chat.Settings = WorkspaceSettings{
+		Ollama: OllamaSettings{
+			Endpoint: "http://10.0.0.1:11434", Model: "qwen3",
+			Agents: []string{"codex"}, // codex opted in, claude NOT
+		},
+	}
+	_ = SaveChatSettings(chat)
+	loaded, _ := LoadChat(filepath.Dir(filepath.Dir(chat.Root)), chat.ID)
+	ws := loaded.AsWorkspace()
+
+	// Codex: should get the profile flag.
+	codex := Agent{ID: AgentCodex, Binary: "codex", WpcTarget: "codex", Available: true}
+	plan, err := Plan(ws, codex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !equalStrings(plan.Args, []string{"-p", "ollama_remote"}) {
+		t.Errorf("codex Args = %v, want [-p ollama_remote]", plan.Args)
+	}
+
+	// Claude: same chat, same Ollama block, but claude is NOT in
+	// Agents — should NOT get ANTHROPIC_* injection.
+	claude := Agent{ID: AgentClaude, Binary: "claude", WpcTarget: "claude", Available: true}
+	plan2, err := Plan(ws, claude)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan2.Env["ANTHROPIC_BASE_URL"] != "" {
+		t.Errorf("claude should NOT get ANTHROPIC_BASE_URL when not in Agents; got %q",
+			plan2.Env["ANTHROPIC_BASE_URL"])
+	}
+	if len(plan2.Args) != 0 {
+		t.Errorf("claude should NOT get --model when not in Agents; got %v", plan2.Args)
+	}
+}
+
+// TestOllamaSettings_HasAgentBackwardCompat: chats created before
+// Agents existed have no Agents field (empty slice on load). HasAgent
+// should report true for claude (matches the old wizard's
+// "save chat-level Ollama only when claude is ticked" behavior).
+func TestOllamaSettings_HasAgentBackwardCompat(t *testing.T) {
+	legacy := OllamaSettings{Endpoint: "http://x", Model: "m"} // no Agents
+	if !legacy.HasAgent(AgentClaude) {
+		t.Error("legacy chats with empty Agents should default to claude opted in")
+	}
+	if legacy.HasAgent(AgentCodex) {
+		t.Error("legacy chats should NOT default to other agents opted in")
+	}
+	// Empty endpoint → nobody's in.
+	empty := OllamaSettings{}
+	if empty.HasAgent(AgentClaude) {
+		t.Error("empty OllamaSettings has nobody opted in")
+	}
+}
+
 func TestPlan_AppendsProfileArgForCodexWhenOllamaConfigured(t *testing.T) {
 	chat := chatFromSeededReversing(t)
 	chat.Settings = WorkspaceSettings{
-		Ollama: OllamaSettings{Endpoint: "http://10.0.0.1:11434", Model: "qwen3"},
+		// Agents must include "codex" — Plan() gates per-agent
+		// injection on the chat's HasAgent() check now, so a chat
+		// that opted into Ollama for claude only would NOT also
+		// inject for codex.
+		Ollama: OllamaSettings{
+			Endpoint: "http://10.0.0.1:11434", Model: "qwen3",
+			Agents: []string{"codex"},
+		},
 	}
 	_ = SaveChatSettings(chat)
 	loaded, _ := LoadChat(filepath.Dir(filepath.Dir(chat.Root)), chat.ID)

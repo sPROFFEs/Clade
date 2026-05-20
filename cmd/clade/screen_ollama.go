@@ -107,10 +107,17 @@ func newOllamaModel(cfg *launcher.Config, ws launcher.Workspace) ollamaModel {
 		endpoint:     ep,
 		apiKey:       ak,
 		modelInput:   mi,
-		pickClaude:   ws.Settings.Ollama.Endpoint != "",
-		pickCodex:    ollama.CodexConfigured(),
-		pickOpenCode: ollama.OpenCodeConfigured(),
-		pickDeepSeek: ollama.DeepSeekConfigured(),
+		// Per-chat ticks come from the chat-level Agents list — the
+		// authoritative record of "did the user tick this in this
+		// chat's wizard?" Codex/opencode/deepseek also fall through
+		// to disk-state if the chat-level list doesn't mention them
+		// (e.g. global config exists from another chat / manual
+		// edit) so the wizard still reflects that something IS
+		// configured globally.
+		pickClaude:   ws.Settings.Ollama.HasAgent(launcher.AgentClaude),
+		pickCodex:    ws.Settings.Ollama.HasAgent(launcher.AgentCodex) || ollama.CodexConfigured(),
+		pickOpenCode: ws.Settings.Ollama.HasAgent(launcher.AgentOpenCode) || ollama.OpenCodeConfigured(),
+		pickDeepSeek: ws.Settings.Ollama.HasAgent(launcher.AgentDeepSeek) || ollama.DeepSeekConfigured(),
 	}
 }
 
@@ -377,33 +384,66 @@ func (p applyPicks) any() bool {
 }
 
 // applyOllama performs the actual writes and returns a per-line result
-// log the screen renders. The checkbox state means CURRENT desired
-// state, not just "things to add" — so unticking an agent that was
-// previously configured actively disables it (clears chat settings
-// for claude; calls Disable* for the global-config agents). Without
-// this round-trip the wizard re-ticks everything on re-open because
-// the disk state still reflects the prior apply.
+// log the screen renders. Three things happen:
+//
+//  1. The chat-level Ollama block is updated: written with the user's
+//     endpoint+model+key + Agents list (which agents the user ticked)
+//     when at least one agent is ticked; cleared when all are unticked.
+//  2. For claude: nothing else — Plan() reads chat-level settings
+//     directly and gates on `o.HasAgent(claude)`.
+//  3. For codex / opencode / deepseek: ticked → write that agent's
+//     global config; unticked → strip any global config left by a
+//     previous apply (so the wizard's disk-state init doesn't re-tick
+//     it on re-open).
+//
+// The split between "chat-level block" and "global per-agent config"
+// matters because settings menu's "Local endpoint" row reads
+// chat-level only — so the chat-level block has to be saved whenever
+// the user configured ANY routing, not just claude.
 func applyOllama(ws launcher.Workspace, s ollama.Settings, picks applyPicks) []string {
 	var out []string
+
+	// 1. Build the per-chat Agents opt-in list.
+	var agents []string
 	if picks.claude {
+		agents = append(agents, string(launcher.AgentClaude))
+	}
+	if picks.codex {
+		agents = append(agents, string(launcher.AgentCodex))
+	}
+	if picks.opencode {
+		agents = append(agents, string(launcher.AgentOpenCode))
+	}
+	if picks.deepseek {
+		agents = append(agents, string(launcher.AgentDeepSeek))
+	}
+
+	// 2. Write or clear the chat-level Ollama block.
+	if len(agents) > 0 {
 		ws.Settings.Ollama = launcher.OllamaSettings{
-			Endpoint: s.Endpoint, Model: s.Model, WireAPI: s.WireAPI, APIKey: s.APIKey,
+			Endpoint: s.Endpoint, Model: s.Model,
+			WireAPI: s.WireAPI, APIKey: s.APIKey,
+			Agents: agents,
 		}
 		if err := launcher.SaveWorkspaceLikeSettings(ws); err != nil {
-			out = append(out, "✗ claude (chat settings): "+err.Error())
+			out = append(out, "✗ chat-level Ollama settings: "+err.Error())
 		} else {
-			out = append(out, "✓ claude: per-chat ANTHROPIC_BASE_URL + --model on next launch")
+			out = append(out, "✓ chat: "+s.Model+" @ "+s.Endpoint+
+				" (agents: "+strings.Join(agents, ", ")+")")
 		}
 	} else if ws.Settings.Ollama.Endpoint != "" || ws.Settings.Ollama.Model != "" {
-		// User unticked claude on a chat that previously had Ollama
-		// routing. Clear the chat-level Ollama block so the next
-		// launch doesn't inject ANTHROPIC_BASE_URL etc.
 		ws.Settings.Ollama = launcher.OllamaSettings{}
 		if err := launcher.SaveWorkspaceLikeSettings(ws); err != nil {
-			out = append(out, "✗ claude (clear chat settings): "+err.Error())
+			out = append(out, "✗ chat (clear Ollama settings): "+err.Error())
 		} else {
-			out = append(out, "↺ claude: cleared per-chat Ollama settings (claude unticked)")
+			out = append(out, "↺ chat: cleared per-chat Ollama settings (no agents ticked)")
 		}
+	}
+
+	// 3. Per-agent: claude is purely chat-level; the others write
+	//    global config when ticked, strip it when unticked.
+	if picks.claude {
+		out = append(out, "✓ claude: per-chat ANTHROPIC_BASE_URL + --model on next launch")
 	}
 	if picks.codex {
 		// Probe BEFORE writing the profile. codex 0.130+ requires

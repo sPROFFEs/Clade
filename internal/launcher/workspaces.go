@@ -62,6 +62,40 @@ type OllamaSettings struct {
 	Model    string `json:"model,omitempty"`
 	WireAPI  string `json:"wireApi,omitempty"`
 	APIKey   string `json:"apiKey,omitempty"`
+
+	// Agents lists which agent IDs are opted into routing through
+	// this endpoint at launch time. Each agent's Plan() branch
+	// checks `HasAgent(id)` to decide whether to inject env vars /
+	// CLI flags. Tracked separately from Endpoint/Model so the
+	// chat-level settings can record "this chat is configured for a
+	// local endpoint" (visible in the settings menu) independently
+	// of which agents Plan() should actively route.
+	//
+	// Empty/missing defaults to ["claude"] for backward compat:
+	// chats created before this field existed had chat-level Ollama
+	// settings saved ONLY when claude was ticked (the old wizard
+	// gated the write on claude), so an existing chat-level Ollama
+	// block implies the user wanted claude routed.
+	Agents []string `json:"agents,omitempty"`
+}
+
+// HasAgent reports whether the given agent ID is opted into Ollama
+// routing for this chat. Used by Plan() to decide injection.
+//
+// Empty Agents defaults to {AgentClaude} — see field doc above.
+func (s OllamaSettings) HasAgent(id AgentID) bool {
+	if s.Endpoint == "" || s.Model == "" {
+		return false
+	}
+	if len(s.Agents) == 0 {
+		return id == AgentClaude
+	}
+	for _, a := range s.Agents {
+		if a == string(id) {
+			return true
+		}
+	}
+	return false
 }
 
 // SaveWorkspaceSettings persists ws.Settings to <ws.Root>/workspace.json.
