@@ -51,6 +51,7 @@ const (
 	navSectionChats     = "chats"
 	navSectionTemplates = "templates"
 	navSectionAgents    = "agents"
+	navSectionBackup    = "backup"
 	navSectionHelp      = "help"
 )
 
@@ -89,9 +90,17 @@ var navEntries = []navEntry{
 		},
 	},
 	{
-		id:    navSectionHelp,
-		label: "Help",
+		id:     navSectionBackup,
+		label:  "Backup",
 		hotkey: "4",
+		makePane: func(cfg *launcher.Config) Pane {
+			return newBackupModel(cfg)
+		},
+	},
+	{
+		id:     navSectionHelp,
+		label:  "Help",
+		hotkey: "5",
 		makePane: func(cfg *launcher.Config) Pane {
 			return newHelpPane(cfg)
 		},
@@ -141,6 +150,11 @@ type layoutModel struct {
 
 	// status / errors
 	statusErr string
+
+	// firstFlash is a one-shot transient note shown after first-run
+	// (e.g. "Remote clone failed; created empty folder instead").
+	// Cleared as soon as it's been rendered once.
+	firstFlash string
 }
 
 func newLayoutModel(cfg *launcher.Config) *layoutModel {

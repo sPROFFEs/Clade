@@ -8,10 +8,12 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/sPROFFEs/Clade/internal/backup"
 	"github.com/sPROFFEs/Clade/internal/launcher"
 )
 
@@ -55,19 +57,39 @@ func wrapLaunch(p launcher.LaunchPlan, c *launcher.Config) tea.Cmd {
 type firstRunStep int
 
 const (
-	firstRunStepRoot firstRunStep = iota
-	firstRunStepSeed
+	firstRunStepRoot     firstRunStep = iota
+	firstRunStepMethod                // pick init method (empty / samples / clone)
+	firstRunStepCloneURL              // shown only when method == Clone
 	firstRunStepWorking
 )
 
+// firstRunMethod is the init choice on step 1. Maps to one of three
+// branches in finalize().
+type firstRunMethod int
+
+const (
+	firstRunMethodEmpty   firstRunMethod = iota // [1] just chats/ + templates/
+	firstRunMethodSamples                       // [2] empty + copy bundled samples
+	firstRunMethodClone                         // [3] git clone a remote
+)
+
 type firstRunModel struct {
-	input    textinput.Model
+	input    textinput.Model // workspaces root on step 0
+	urlInput textinput.Model // clone URL on step 2
 	step     firstRunStep
-	seed     bool // user's choice on step 1 (default true)
+	method   firstRunMethod  // chosen on step 1
+	cursor   int             // 0..2 cursor on step 1
 	root     string
-	err      string
-	status   string
-	bundled  []string // names of templates that would be seeded
+	cloneURL string
+
+	// cloneFallback explains why we fell back to method=Empty (e.g.
+	// "remote unreachable; falling back to empty folder"). Surfaced
+	// on the working step so the user knows what just happened.
+	cloneFallback string
+
+	err     string
+	status  string
+	bundled []string // names of templates that would be seeded
 }
 
 func newFirstRun() firstRunModel {
@@ -77,10 +99,17 @@ func newFirstRun() firstRunModel {
 	ti.Focus()
 	ti.CharLimit = 4096
 	ti.Width = 60
+
+	urlIn := textinput.New()
+	urlIn.Placeholder = "https://github.com/user/clade-backup.git"
+	urlIn.CharLimit = 2048
+	urlIn.Width = 60
+
 	return firstRunModel{
-		input: ti,
-		step:  firstRunStepRoot,
-		seed:  true, // recommended default
+		input:    ti,
+		urlInput: urlIn,
+		step:     firstRunStepRoot,
+		method:   firstRunMethodSamples, // best default for first-time users
 	}
 }
 
@@ -132,6 +161,30 @@ func bundledTemplateNames() []string {
 
 func (m firstRunModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case firstRunCloneResultMsg:
+		// Came back from the clone attempt on the working step.
+		if msg.err == nil {
+			// Clone succeeded — backup is implicitly enabled (the
+			// user explicitly chose to clone a remote into this
+			// workspaces root).
+			cfg := &launcher.Config{
+				WorkspacesRoot:  m.root,
+				BackupEnabled:   true,
+				BackupRemoteURL: m.cloneURL,
+			}
+			if err := launcher.SaveConfig(cfg); err != nil {
+				m.err = err.Error()
+				m.step = firstRunStepCloneURL
+				return m, nil
+			}
+			return m, wrap(newLayoutModel(cfg))
+		}
+		// Clone failed — fall back to "empty folder" with a
+		// breadcrumb so the user knows what happened.
+		m.cloneFallback = msg.err.Error()
+		m.method = firstRunMethodEmpty
+		return m, m.finalize()
+
 	case tea.KeyMsg:
 		switch m.step {
 		case firstRunStepRoot:
@@ -143,72 +196,200 @@ func (m firstRunModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.root = root
 				m.bundled = bundledTemplateNames()
-				m.step = firstRunStepSeed
+				m.step = firstRunStepMethod
+				m.cursor = int(firstRunMethodSamples) // default selection
 				return m, nil
 			}
 			var cmd tea.Cmd
 			m.input, cmd = m.input.Update(msg)
 			return m, cmd
 
-		case firstRunStepSeed:
+		case firstRunStepMethod:
 			switch msg.String() {
-			case "y", "Y":
-				m.seed = true
+			case "up", "k":
+				if m.cursor > 0 {
+					m.cursor--
+				}
+			case "down", "j":
+				if m.cursor < 2 {
+					m.cursor++
+				}
+			case "1":
+				m.method = firstRunMethodEmpty
 				return m, m.finalize()
-			case "n", "N":
-				m.seed = false
+			case "2":
+				m.method = firstRunMethodSamples
 				return m, m.finalize()
-			case " ":
-				m.seed = !m.seed
-				return m, nil
+			case "3":
+				m.method = firstRunMethodClone
+				m.step = firstRunStepCloneURL
+				m.urlInput.Focus()
+				return m, textinput.Blink
 			case "enter":
-				// Accept whatever the toggle is currently showing.
+				m.method = firstRunMethod(m.cursor)
+				if m.method == firstRunMethodClone {
+					m.step = firstRunStepCloneURL
+					m.urlInput.Focus()
+					return m, textinput.Blink
+				}
 				return m, m.finalize()
 			case "esc":
 				m.step = firstRunStepRoot
 				m.input.Focus()
 				return m, textinput.Blink
 			}
+
+		case firstRunStepCloneURL:
+			switch msg.Type {
+			case tea.KeyEnter:
+				url := strings.TrimSpace(m.urlInput.Value())
+				if url == "" {
+					m.err = "URL can't be empty"
+					return m, nil
+				}
+				m.cloneURL = url
+				m.err = ""
+				return m, m.startClone()
+			case tea.KeyEsc:
+				m.step = firstRunStepMethod
+				return m, nil
+			}
+			var cmd tea.Cmd
+			m.urlInput, cmd = m.urlInput.Update(msg)
+			return m, cmd
 		}
 	}
 	return m, nil
 }
 
-// finalize seeds (if requested) and saves config, then advances to the
-// chat list. Always called from step 1.
+// firstRunCloneResultMsg arrives once the background clone attempt
+// from startClone() finishes.
+type firstRunCloneResultMsg struct {
+	err error
+}
+
+// finalize handles methods Empty + Samples (clone is handled by
+// startClone). Creates the directory skeleton, optionally seeds the
+// bundled samples, writes the managed .gitignore so a later
+// "link a remote" flow works without surprises, saves config, then
+// hands off to the layout.
 func (m *firstRunModel) finalize() tea.Cmd {
 	root := m.root
-	seed := m.seed
+	method := m.method
+	fallbackNote := m.cloneFallback
 	m.step = firstRunStepWorking
-	if seed {
-		m.status = "Seeding bundled templates..."
-	} else {
-		m.status = "Skipping seed — you can add templates later via 't'."
+	switch method {
+	case firstRunMethodEmpty:
+		m.status = "Creating empty workspaces root..."
+	case firstRunMethodSamples:
+		m.status = "Creating workspaces root + seeding bundled templates..."
 	}
 	return func() tea.Msg {
-		// Always create the directory skeleton, even if seed=true and
-		// SeedSamples ends up finding nothing to copy (e.g. the user
-		// installed via a release archive that didn't ship samples to
-		// any of the SampleCandidates locations). Otherwise the home
-		// screen lands on a workspacesRoot that doesn't exist on disk,
-		// confusing the user into thinking nothing happened.
+		// Always create the directory skeleton.
 		if err := os.MkdirAll(filepath.Join(root, launcher.TemplatesDir), 0o755); err != nil {
 			return errMsg{err: fmt.Errorf("mkdir templates: %w", err)}
 		}
 		if err := os.MkdirAll(filepath.Join(root, launcher.ChatsDir), 0o755); err != nil {
 			return errMsg{err: fmt.Errorf("mkdir chats: %w", err)}
 		}
-		if seed {
+		if method == firstRunMethodSamples {
 			if _, err := launcher.SeedSamples(root, sampleCandidatesFromCwd()); err != nil {
 				return errMsg{err: fmt.Errorf("seed samples: %w", err)}
 			}
 		}
+		// NOTE: we deliberately do NOT write .gitignore /
+		// .gitattributes here. The backup feature is opt-in — those
+		// managed files only appear when the user explicitly flips
+		// the master switch in the Backup tab (or picks the "clone
+		// from remote" first-run option, which sets the switch on as
+		// part of the clone).
 		cfg := &launcher.Config{WorkspacesRoot: root}
 		if err := launcher.SaveConfig(cfg); err != nil {
 			return errMsg{err: fmt.Errorf("save config: %w", err)}
 		}
-		return screenDoneMsg{next: newLayoutModel(cfg)}
+		next := newLayoutModel(cfg)
+		// Surface the clone fallback breadcrumb (e.g. "remote
+		// unreachable; falling back…") as a one-off note so the user
+		// understands why their "clone" choice didn't land.
+		if fallbackNote != "" {
+			next.firstFlash = "Remote clone failed; created empty folder instead.\n  " + fallbackNote
+		}
+		return screenDoneMsg{next: next}
 	}
+}
+
+// startClone fires the background `git clone <url> <root>` and
+// returns a firstRunCloneResultMsg when done. On success, the
+// Update handler saves the remote URL into the config and routes
+// to the layout. On failure, falls back to method=Empty with a
+// breadcrumb.
+func (m *firstRunModel) startClone() tea.Cmd {
+	root := m.root
+	url := m.cloneURL
+	m.step = firstRunStepWorking
+	m.status = "Cloning " + url + " into " + root + "..."
+	return func() tea.Msg {
+		// The clone target must not exist (or must be empty). If
+		// the user's root already exists with files, fail with a
+		// clear message rather than letting git complain cryptically.
+		if entries, err := os.ReadDir(root); err == nil && len(entries) > 0 {
+			return firstRunCloneResultMsg{err: fmt.Errorf(
+				"%s already has files in it; clone target must be empty. "+
+					"Remove the directory or pick a different workspaces root.", root)}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		if err := backup.Clone(ctx, url, root); err != nil {
+			return firstRunCloneResultMsg{err: classifyCloneError(err)}
+		}
+		// Clone succeeded — ensure templates/ + chats/ exist (some
+		// repos may not have them yet). The managed .gitignore /
+		// .gitattributes come from the remote we just cloned; if
+		// they're missing we write them on the first Sync from the
+		// Backup tab.
+		_ = os.MkdirAll(filepath.Join(root, launcher.TemplatesDir), 0o755)
+		_ = os.MkdirAll(filepath.Join(root, launcher.ChatsDir), 0o755)
+		// Belt-and-braces: drop the managed files if the remote
+		// didn't ship them. WriteManaged* refuses to clobber user-
+		// edited files, so this is safe.
+		_ = backup.WriteManagedGitignore(root)
+		_ = backup.WriteManagedGitattributes(root)
+		return firstRunCloneResultMsg{}
+	}
+}
+
+// classifyCloneError turns a backup.Clone failure into a friendlier
+// message for first-run users who may not be deep on git internals.
+func classifyCloneError(err error) error {
+	if err == nil {
+		return nil
+	}
+	msg := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(msg, "authentication"),
+		strings.Contains(msg, "permission denied"),
+		strings.Contains(msg, "could not read username"),
+		strings.Contains(msg, "publickey"):
+		return fmt.Errorf(
+			"remote repository is not reachable or is private. Please review " +
+				"that your git credentials are configured (HTTPS credential " +
+				"helper or SSH key) and try again from the Backup tab once " +
+				"you've created an empty workspace")
+	case strings.Contains(msg, "could not resolve host"),
+		strings.Contains(msg, "name or service not known"),
+		strings.Contains(msg, "connection refused"),
+		strings.Contains(msg, "network unreachable"):
+		return fmt.Errorf(
+			"remote repository is not reachable. Please check the URL and " +
+				"your network connection")
+	case strings.Contains(msg, "not found"),
+		strings.Contains(msg, "does not appear to be a git repository"):
+		return fmt.Errorf(
+			"remote repository not found. Verify the URL is correct and " +
+				"the repository is either public or your credentials grant " +
+				"access")
+	}
+	return err
 }
 
 func (m firstRunModel) View() string {
@@ -231,27 +412,63 @@ func (m firstRunModel) View() string {
 		b.WriteString(inputLabelStyle.Render("Workspaces root: "))
 		b.WriteString(m.input.View())
 
-	case firstRunStepSeed:
-		help = "y / n to choose · space to toggle · enter to accept · esc back"
+	case firstRunStepMethod:
+		help = "↑/↓ select · enter accept · 1/2/3 jump · esc back"
 		b.WriteString(subtitleStyle.Render("Workspaces root: ") + m.root + "\n\n")
-		mark := "[ ] No, leave it empty"
-		if m.seed {
-			mark = availableStyle.Render("[x] Yes, copy the bundled templates (recommended)")
+		b.WriteString(inputLabelStyle.Render("How should this root be initialised?") + "\n\n")
+		opts := []struct {
+			label string
+			hint  string
+		}{
+			{
+				"[1] Empty folder",
+				"Just chats/ and templates/. Add templates by hand later via 't'.",
+			},
+			{
+				"[2] Copy the bundled sample templates",
+				"Seeds the reversing, code-review, and workpath-author starter templates.",
+			},
+			{
+				"[3] Clone a git repository (cross-machine sync)",
+				"Pulls existing chats + templates from a remote you already pushed " +
+					"to from another machine. The repo must be public OR your git " +
+					"credentials (HTTPS helper / SSH key) must already be configured.",
+			},
 		}
-		b.WriteString(inputLabelStyle.Render("Seed example templates? ") + mark + "\n\n")
-		if len(m.bundled) > 0 {
-			b.WriteString(descStyle.Render("Bundled templates:") + "\n")
-			for _, name := range m.bundled {
-				b.WriteString(descStyle.Render("  • "+name) + "\n")
+		for i, opt := range opts {
+			isSel := i == m.cursor
+			marker := "  "
+			if isSel {
+				marker = "› "
 			}
-		} else {
-			b.WriteString(hintStyle.Render(
-				"(No bundled templates found near the launcher binary — nothing to seed.)") + "\n")
+			b.WriteString(selectionRow(marker+opt.label, isSel) + "\n")
+			if isSel {
+				b.WriteString(descStyle.Render("   "+opt.hint) + "\n")
+			}
 		}
 		b.WriteString("\n")
+		if len(m.bundled) > 0 {
+			b.WriteString(descStyle.Render("Bundled templates available for option [2]: " +
+				strings.Join(m.bundled, ", ")) + "\n")
+		}
+
+	case firstRunStepCloneURL:
+		help = "enter clone · esc back"
+		b.WriteString(subtitleStyle.Render("Workspaces root: ") + m.root + "\n\n")
+		b.WriteString(inputLabelStyle.Render("Git remote URL: "))
+		b.WriteString(m.urlInput.View() + "\n\n")
+		b.WriteString(descStyle.Render(
+			"Examples:") + "\n")
+		b.WriteString(descStyle.Render(
+			"  https://github.com/<user>/<repo>.git") + "\n")
+		b.WriteString(descStyle.Render(
+			"  git@github.com:<user>/<repo>.git") + "\n")
+		b.WriteString(descStyle.Render(
+			"  https://gitea.example/<user>/<repo>.git") + "\n\n")
 		b.WriteString(hintStyle.Render(
-			"Either way you can add or remove templates later via 't' on the home screen.",
-		))
+			"⚠ The repo must be public OR your git credentials must be configured.\n"+
+				"  On clone failure we'll fall back to creating an empty folder; you can\n"+
+				"  link the remote later from the Backup tab."))
 
 	case firstRunStepWorking:
 		help = ""

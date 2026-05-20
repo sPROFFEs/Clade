@@ -66,20 +66,20 @@ func TestFirstRun_YesSeedsTemplatesAndAdvances(t *testing.T) {
 	m := newFirstRun()
 	m.input.SetValue(wsRoot)
 
-	// step 0 → 1: Enter advances from path input to the seed prompt.
+	// step 0 → 1: Enter advances from path input to the method picker.
 	nx, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = nx.(firstRunModel)
-	if m.step != firstRunStepSeed {
-		t.Fatalf("step = %d, want %d (seed)", m.step, firstRunStepSeed)
+	if m.step != firstRunStepMethod {
+		t.Fatalf("step = %d, want %d (method)", m.step, firstRunStepMethod)
 	}
-	if !strings.Contains(m.View(), "Seed example templates") {
-		t.Errorf("step 1 view missing seed prompt:\n%s", m.View())
+	if !strings.Contains(m.View(), "How should this root be initialised?") {
+		t.Errorf("step 1 view missing method picker:\n%s", m.View())
 	}
 
-	// step 1 → done: 'y' seeds + saves config + transitions.
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	// step 1 → done: '2' picks "copy bundled samples" and finalizes.
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
 	if cmd == nil {
-		t.Fatal("'y' should produce a finalize Cmd")
+		t.Fatal("'2' should produce a finalize Cmd")
 	}
 	done := runCmd(t, cmd).(screenDoneMsg)
 	if _, ok := done.next.(*layoutModel); !ok {
@@ -95,7 +95,9 @@ func TestFirstRun_YesSeedsTemplatesAndAdvances(t *testing.T) {
 	}
 }
 
-func TestFirstRun_NoSkipsSeedingAndCreatesEmptyDirs(t *testing.T) {
+func TestFirstRun_MethodEmptyCreatesEmptyDirs(t *testing.T) {
+	// Method [1] "empty folder" creates chats/ and templates/ without
+	// copying any samples.
 	tmp := t.TempDir()
 	wsRoot := filepath.Join(tmp, "ws")
 	redirectConfig(t, filepath.Join(tmp, "cfg"))
@@ -105,9 +107,9 @@ func TestFirstRun_NoSkipsSeedingAndCreatesEmptyDirs(t *testing.T) {
 	m.input.SetValue(wsRoot)
 	nx, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = nx.(firstRunModel)
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
 	if cmd == nil {
-		t.Fatal("'n' should also produce a finalize Cmd")
+		t.Fatal("'1' (empty folder) should produce a finalize Cmd")
 	}
 	done := runCmd(t, cmd).(screenDoneMsg)
 	if _, ok := done.next.(*layoutModel); !ok {
@@ -128,7 +130,58 @@ func TestFirstRun_NoSkipsSeedingAndCreatesEmptyDirs(t *testing.T) {
 	}
 }
 
-func TestFirstRun_SpaceTogglesSeedChoice(t *testing.T) {
+// TestFirstRun_MethodEmpty_LeavesBackupDormant pins the opt-in
+// guarantee: picking [1] empty or [2] samples must NOT touch any
+// backup-related state — no .gitignore, no .gitattributes, no .git
+// dir, and Config.BackupEnabled remains false. Users who never open
+// the Backup tab see exactly the pre-0.1.11 behavior.
+func TestFirstRun_MethodEmpty_LeavesBackupDormant(t *testing.T) {
+	tmp := t.TempDir()
+	wsRoot := filepath.Join(tmp, "ws")
+	redirectConfig(t, filepath.Join(tmp, "cfg"))
+	t.Chdir(repoRoot(t))
+
+	m := newFirstRun()
+	m.input.SetValue(wsRoot)
+	nx, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = nx.(firstRunModel)
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
+	if cmd == nil {
+		t.Fatal("'1' should produce a finalize Cmd")
+	}
+	done := runCmd(t, cmd).(screenDoneMsg)
+	if _, ok := done.next.(*layoutModel); !ok {
+		t.Fatalf("expected *layoutModel, got %T", done.next)
+	}
+
+	// Loaded config: BackupEnabled false, no remote URL.
+	cfg, err := launcher.LoadConfig()
+	if err != nil || cfg == nil {
+		t.Fatalf("LoadConfig: %v %v", err, cfg)
+	}
+	if cfg.BackupEnabled {
+		t.Error("BackupEnabled should be false after method=Empty first-run")
+	}
+	if cfg.BackupRemoteURL != "" {
+		t.Errorf("BackupRemoteURL should be empty, got %q", cfg.BackupRemoteURL)
+	}
+	if cfg.BackupAutoSync {
+		t.Error("BackupAutoSync should be false")
+	}
+
+	// Workspaces root must NOT have any backup-managed files.
+	for _, leaked := range []string{".gitignore", ".gitattributes", ".git"} {
+		if _, err := os.Stat(filepath.Join(wsRoot, leaked)); err == nil {
+			t.Errorf("backup left %s in the workspaces root despite never being enabled", leaked)
+		}
+	}
+}
+
+func TestFirstRun_MethodCursorNavigation(t *testing.T) {
+	// The first-run wizard's method picker is a 3-row list (empty /
+	// samples / clone). The default cursor seeds on "samples" (the
+	// recommended choice); arrows move it; the number keys also
+	// jump directly.
 	tmp := t.TempDir()
 	redirectConfig(t, filepath.Join(tmp, "cfg"))
 
@@ -136,13 +189,15 @@ func TestFirstRun_SpaceTogglesSeedChoice(t *testing.T) {
 	m.input.SetValue(filepath.Join(tmp, "ws"))
 	nx, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = nx.(firstRunModel)
-	if !m.seed {
-		t.Fatal("seed should default to true (recommended)")
+	if m.cursor != int(firstRunMethodSamples) {
+		t.Errorf("cursor should default to %d (samples), got %d",
+			firstRunMethodSamples, m.cursor)
 	}
-	nx, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	nx, _ = m.Update(tea.KeyMsg{Type: tea.KeyUp})
 	m = nx.(firstRunModel)
-	if m.seed {
-		t.Error("space should toggle seed off")
+	if m.cursor != int(firstRunMethodEmpty) {
+		t.Errorf("up should move cursor to %d (empty), got %d",
+			firstRunMethodEmpty, m.cursor)
 	}
 }
 

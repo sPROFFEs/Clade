@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // Config is the persisted, per-user launcher state.
@@ -22,6 +23,44 @@ type Config struct {
 	LastAgent string `json:"lastAgent,omitempty"`
 	// WpcBinary, when set, overrides PATH lookup. Optional.
 	WpcBinary string `json:"wpcBinary,omitempty"`
+
+	// --- backup / git sync ---
+	// BackupEnabled is the MASTER SWITCH for the cloud backup feature.
+	// Off by default. When false, NOTHING backup-related runs: no
+	// auto-sync hooks, no managed .gitignore / .gitattributes get
+	// written, the Backup tab's other rows show as disabled until the
+	// user flips it on. The workspaces root behaves exactly as it did
+	// before 0.1.11 — just a directory of chats and templates.
+	//
+	// Flipping the switch on initialises the workspaces root as a git
+	// repo (creates .git, writes the managed metadata, registers the
+	// MEMORY.md merge driver). Flipping it off removes the configured
+	// remote and disables auto-sync but leaves the .git dir + the
+	// managed files alone so re-enabling later is cheap.
+	BackupEnabled bool `json:"backupEnabled,omitempty"`
+	// BackupRemoteURL is the configured remote when the workspaces root
+	// is being managed as a git repo. Empty = no remote configured.
+	BackupRemoteURL string `json:"backupRemoteUrl,omitempty"`
+	// BackupAutoSync, when true, fires a sync on startup and on Clade
+	// exit. Off by default. Sync is a fast-forward / commit-and-push
+	// operation; divergence opens the resolution popup unless
+	// BackupForceAlwaysLocal is also true.
+	BackupAutoSync bool `json:"backupAutoSync,omitempty"`
+	// BackupForceAlwaysLocal, when true, bypasses the divergence popup
+	// in the auto-sync path and force-pushes local over remote. Loud
+	// activation warning. Guarded against the "two machines, both
+	// force-pushing" case by the Machine-ID check in the auto-sync
+	// hook.
+	BackupForceAlwaysLocal bool `json:"backupForceAlwaysLocal,omitempty"`
+	// BackupLastSyncAt is the UTC timestamp of the last successful
+	// sync (push, pull, or in-sync verification). Surfaced in the
+	// Backup screen's header.
+	BackupLastSyncAt time.Time `json:"backupLastSyncAt,omitempty"`
+	// BackupMachineID is a per-machine random identifier embedded in
+	// commit message trailers. Used by the auto-sync safeguard to
+	// detect "another machine just pushed; refuse to clobber."
+	// Generated lazily on first auto-sync activation.
+	BackupMachineID string `json:"backupMachineId,omitempty"`
 }
 
 // ConfigPaths returns the directory and file used for persistent config.

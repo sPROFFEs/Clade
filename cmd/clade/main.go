@@ -16,15 +16,18 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/sPROFFEs/Clade/internal/backup"
 	"github.com/sPROFFEs/Clade/internal/installer"
 	"github.com/sPROFFEs/Clade/internal/launcher"
 	"github.com/sPROFFEs/Clade/internal/ollama"
@@ -38,11 +41,19 @@ func main() {
 	checkUpdateFlag := flag.Bool("check-update", false, "check GitHub for a newer release and exit")
 	updateFlag := flag.Bool("update", false, "download and install the latest release, then exit")
 	yesFlag := flag.Bool("y", false, "auto-confirm the update prompt (use with -update for non-interactive installs)")
+	mergeMemory := flag.Bool("merge-memory", false,
+		"git merge driver hook: concatenate %O %A %B and write result to %A. "+
+			"Wired into .git/config by the backup feature; not for direct use.")
 	flag.Parse()
 	if *versionFlag {
 		fmt.Println(version.Banner)
 		fmt.Printf("\nclade %s %s/%s\n", version.Current, runtime.GOOS, runtime.GOARCH)
 		return
+	}
+	if *mergeMemory {
+		// Args left in flag.Args() are: <ancestor> <ours> <theirs>.
+		// Git passes them as %O %A %B per the merge driver spec.
+		os.Exit(runMergeMemory(flag.Args()))
 	}
 	if *checkUpdateFlag {
 		os.Exit(runCheckUpdate())
@@ -72,6 +83,14 @@ func main() {
 		die(err)
 	}
 
+	// Backup auto-sync on startup. Gated on the master switch + the
+	// auto-sync sub-toggle + a configured remote. When the master
+	// switch is OFF the feature is fully dormant and this branch is
+	// a no-op — Clade behaves exactly as it did pre-0.1.11.
+	if cfg != nil && cfg.BackupEnabled && cfg.BackupAutoSync && cfg.BackupRemoteURL != "" {
+		runStartupAutoSync(cfg)
+	}
+
 	var firstScreen tea.Model
 	if cfg == nil {
 		firstScreen = newFirstRun()
@@ -94,12 +113,167 @@ func main() {
 	if _, err := prog.Run(); err != nil {
 		die(err)
 	}
+	// Backup auto-sync on exit. Same master-switch gate as startup.
+	// Picks up the latest cfg in case the user toggled auto-sync
+	// inside the session.
+	if root.cfg != nil && root.cfg.BackupEnabled && root.cfg.BackupAutoSync && root.cfg.BackupRemoteURL != "" {
+		runExitAutoSync(root.cfg)
+	}
+
 	// Stay-in-Clade model: agent runs are handled INSIDE the Bubbletea
 	// program via tea.ExecProcess (see rootModel.Update). main() only
 	// needs to bubble fatal errors back to the shell.
 	if root.fatal != nil {
 		die(root.fatal)
 	}
+}
+
+// runStartupAutoSync fetches + applies safe sync actions before the
+// TUI launches. Diverged repos halt and print a message telling the
+// user to resolve via the Backup tab. Force-always-local skips the
+// halt and force-pushes.
+//
+// Best-effort: any failure prints a one-liner and lets the launcher
+// continue (we don't want a network blip to lock the user out of
+// their local chats).
+func runStartupAutoSync(cfg *launcher.Config) {
+	dir := cfg.WorkspacesRoot
+	if !backup.IsGitRepo(dir) {
+		// First sync on a freshly-created empty/sample root — init
+		// + push so subsequent runs have something to fetch.
+		fmt.Fprintf(os.Stderr, "[backup] initialising %s as a git repo...\n", dir)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if _, err := backup.Init(ctx, dir); err != nil {
+			fmt.Fprintf(os.Stderr, "[backup] init failed: %v (continuing)\n", err)
+			return
+		}
+		if err := backup.AddRemote(ctx, dir, cfg.BackupRemoteURL); err != nil {
+			fmt.Fprintf(os.Stderr, "[backup] add remote failed: %v (continuing)\n", err)
+			return
+		}
+	}
+	fmt.Fprintln(os.Stderr, "[backup] syncing...")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if cfg.BackupMachineID != "" {
+		_ = os.Setenv("CLADE_BACKUP_MACHINE_ID", cfg.BackupMachineID)
+		defer os.Unsetenv("CLADE_BACKUP_MACHINE_ID")
+	}
+	action, st, err := backup.Sync(ctx, dir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[backup] sync error: %v (continuing)\n", err)
+		return
+	}
+	switch action {
+	case backup.SyncActionInSync:
+		fmt.Fprintln(os.Stderr, "[backup] in sync ✓")
+	case backup.SyncActionPushed:
+		fmt.Fprintln(os.Stderr, "[backup] pushed local changes ✓")
+		cfg.BackupLastSyncAt = time.Now().UTC()
+		_ = launcher.SaveConfig(cfg)
+	case backup.SyncActionPulled:
+		fmt.Fprintln(os.Stderr, "[backup] pulled remote changes ✓")
+		cfg.BackupLastSyncAt = time.Now().UTC()
+		_ = launcher.SaveConfig(cfg)
+	case backup.SyncActionNeedsResolution:
+		if cfg.BackupForceAlwaysLocal {
+			if guardOK := checkMachineGuard(ctx, cfg, dir); !guardOK {
+				return
+			}
+			fmt.Fprintln(os.Stderr, "[backup] diverged; force-pushing local (force-always-local is ON)")
+			if err := backup.Push(ctx, dir, true); err != nil {
+				fmt.Fprintf(os.Stderr, "[backup] force push failed: %v (continuing)\n", err)
+			} else {
+				cfg.BackupLastSyncAt = time.Now().UTC()
+				_ = launcher.SaveConfig(cfg)
+			}
+		} else {
+			fmt.Fprintln(os.Stderr,
+				"[backup] LOCAL AND REMOTE HAVE DIVERGED. Open the Backup tab "+
+					"(Ctrl-4) to resolve. Status: "+strings.TrimSpace(fmt.Sprintf(
+					"%d ahead, %d behind", st.Ahead, st.Behind)))
+		}
+	case backup.SyncActionNoRemote:
+		// nothing to do
+	}
+}
+
+// runExitAutoSync mirrors runStartupAutoSync for the exit path. Same
+// rules; we just bias toward "commit and push" since exit time is
+// almost always when the user expects their work to be saved.
+func runExitAutoSync(cfg *launcher.Config) {
+	dir := cfg.WorkspacesRoot
+	if !backup.IsGitRepo(dir) {
+		return
+	}
+	fmt.Fprintln(os.Stderr, "[backup] syncing on exit...")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if cfg.BackupMachineID != "" {
+		_ = os.Setenv("CLADE_BACKUP_MACHINE_ID", cfg.BackupMachineID)
+		defer os.Unsetenv("CLADE_BACKUP_MACHINE_ID")
+	}
+	action, _, err := backup.Sync(ctx, dir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[backup] sync error: %v\n", err)
+		return
+	}
+	switch action {
+	case backup.SyncActionInSync:
+		fmt.Fprintln(os.Stderr, "[backup] in sync ✓")
+	case backup.SyncActionPushed:
+		fmt.Fprintln(os.Stderr, "[backup] pushed local changes ✓")
+		cfg.BackupLastSyncAt = time.Now().UTC()
+		_ = launcher.SaveConfig(cfg)
+	case backup.SyncActionPulled:
+		fmt.Fprintln(os.Stderr, "[backup] pulled remote changes ✓")
+		cfg.BackupLastSyncAt = time.Now().UTC()
+		_ = launcher.SaveConfig(cfg)
+	case backup.SyncActionNeedsResolution:
+		if cfg.BackupForceAlwaysLocal {
+			if guardOK := checkMachineGuard(ctx, cfg, dir); !guardOK {
+				return
+			}
+			fmt.Fprintln(os.Stderr, "[backup] diverged; force-pushing local (force-always-local is ON)")
+			if err := backup.Push(ctx, dir, true); err != nil {
+				fmt.Fprintf(os.Stderr, "[backup] force push failed: %v\n", err)
+			} else {
+				cfg.BackupLastSyncAt = time.Now().UTC()
+				_ = launcher.SaveConfig(cfg)
+			}
+		} else {
+			fmt.Fprintln(os.Stderr,
+				"[backup] LOCAL AND REMOTE HAVE DIVERGED. Run Clade again "+
+					"and open the Backup tab (Ctrl-4) to resolve.")
+		}
+	}
+}
+
+// checkMachineGuard refuses force-push when the remote's last commit
+// has a Machine-ID trailer that doesn't match ours AND landed within
+// the last 24h — i.e. another machine pushed recently and we'd be
+// clobbering its work. The user has to disable force-always-local
+// or resolve manually via Sync now.
+func checkMachineGuard(ctx context.Context, cfg *launcher.Config, dir string) bool {
+	remoteID, remoteWhen, err := backup.LastCommitMachineID(ctx, dir)
+	if err != nil {
+		// Best-effort: missing trailers / fetch failure → allow.
+		return true
+	}
+	if remoteID == "" || remoteID == cfg.BackupMachineID {
+		return true
+	}
+	if time.Since(remoteWhen) > 24*time.Hour {
+		return true
+	}
+	fmt.Fprintf(os.Stderr,
+		"[backup] Another machine (id %s) pushed to this remote within the\n"+
+			"         last 24h (at %s). Refusing to force-push to avoid\n"+
+			"         overwriting their work. Disable 'force always local' in\n"+
+			"         the Backup tab or resolve manually via Sync now.\n",
+		remoteID, remoteWhen.Format(time.RFC3339))
+	return false
 }
 
 // rootModel keeps the active screen and Clade-global state (the loaded
@@ -236,6 +410,50 @@ func extractExitCode(err error) int {
 		return ee.ExitCode()
 	}
 	return 1
+}
+
+// runMergeMemory is wired into the workspaces repo via .git/config as
+// the `clade-memory` merge driver. Git calls us with 3 args:
+//
+//	%O = ancestor (base) file
+//	%A = our file (write the result here)
+//	%B = their file
+//
+// We concatenate ours + theirs under a separator instead of producing
+// `<<<<<<<` conflict markers. Best-effort: any error returns a
+// non-zero exit, which makes git fall back to the default text merge.
+func runMergeMemory(args []string) int {
+	if len(args) < 3 {
+		fmt.Fprintln(os.Stderr, "clade --merge-memory needs 3 paths (ancestor, ours, theirs)")
+		return 2
+	}
+	_ = args[0] // ancestor unused — we concatenate, not 3-way merge
+	ours, theirs := args[1], args[2]
+	a, errA := os.ReadFile(ours)
+	if errA != nil {
+		fmt.Fprintf(os.Stderr, "read ours: %v\n", errA)
+		return 1
+	}
+	b, errB := os.ReadFile(theirs)
+	if errB != nil {
+		fmt.Fprintf(os.Stderr, "read theirs: %v\n", errB)
+		return 1
+	}
+	combined := string(a)
+	if !strings.HasSuffix(combined, "\n") {
+		combined += "\n"
+	}
+	combined += "\n## --- merged from another machine at " +
+		time.Now().UTC().Format(time.RFC3339) + " ---\n\n"
+	combined += string(b)
+	if !strings.HasSuffix(combined, "\n") {
+		combined += "\n"
+	}
+	if err := os.WriteFile(ours, []byte(combined), 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "write ours: %v\n", err)
+		return 1
+	}
+	return 0
 }
 
 func die(err error) {
