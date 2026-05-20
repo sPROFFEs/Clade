@@ -392,16 +392,23 @@ func applyOllama(ws launcher.Workspace, s ollama.Settings, picks applyPicks) []s
 	}
 	if picks.codex {
 		// Probe BEFORE writing the profile. codex 0.130+ requires
-		// /v1/responses; most OpenAI-compatible servers (GPUStack,
-		// vanilla Ollama, vLLM until recently, llama.cpp's server,
-		// LocalAI) implement only /v1/chat/completions. Writing the
-		// profile against an endpoint that can't serve responses
-		// produces a chat that loads but every turn fails with
-		// codex's generic "experiencing high demand" retry message.
-		// Refuse instead.
+		// /v1/responses; most OpenAI-compatible servers (vanilla
+		// Ollama, vLLM until recently, llama.cpp's server, LocalAI)
+		// implement only /v1/chat/completions. Writing the profile
+		// against an endpoint that can't serve responses produces a
+		// chat that loads but every turn fails with codex's generic
+		// "experiencing high demand" retry message.
+		//
+		// The probe returns (warning, err): err blocks the apply, a
+		// non-empty warning passes the apply but surfaces a note.
+		// 5xx upstream errors (e.g. GPUStack worker temporarily down)
+		// fall into the "warn but apply" bucket — the route exists,
+		// the user just has a backend health issue separate from the
+		// wire_api question.
 		probeCtx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
-		probeErr := ollama.ProbeCodexCompat(probeCtx, s.Endpoint, s.APIKey, s.Model)
+		probeWarn, probeErr := ollama.ProbeCodexCompat(probeCtx, s.Endpoint, s.APIKey, s.Model)
 		cancel()
+		out = append(out, hintStyle.Render("  · codex probe → /v1/responses ran"))
 		if probeErr != nil {
 			out = append(out, "✗ codex: "+probeErr.Error())
 			// Strip any stale ollama_remote block left by a previous
@@ -412,10 +419,15 @@ func applyOllama(ws launcher.Workspace, s ollama.Settings, picks applyPicks) []s
 			if _, derr := ollama.DisableCodex(); derr == nil {
 				out = append(out, "  (cleaned up any stale ollama_remote block in ~/.codex/config.toml)")
 			}
-		} else if path, err := ollama.ApplyCodex(s); err != nil {
-			out = append(out, "✗ codex: "+err.Error())
 		} else {
-			out = append(out, "✓ codex: "+path+" (launched with -p ollama_remote)")
+			if path, err := ollama.ApplyCodex(s); err != nil {
+				out = append(out, "✗ codex: "+err.Error())
+			} else {
+				out = append(out, "✓ codex: "+path+" (launched with -p ollama_remote)")
+			}
+			if probeWarn != "" {
+				out = append(out, "  ⚠ codex: "+probeWarn)
+			}
 		}
 	}
 	if picks.opencode {

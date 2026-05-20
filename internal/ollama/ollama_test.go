@@ -140,7 +140,7 @@ func TestListModels_SendsBearerWhenKeySet(t *testing.T) {
 // it lands inside provider.<name>.options.apiKey where @ai-sdk/openai-
 // compatible expects it.
 // TestProbeCodexCompat_PassesWhenServerImplementsResponses: 2xx from
-// /v1/responses → probe passes, no error.
+// /v1/responses → probe passes, no error, no warning.
 func TestProbeCodexCompat_PassesWhenServerImplementsResponses(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/responses" {
@@ -151,8 +151,9 @@ func TestProbeCodexCompat_PassesWhenServerImplementsResponses(t *testing.T) {
 		http.NotFound(w, r)
 	}))
 	defer srv.Close()
-	if err := ProbeCodexCompat(context.Background(), srv.URL, "", "any"); err != nil {
-		t.Errorf("expected nil error on 2xx, got %v", err)
+	warn, err := ProbeCodexCompat(context.Background(), srv.URL, "", "any")
+	if err != nil || warn != "" {
+		t.Errorf("expected (nil, \"\") on 2xx; got (%q, %v)", warn, err)
 	}
 }
 
@@ -164,22 +165,51 @@ func TestProbeCodexCompat_AuthFailureCountsAsRouteExists(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(code)
 		}))
-		if err := ProbeCodexCompat(context.Background(), srv.URL, "", "any"); err != nil {
-			t.Errorf("%d should count as pass (route exists), got %v", code, err)
+		warn, err := ProbeCodexCompat(context.Background(), srv.URL, "", "any")
+		if err != nil || warn != "" {
+			t.Errorf("%d should count as clean pass; got warn=%q err=%v", code, warn, err)
 		}
 		srv.Close()
 	}
 }
 
-// TestProbeCodexCompat_404IsRefused: the GPUStack-style case — server
-// only implements /v1/chat/completions, so /v1/responses returns 404.
-// Error should be user-facing and mention LiteLLM as the workaround.
+// TestProbeCodexCompat_502_503_504_PassWithWarning: GPUStack's API
+// gateway routes /v1/responses fine but its internal worker can be
+// unreachable → 503 with a body explaining the upstream failure. The
+// route IS implemented, so the probe should NOT refuse the apply.
+// Pass with a warning so the user sees the backend health issue.
+func TestProbeCodexCompat_502_503_504_PassWithWarning(t *testing.T) {
+	for _, code := range []int{502, 503, 504} {
+		body := `{"error":{"message":"Cannot connect to host 192.168.155.150:40047 ssl:default [Connect call failed]"}}`
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(code)
+			_, _ = w.Write([]byte(body))
+		}))
+		warn, err := ProbeCodexCompat(context.Background(), srv.URL, "", "any")
+		if err != nil {
+			t.Errorf("%d should pass (route exists, upstream unhealthy); got err=%v", code, err)
+		}
+		if warn == "" {
+			t.Errorf("%d should produce a warning so user sees the upstream issue", code)
+		}
+		for _, want := range []string{"speaks /v1/responses", "upstream"} {
+			if !strings.Contains(warn, want) {
+				t.Errorf("%d warning should mention %q; got: %s", code, want, warn)
+			}
+		}
+		srv.Close()
+	}
+}
+
+// TestProbeCodexCompat_404IsRefused: server only implements
+// /v1/chat/completions, /v1/responses returns 404. Error must be
+// user-facing and mention LiteLLM as the workaround.
 func TestProbeCodexCompat_404IsRefused(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 	}))
 	defer srv.Close()
-	err := ProbeCodexCompat(context.Background(), srv.URL, "", "any")
+	_, err := ProbeCodexCompat(context.Background(), srv.URL, "", "any")
 	if err == nil {
 		t.Fatal("404 should produce an error")
 	}
@@ -192,15 +222,14 @@ func TestProbeCodexCompat_404IsRefused(t *testing.T) {
 
 // TestProbeCodexCompat_400ChatCompletionsHintIsRecognised: some
 // chat-completions-only servers (LocalAI etc.) return 400 with a
-// hint about /v1/chat/completions instead of 404. The probe should
-// catch that shape too.
+// hint about /v1/chat/completions instead of 404. Catch that shape.
 func TestProbeCodexCompat_400ChatCompletionsHintIsRecognised(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(400)
 		_, _ = w.Write([]byte(`{"error":"unknown endpoint, try /v1/chat/completions"}`))
 	}))
 	defer srv.Close()
-	err := ProbeCodexCompat(context.Background(), srv.URL, "", "any")
+	_, err := ProbeCodexCompat(context.Background(), srv.URL, "", "any")
 	if err == nil {
 		t.Fatal("400 + chat/completions hint should produce an error")
 	}
@@ -213,7 +242,7 @@ func TestProbeCodexCompat_400ChatCompletionsHintIsRecognised(t *testing.T) {
 // error → user-readable message naming the endpoint.
 func TestProbeCodexCompat_UnreachableEndpointReportsClearly(t *testing.T) {
 	// 127.0.0.1:1 is reliably refused on every OS we ship to.
-	err := ProbeCodexCompat(context.Background(), "http://127.0.0.1:1", "", "any")
+	_, err := ProbeCodexCompat(context.Background(), "http://127.0.0.1:1", "", "any")
 	if err == nil {
 		t.Fatal("unreachable endpoint should error")
 	}

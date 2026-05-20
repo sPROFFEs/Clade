@@ -213,35 +213,38 @@ const (
 
 // ProbeCodexCompat issues a stub POST to <endpoint>/v1/responses to
 // verify that the configured backend speaks codex 0.130+'s wire_api
-// ("responses"). The wizard calls this BEFORE ApplyCodex — if the
-// probe fails we refuse to write the codex profile rather than leave
-// the user with a half-broken config that silently routes to the
-// wrong place.
+// ("responses"). The wizard calls this BEFORE ApplyCodex; the returned
+// (warning, error) pair has these semantics:
 //
-// Returns nil on success. Non-nil error is user-facing and describes
-// the failure mode in plain language.
+//   - error != nil → refuse the codex apply; show the message
+//   - error == nil && warning != "" → apply but surface the warning
+//   - both empty   → apply cleanly
 //
-// The probe sends the minimum well-formed /v1/responses body codex
-// would send for a real call: an `input[]` with one structured user
-// message and a 1-token cap so happy-path servers respond fast and
-// failure-path servers fail fast.
+// We split the result this way because "does the endpoint IMPLEMENT
+// /v1/responses?" and "is the endpoint HEALTHY right now?" are
+// independent questions, and confusing them produces false refusals
+// (a transient upstream 503 from GPUStack would block a config that
+// IS valid — the worker just isn't reachable). The probe distinguishes:
 //
-// Status code → outcome:
-//   - 2xx                       → endpoint serves the contract, return nil
-//   - 401 / 403                 → auth failure, but the route exists. Treat
-//                                 as nil — real codex launch will pass the
-//                                 right key via env_key and may succeed
-//   - 404 / 405 / 501           → "/v1/responses" not implemented
-//   - 400 + chat-completions-shape error → server is /v1/chat/completions-only
-//   - 5xx                       → upstream error; surface to user
-//   - Network error             → endpoint unreachable
+//   2xx                          → pass clean
+//   401 / 403                    → pass clean (route exists; auth's the
+//                                  only complaint, real launch handles
+//                                  via env_key)
+//   502 / 503 / 504              → pass + warn ("route exists but
+//                                  upstream returned X — backend may
+//                                  need to come up before codex works")
+//   404 / 405 / 501              → REFUSE: route doesn't exist
+//   400 + chat-completions hint  → REFUSE: server is chat-completions-only
+//   400 (other)                  → REFUSE: surface body
+//   500 / other 5xx              → REFUSE: surface body
+//   Network error                → REFUSE: endpoint unreachable
 //
 // Probe timeout is short (12s) — slow servers degrade UX but the
 // probe must not block the wizard indefinitely.
-func ProbeCodexCompat(ctx context.Context, endpoint, apiKey, model string) error {
+func ProbeCodexCompat(ctx context.Context, endpoint, apiKey, model string) (warning string, err error) {
 	endpoint = NormalizeEndpoint(endpoint)
 	if endpoint == "" {
-		return errors.New("empty endpoint")
+		return "", errors.New("empty endpoint")
 	}
 	if model == "" {
 		// Codex won't omit `model` in a real request, but if we don't
@@ -254,38 +257,54 @@ func ProbeCodexCompat(ctx context.Context, endpoint, apiKey, model string) error
 	bodyJSON := `{"model":"` + jsonEscape(model) + `","input":[{"role":"user","content":[{"type":"input_text","text":"ping"}]}],"max_output_tokens":1,"stream":false}`
 	req, err := http.NewRequestWithContext(ctx, "POST", endpoint+"/v1/responses", strings.NewReader(bodyJSON))
 	if err != nil {
-		return err
+		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	addBearer(req, apiKey)
 	cli := &http.Client{Timeout: 12 * time.Second}
 	resp, err := cli.Do(req)
 	if err != nil {
-		return fmt.Errorf("couldn't reach %s/v1/responses: %w", endpoint, err)
+		return "", fmt.Errorf("couldn't reach %s/v1/responses: %w", endpoint, err)
 	}
 	defer resp.Body.Close()
 
+	// Read a slice of body up front so every branch can include it
+	// in its message without duplicating the read logic.
+	buf := make([]byte, 2048)
+	n, _ := resp.Body.Read(buf)
+	bodyText := strings.TrimSpace(string(buf[:n]))
+
 	switch {
 	case resp.StatusCode/100 == 2:
-		return nil
+		return "", nil
 	case resp.StatusCode == 401 || resp.StatusCode == 403:
 		// Route exists; auth's the only complaint. Real codex launch
 		// will set the proper OPENAI_API_KEY via env_key and should
-		// succeed — pretend the probe passed.
-		return nil
+		// succeed.
+		return "", nil
+	case resp.StatusCode == 502 || resp.StatusCode == 503 || resp.StatusCode == 504:
+		// Route exists, upstream isn't reachable / overloaded. Common
+		// case: GPUStack's API gateway returns 503 when its internal
+		// worker is down. The config IS valid — the user just has a
+		// backend health issue. Pass with a warning so the user sees
+		// it and can act, but don't block the apply.
+		hint := ""
+		if bodyText != "" {
+			hint = ": " + truncForMsg(bodyText, 200)
+		}
+		return fmt.Sprintf(
+			"endpoint speaks /v1/responses but currently returns HTTP %d (upstream unreachable%s). "+
+				"Config saved; check your backend worker before launching codex.",
+			resp.StatusCode, hint), nil
 	case resp.StatusCode == 404 || resp.StatusCode == 405 || resp.StatusCode == 501:
-		return fmt.Errorf(
+		return "", fmt.Errorf(
 			"endpoint %s doesn't implement /v1/responses (HTTP %d). "+
 				"codex 0.130+ requires this endpoint. "+
 				"Use claude / opencode / deepseek (all work via /v1/chat/completions), "+
 				"or proxy this endpoint through LiteLLM",
 			endpoint, resp.StatusCode)
 	default:
-		// Read a slice of the body so the error message has enough
-		// signal for the user to debug.
-		buf := make([]byte, 2048)
-		n, _ := resp.Body.Read(buf)
-		body := strings.TrimSpace(string(buf[:n]))
+		body := bodyText
 		if body == "" {
 			body = "(empty body)"
 		}
@@ -296,15 +315,24 @@ func ProbeCodexCompat(ctx context.Context, endpoint, apiKey, model string) error
 		if strings.Contains(lower, "chat/completions") ||
 			strings.Contains(lower, "unknown endpoint") ||
 			strings.Contains(lower, "method not allowed") {
-			return fmt.Errorf(
+			return "", fmt.Errorf(
 				"endpoint %s appears to only implement /v1/chat/completions (HTTP %d: %s). "+
 					"codex 0.130+ requires /v1/responses. "+
 					"Use claude / opencode / deepseek, or proxy through LiteLLM",
-				endpoint, resp.StatusCode, body)
+				endpoint, resp.StatusCode, truncForMsg(body, 200))
 		}
-		return fmt.Errorf("endpoint %s returned HTTP %d for /v1/responses: %s",
-			endpoint, resp.StatusCode, body)
+		return "", fmt.Errorf("endpoint %s returned HTTP %d for /v1/responses: %s",
+			endpoint, resp.StatusCode, truncForMsg(body, 400))
 	}
+}
+
+// truncForMsg cuts a string at max chars and appends "…" if cut, so
+// long server error bodies don't blow out the UI line.
+func truncForMsg(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "…"
 }
 
 // jsonEscape escapes a string for safe inclusion as a JSON value. We
