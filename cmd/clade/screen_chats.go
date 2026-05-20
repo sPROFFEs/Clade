@@ -143,13 +143,10 @@ func (m chatListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// nav now serves install management only. Keeping the case
 		// empty here would shadow the layout-level `a` handler from
 		// jumping to the Agents tab, so we just don't register it.
-		case "o":
-			// Ollama config — per-chat (writes into chat.json via the
-			// smart saver). Surfaced here too so the user doesn't have
-			// to dive through the agents picker to reach it.
-			if m.cursor < len(m.items) {
-				return m, wrap(newOllamaModel(m.cfg, m.items[m.cursor].AsWorkspace()))
-			}
+		// Ollama / local-endpoint config moved into the settings menu
+		// (`e` key → "Local endpoint" row). The chat list `o` key no
+		// longer opens it directly — keeping all chat config under one
+		// roof matches the agent picker's move in 0.1.10.
 		case "t":
 			return m, wrap(newTemplateListModel(m.cfg))
 		case "p":
@@ -265,9 +262,8 @@ func chatListHelp(m chatListModel) string {
 		parts = append(parts,
 			"enter open",
 			"F fresh (skip resume)",
-			"e settings (agent, language, memory, mirror, skills)",
+			"e settings (agent, local endpoint, language, memory, mirror, skills)",
 			"f files",
-			"o ollama",
 			"p pin tab",
 			"d delete",
 		)

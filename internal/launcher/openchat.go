@@ -120,11 +120,17 @@ func OpenChatWithOptions(c Chat, opts OpenChatOptions) (LaunchPlan, Agent, error
 	if len(resume.Args) > 0 {
 		switch picked.ID {
 		case AgentCodex:
-			// codex's `resume` is a subcommand that takes over the
-			// invocation — drop any subcommand-incompatible args we
-			// added earlier (e.g. `-p ollama_remote`). Codex resume
-			// inherits the profile from the rollout itself.
-			plan.Args = append([]string(nil), resume.Args...)
+			// codex's `resume` is a subcommand, so the resume args
+			// have to come AFTER any global flags codex already
+			// expected. `-p ollama_remote` (the Ollama-profile
+			// selector that Plan() injects when ollama is configured)
+			// is a top-level global — `codex -p ollama_remote resume
+			// --last` is the valid form, NOT `codex resume --last`.
+			// We previously dropped pre-existing args entirely on
+			// resume; that silently routed Ollama-configured chats
+			// through the default profile (OpenAI). Prepend instead
+			// so the profile survives.
+			plan.Args = append(plan.Args, resume.Args...)
 		default:
 			// Claude (and future single-flag resumers) tolerate the
 			// resume flag alongside flags like `--model`. Append.

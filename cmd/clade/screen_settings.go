@@ -43,6 +43,7 @@ const (
 	settingsItemMemory
 	settingsItemMirror
 	settingsItemAgent
+	settingsItemEndpoint // local OpenAI-compat / Ollama endpoint
 	settingsItemSkills
 	settingsItemCount
 )
@@ -144,6 +145,24 @@ func chatIDFromRoot(root string) string {
 	return filepath.Base(root)
 }
 
+// freshWorkspace re-reads the workspace/chat/template from disk so a
+// downstream screen (e.g. ollamaModel) that wrote settings into
+// chat.json doesn't leave the in-memory ws stale when we return.
+func freshWorkspace(cfg *launcher.Config, ws launcher.Workspace) launcher.Workspace {
+	if id := chatIDFromRoot(ws.Root); id != "" {
+		if chat, err := launcher.LoadChat(cfg.WorkspacesRoot, id); err == nil && chat != nil {
+			return chat.AsWorkspace()
+		}
+	}
+	if tpl, err := launcher.LoadTemplate(cfg.WorkspacesRoot, ws.Name); err == nil && tpl != nil {
+		return launcher.Workspace{
+			Name: tpl.Name, Root: tpl.Root, WorkpathDir: tpl.WorkpathDir,
+			Description: tpl.Description, Settings: tpl.Settings,
+		}
+	}
+	return ws
+}
+
 // agentsLoadedForSettingsMsg is dispatched when the agent picker's
 // async detection finishes. Distinct from agentsLoadedMsg so it can't
 // be confused with the main agents picker.
@@ -243,6 +262,19 @@ func (m settingsModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.mode = settingsModeEditAgent
 			m.agentErr = ""
 			return m, m.loadAgentsCmd()
+		case settingsItemEndpoint:
+			// Local endpoint (Ollama / OpenAI-compat) config. Hand off
+			// to the existing multi-step wizard but route Esc/apply
+			// back here instead of to the chat list — keeps the user
+			// inside settings while they tweak related options.
+			cfg := m.cfg
+			ws := m.ws
+			return m, wrap(newOllamaModelWithReturn(cfg, ws, func() tea.Cmd {
+				// Reload settings from disk so the values we render
+				// reflect what the Ollama wizard just wrote.
+				reloaded := newSettingsModel(cfg, freshWorkspace(cfg, ws))
+				return wrap(reloaded)
+			}))
 		case settingsItemSkills:
 			m.mode = settingsModeEditSkills
 			m.skillInput.SetValue("")
@@ -442,6 +474,7 @@ func (m settingsModel) renderList() string {
 		{"Persistent MEMORY.md", boolValue(m.memory), "Stage a MEMORY.md the agent can read/write across sessions."},
 		{"Mirror agent state", boolValue(m.mirror), "Restore the chat's captured slice into the agent's home dir before launch. SIGKILL-safe via mtime comparison. Snapshot on exit always runs regardless."},
 		{"Agent", agentLabel(m.currentAgent), "Press Enter to open the per-chat agent picker. Switching agents writes through to chat.json immediately."},
+		{"Local endpoint", endpointLabel(m.ws.Settings.Ollama), "Route this chat through an OpenAI-compatible local endpoint (Ollama, GPUStack, vLLM, …) instead of the agent's vendor API."},
 		{"Online skills", fmt.Sprintf("%d", len(m.skills)), "Git URLs fetched into the sandbox's .claude/skills/ on launch."},
 	}
 	for i, r := range rows {
@@ -529,6 +562,24 @@ func agentLabel(id launcher.AgentID) string {
 		return descStyle.Render("(none)")
 	}
 	return string(id)
+}
+
+// endpointLabel renders the current Ollama / local-endpoint config in
+// one line for the settings menu's value column. Returns a dim "(off)"
+// when nothing's configured.
+func endpointLabel(s launcher.OllamaSettings) string {
+	if s.Endpoint == "" && s.Model == "" {
+		return descStyle.Render("(off)")
+	}
+	model := s.Model
+	if model == "" {
+		model = "?"
+	}
+	ep := s.Endpoint
+	if ep == "" {
+		ep = "?"
+	}
+	return model + "  " + descStyle.Render("@ "+ep)
 }
 
 // renderListLabel returns a wrapper around lipgloss.Width because the

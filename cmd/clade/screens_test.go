@@ -219,9 +219,10 @@ func TestChatListModel_HelpAdaptsToCursor(t *testing.T) {
 	next, _ := m.Update(runCmd(t, m.Init()))
 	m = next.(chatListModel)
 
-	// Cursor on a real chat → e/f/o/a/d should appear.
+	// Cursor on a real chat → chat-only keys should appear. Ollama/agent
+	// were moved into the settings menu so they no longer appear here.
 	help := chatListHelp(m)
-	for _, key := range []string{"e settings", "d delete", "o ollama", "f files"} {
+	for _, key := range []string{"e settings", "d delete", "f files"} {
 		if !strings.Contains(help, key) {
 			t.Errorf("on a real chat the help should mention %q; got:\n%s", key, help)
 		}
@@ -233,7 +234,7 @@ func TestChatListModel_HelpAdaptsToCursor(t *testing.T) {
 		m = nx.(chatListModel)
 	}
 	help = chatListHelp(m)
-	for _, key := range []string{"e settings", "d delete", "o ollama", "f files"} {
+	for _, key := range []string{"e settings", "d delete", "f files"} {
 		if strings.Contains(help, key) {
 			t.Errorf("on extra row the help should NOT mention %q; got:\n%s", key, help)
 		}
@@ -351,7 +352,11 @@ func TestChatListModel_EnterOnExistingGoesToLaunchingScreen(t *testing.T) {
 	}
 }
 
-func TestChatListModel_OKeyOpensOllama(t *testing.T) {
+func TestChatListModel_OKeyNoLongerOpensOllama(t *testing.T) {
+	// Ollama / local-endpoint config moved into the settings menu
+	// (`e` key → "Local endpoint" row). Pressing `o` on the chat list
+	// should be a no-op now (or fall through to the layout's own `o`
+	// handler if one exists — there isn't one today).
 	tmp := seededRoot(t)
 	redirectConfig(t, t.TempDir())
 	cfg := &launcher.Config{WorkspacesRoot: tmp}
@@ -364,11 +369,13 @@ func TestChatListModel_OKeyOpensOllama(t *testing.T) {
 
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
 	if cmd == nil {
-		t.Fatal("'o' should open Ollama screen for the highlighted chat")
+		return // no-op — what we want
 	}
-	done := runCmd(t, cmd).(screenDoneMsg)
-	if _, ok := done.next.(ollamaModel); !ok {
-		t.Errorf("expected ollamaModel, got %T", done.next)
+	msg := runCmd(t, cmd)
+	if done, ok := msg.(screenDoneMsg); ok {
+		if _, isOllama := done.next.(ollamaModel); isOllama {
+			t.Errorf("`o` on chat list still opens ollama screen — should be moved into settings menu")
+		}
 	}
 }
 

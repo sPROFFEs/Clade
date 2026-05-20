@@ -56,8 +56,8 @@ func TestSettingsScreen_MenuRoundTripsOnTemplate(t *testing.T) {
 		t.Errorf("memory should be on after space, got %v", m.memory)
 	}
 
-	// Down two more to Skills (index 4: lang, mem, mirror, agent, skills).
-	for i := 0; i < 3; i++ {
+	// Down to Skills (lang, mem, mirror, agent, endpoint, skills → 4 downs).
+	for i := 0; i < 4; i++ {
 		nx, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
 		m = nx.(settingsModel)
 	}
