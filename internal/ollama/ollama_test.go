@@ -139,6 +139,89 @@ func TestListModels_SendsBearerWhenKeySet(t *testing.T) {
 // TestApplyOpenCode_WritesAPIKeyIntoOptions: when a key is configured,
 // it lands inside provider.<name>.options.apiKey where @ai-sdk/openai-
 // compatible expects it.
+// TestProbeCodexCompat_PassesWhenServerImplementsResponses: 2xx from
+// /v1/responses → probe passes, no error.
+func TestProbeCodexCompat_PassesWhenServerImplementsResponses(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/responses" {
+			w.WriteHeader(200)
+			_, _ = w.Write([]byte(`{"id":"resp_x","output":[{"type":"output_text","text":"ok"}]}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+	if err := ProbeCodexCompat(context.Background(), srv.URL, "", "any"); err != nil {
+		t.Errorf("expected nil error on 2xx, got %v", err)
+	}
+}
+
+// TestProbeCodexCompat_AuthFailureCountsAsRouteExists: 401/403 means
+// the path matched, only auth's missing. Real codex launch will pass
+// the right key via env_key, so treat as success for compat detection.
+func TestProbeCodexCompat_AuthFailureCountsAsRouteExists(t *testing.T) {
+	for _, code := range []int{401, 403} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(code)
+		}))
+		if err := ProbeCodexCompat(context.Background(), srv.URL, "", "any"); err != nil {
+			t.Errorf("%d should count as pass (route exists), got %v", code, err)
+		}
+		srv.Close()
+	}
+}
+
+// TestProbeCodexCompat_404IsRefused: the GPUStack-style case — server
+// only implements /v1/chat/completions, so /v1/responses returns 404.
+// Error should be user-facing and mention LiteLLM as the workaround.
+func TestProbeCodexCompat_404IsRefused(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+	err := ProbeCodexCompat(context.Background(), srv.URL, "", "any")
+	if err == nil {
+		t.Fatal("404 should produce an error")
+	}
+	for _, want := range []string{"/v1/responses", "0.130", "LiteLLM"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should mention %q for the user; got: %v", want, err)
+		}
+	}
+}
+
+// TestProbeCodexCompat_400ChatCompletionsHintIsRecognised: some
+// chat-completions-only servers (LocalAI etc.) return 400 with a
+// hint about /v1/chat/completions instead of 404. The probe should
+// catch that shape too.
+func TestProbeCodexCompat_400ChatCompletionsHintIsRecognised(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(400)
+		_, _ = w.Write([]byte(`{"error":"unknown endpoint, try /v1/chat/completions"}`))
+	}))
+	defer srv.Close()
+	err := ProbeCodexCompat(context.Background(), srv.URL, "", "any")
+	if err == nil {
+		t.Fatal("400 + chat/completions hint should produce an error")
+	}
+	if !strings.Contains(err.Error(), "chat/completions") {
+		t.Errorf("error should explain it's a chat/completions-only server; got: %v", err)
+	}
+}
+
+// TestProbeCodexCompat_UnreachableEndpointReportsClearly: network
+// error → user-readable message naming the endpoint.
+func TestProbeCodexCompat_UnreachableEndpointReportsClearly(t *testing.T) {
+	// 127.0.0.1:1 is reliably refused on every OS we ship to.
+	err := ProbeCodexCompat(context.Background(), "http://127.0.0.1:1", "", "any")
+	if err == nil {
+		t.Fatal("unreachable endpoint should error")
+	}
+	if !strings.Contains(err.Error(), "127.0.0.1:1") {
+		t.Errorf("error should name the endpoint; got: %v", err)
+	}
+}
+
 func TestApplyOpenCode_WritesAPIKeyIntoOptions(t *testing.T) {
 	tmp := t.TempDir()
 	redirectHome(t, tmp)

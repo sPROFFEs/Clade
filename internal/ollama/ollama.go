@@ -211,6 +211,131 @@ const (
 	codexProfileName  = "ollama_remote"
 )
 
+// ProbeCodexCompat issues a stub POST to <endpoint>/v1/responses to
+// verify that the configured backend speaks codex 0.130+'s wire_api
+// ("responses"). The wizard calls this BEFORE ApplyCodex — if the
+// probe fails we refuse to write the codex profile rather than leave
+// the user with a half-broken config that silently routes to the
+// wrong place.
+//
+// Returns nil on success. Non-nil error is user-facing and describes
+// the failure mode in plain language.
+//
+// The probe sends the minimum well-formed /v1/responses body codex
+// would send for a real call: an `input[]` with one structured user
+// message and a 1-token cap so happy-path servers respond fast and
+// failure-path servers fail fast.
+//
+// Status code → outcome:
+//   - 2xx                       → endpoint serves the contract, return nil
+//   - 401 / 403                 → auth failure, but the route exists. Treat
+//                                 as nil — real codex launch will pass the
+//                                 right key via env_key and may succeed
+//   - 404 / 405 / 501           → "/v1/responses" not implemented
+//   - 400 + chat-completions-shape error → server is /v1/chat/completions-only
+//   - 5xx                       → upstream error; surface to user
+//   - Network error             → endpoint unreachable
+//
+// Probe timeout is short (12s) — slow servers degrade UX but the
+// probe must not block the wizard indefinitely.
+func ProbeCodexCompat(ctx context.Context, endpoint, apiKey, model string) error {
+	endpoint = NormalizeEndpoint(endpoint)
+	if endpoint == "" {
+		return errors.New("empty endpoint")
+	}
+	if model == "" {
+		// Codex won't omit `model` in a real request, but if we don't
+		// have one yet (wizard's probe-before-model-pick flow), pass
+		// a placeholder. Any /v1/responses server should still reject
+		// with a model-not-found error AFTER routing, telling us the
+		// route exists.
+		model = "probe-model"
+	}
+	bodyJSON := `{"model":"` + jsonEscape(model) + `","input":[{"role":"user","content":[{"type":"input_text","text":"ping"}]}],"max_output_tokens":1,"stream":false}`
+	req, err := http.NewRequestWithContext(ctx, "POST", endpoint+"/v1/responses", strings.NewReader(bodyJSON))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	addBearer(req, apiKey)
+	cli := &http.Client{Timeout: 12 * time.Second}
+	resp, err := cli.Do(req)
+	if err != nil {
+		return fmt.Errorf("couldn't reach %s/v1/responses: %w", endpoint, err)
+	}
+	defer resp.Body.Close()
+
+	switch {
+	case resp.StatusCode/100 == 2:
+		return nil
+	case resp.StatusCode == 401 || resp.StatusCode == 403:
+		// Route exists; auth's the only complaint. Real codex launch
+		// will set the proper OPENAI_API_KEY via env_key and should
+		// succeed — pretend the probe passed.
+		return nil
+	case resp.StatusCode == 404 || resp.StatusCode == 405 || resp.StatusCode == 501:
+		return fmt.Errorf(
+			"endpoint %s doesn't implement /v1/responses (HTTP %d). "+
+				"codex 0.130+ requires this endpoint. "+
+				"Use claude / opencode / deepseek (all work via /v1/chat/completions), "+
+				"or proxy this endpoint through LiteLLM",
+			endpoint, resp.StatusCode)
+	default:
+		// Read a slice of the body so the error message has enough
+		// signal for the user to debug.
+		buf := make([]byte, 2048)
+		n, _ := resp.Body.Read(buf)
+		body := strings.TrimSpace(string(buf[:n]))
+		if body == "" {
+			body = "(empty body)"
+		}
+		// Some chat-completions-only servers return 400 with a hint
+		// pointing at the wrong endpoint. Detect a couple of common
+		// shapes so we can give a better message.
+		lower := strings.ToLower(body)
+		if strings.Contains(lower, "chat/completions") ||
+			strings.Contains(lower, "unknown endpoint") ||
+			strings.Contains(lower, "method not allowed") {
+			return fmt.Errorf(
+				"endpoint %s appears to only implement /v1/chat/completions (HTTP %d: %s). "+
+					"codex 0.130+ requires /v1/responses. "+
+					"Use claude / opencode / deepseek, or proxy through LiteLLM",
+				endpoint, resp.StatusCode, body)
+		}
+		return fmt.Errorf("endpoint %s returned HTTP %d for /v1/responses: %s",
+			endpoint, resp.StatusCode, body)
+	}
+}
+
+// jsonEscape escapes a string for safe inclusion as a JSON value. We
+// don't want to pull in encoding/json just for the probe's body, so
+// this minimal version covers the cases that can appear in model
+// names (backslash, quotes, control chars).
+func jsonEscape(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch r {
+		case '\\':
+			b.WriteString(`\\`)
+		case '"':
+			b.WriteString(`\"`)
+		case '\n':
+			b.WriteString(`\n`)
+		case '\r':
+			b.WriteString(`\r`)
+		case '\t':
+			b.WriteString(`\t`)
+		default:
+			if r < 0x20 {
+				fmt.Fprintf(&b, `\u%04x`, r)
+				continue
+			}
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
 // ApplyCodex writes the [model_providers.ollama_remote] + [profiles.ollama_remote]
 // blocks to ~/.codex/config.toml. Existing matching blocks are replaced
 // (idempotent). Existing unrelated config is preserved.

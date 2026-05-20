@@ -16,6 +16,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -390,7 +391,28 @@ func applyOllama(ws launcher.Workspace, s ollama.Settings, picks applyPicks) []s
 		}
 	}
 	if picks.codex {
-		if path, err := ollama.ApplyCodex(s); err != nil {
+		// Probe BEFORE writing the profile. codex 0.130+ requires
+		// /v1/responses; most OpenAI-compatible servers (GPUStack,
+		// vanilla Ollama, vLLM until recently, llama.cpp's server,
+		// LocalAI) implement only /v1/chat/completions. Writing the
+		// profile against an endpoint that can't serve responses
+		// produces a chat that loads but every turn fails with
+		// codex's generic "experiencing high demand" retry message.
+		// Refuse instead.
+		probeCtx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+		probeErr := ollama.ProbeCodexCompat(probeCtx, s.Endpoint, s.APIKey, s.Model)
+		cancel()
+		if probeErr != nil {
+			out = append(out, "✗ codex: "+probeErr.Error())
+			// Strip any stale ollama_remote block left by a previous
+			// (working or partial) apply so the user isn't left with
+			// a config that codex picks up at launch and then chokes
+			// on. Best-effort — DisableCodex is a no-op when nothing's
+			// there.
+			if _, derr := ollama.DisableCodex(); derr == nil {
+				out = append(out, "  (cleaned up any stale ollama_remote block in ~/.codex/config.toml)")
+			}
+		} else if path, err := ollama.ApplyCodex(s); err != nil {
 			out = append(out, "✗ codex: "+err.Error())
 		} else {
 			out = append(out, "✓ codex: "+path+" (launched with -p ollama_remote)")
