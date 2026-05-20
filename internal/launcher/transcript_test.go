@@ -3,6 +3,7 @@ package launcher
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -156,6 +157,106 @@ func TestSearch_FindsMatchesAcrossFiles(t *testing.T) {
 	}
 	if !gotMem || !gotSum {
 		t.Errorf("expected hits in MEMORY.md and summary.md; gotMem=%v gotSum=%v", gotMem, gotSum)
+	}
+}
+
+// TestLocateCodexTranscript_TimeWindowFallback locks in the Part A fix:
+// when codex's stored cwd field doesn't string-match the sandbox path
+// verbatim (symlink resolution, drive-letter casing, trailing slash, …),
+// the locator falls back to the newest rollout within the session
+// window instead of returning empty. The Note flags the fallback so
+// the user knows why a concurrent codex session could be picked up.
+func TestLocateCodexTranscript_TimeWindowFallback(t *testing.T) {
+	tmpHome := t.TempDir()
+	if runtime.GOOS == "windows" {
+		t.Setenv("USERPROFILE", tmpHome)
+	} else {
+		t.Setenv("HOME", tmpHome)
+	}
+	sandbox := t.TempDir()
+	sessionStart := time.Now().Add(-1 * time.Minute)
+
+	// Plant a rollout whose cwd field intentionally does NOT match
+	// the sandbox — like the real-world symlink-resolution case.
+	dateDir := filepath.Join(tmpHome, ".codex", "sessions",
+		sessionStart.Format("2006"),
+		sessionStart.Format("01"),
+		sessionStart.Format("02"))
+	if err := os.MkdirAll(dateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rollout := filepath.Join(dateDir, "rollout-20260520T100000-test.jsonl")
+	body := `{"type":"session_meta","cwd":"/private/var/folders/xx/wrong/path"}` + "\n" +
+		`{"type":"user_message","text":"refactor X"}` + "\n"
+	if err := os.WriteFile(rollout, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Make sure the file is "after" sessionStart by mtime.
+	now := time.Now()
+	_ = os.Chtimes(rollout, now, now)
+
+	src, raw, parsed, note, err := locateCodexTranscript(sandbox, sessionStart)
+	if err != nil {
+		t.Fatalf("locator err: %v", err)
+	}
+	if src == "" {
+		t.Fatalf("expected fallback to pick the rollout despite cwd mismatch; got empty src, note=%q", note)
+	}
+	if src != rollout {
+		t.Errorf("picked %q, want %q", src, rollout)
+	}
+	if len(raw) == 0 || len(parsed) == 0 {
+		t.Errorf("expected raw+parsed content from the rollout")
+	}
+	if note == "" || !strings.Contains(note, "fallback") {
+		t.Errorf("expected fallback note, got %q", note)
+	}
+}
+
+// TestLocateCodexTranscript_StrictPreferredWhenMatching: when one
+// rollout matches the sandbox cwd and another (newer) doesn't, the
+// matching one wins despite being older. This is the concurrent-codex
+// safety net that the looseLatest fallback must not undermine.
+func TestLocateCodexTranscript_StrictPreferredWhenMatching(t *testing.T) {
+	tmpHome := t.TempDir()
+	if runtime.GOOS == "windows" {
+		t.Setenv("USERPROFILE", tmpHome)
+	} else {
+		t.Setenv("HOME", tmpHome)
+	}
+	sandbox := t.TempDir()
+	sessionStart := time.Now().Add(-1 * time.Minute)
+
+	dateDir := filepath.Join(tmpHome, ".codex", "sessions",
+		sessionStart.Format("2006"),
+		sessionStart.Format("01"),
+		sessionStart.Format("02"))
+	if err := os.MkdirAll(dateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	matching := filepath.Join(dateDir, "rollout-20260520T100000-ours.jsonl")
+	unrelated := filepath.Join(dateDir, "rollout-20260520T100100-someone-else.jsonl")
+	wantCwd := normaliseCwd(sandbox)
+	if err := os.WriteFile(matching, []byte(`{"type":"session_meta","cwd":"`+wantCwd+`"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(unrelated, []byte(`{"type":"session_meta","cwd":"/other/sandbox"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Make the unrelated one newer by mtime.
+	now := time.Now()
+	_ = os.Chtimes(matching, now.Add(-30*time.Second), now.Add(-30*time.Second))
+	_ = os.Chtimes(unrelated, now, now)
+
+	src, _, _, note, err := locateCodexTranscript(sandbox, sessionStart)
+	if err != nil {
+		t.Fatalf("locator err: %v", err)
+	}
+	if src != matching {
+		t.Errorf("strict cwd match should win over newer-but-unrelated; got %q want %q", src, matching)
+	}
+	if note != "" {
+		t.Errorf("strict pick should NOT emit a fallback note; got %q", note)
 	}
 }
 

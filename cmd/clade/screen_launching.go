@@ -24,6 +24,12 @@ type launchingModel struct {
 	cfg  *launcher.Config
 	chat launcher.Chat
 
+	// fresh, when true, tells OpenChat to bypass RestoreNativeSession
+	// for this launch. The chat's captured sessions/ dir is left as-is
+	// so a subsequent normal launch can still resume. Set by the chat
+	// list's `F` key (vs. plain Enter, which auto-resumes).
+	fresh bool
+
 	step    string // human-readable phase label
 	frame   int    // spinner frame
 	planErr error
@@ -43,11 +49,23 @@ func newLaunchingModel(cfg *launcher.Config, chat launcher.Chat) launchingModel 
 	return launchingModel{cfg: cfg, chat: chat, step: "Resolving agent..."}
 }
 
+// newLaunchingModelFresh is the "skip native resume" variant — bound to
+// the chat list's `F` key. Used when the user wants to start over on a
+// chat that already has a captured session, without manually deleting
+// the sessions/ dir.
+func newLaunchingModelFresh(cfg *launcher.Config, chat launcher.Chat) launchingModel {
+	m := newLaunchingModel(cfg, chat)
+	m.fresh = true
+	m.step = "Resolving agent (fresh launch — skipping resume)..."
+	return m
+}
+
 func (m launchingModel) Init() tea.Cmd {
 	chat := m.chat
+	opts := launcher.OpenChatOptions{SkipResume: m.fresh}
 	return tea.Batch(
 		func() tea.Msg {
-			plan, _, err := launcher.OpenChat(chat)
+			plan, _, err := launcher.OpenChatWithOptions(chat, opts)
 			if err != nil {
 				return launchPlannedMsg{err: err}
 			}
@@ -131,7 +149,12 @@ func (m launchingModel) Body() string {
 	b.WriteString(spin + " " + hintStyle.Render(m.step) + "\n\n")
 	b.WriteString(subtitleStyle.Render("Template: ") + m.chat.Template + "\n")
 	b.WriteString(subtitleStyle.Render("Agent:    ") + string(m.chat.AgentID) + "\n")
-	b.WriteString(subtitleStyle.Render("Sandbox:  ") + m.chat.SandboxDir + "\n\n")
+	b.WriteString(subtitleStyle.Render("Sandbox:  ") + m.chat.SandboxDir + "\n")
+	mode := "auto-resume (use F on the chat list for a fresh launch)"
+	if m.fresh {
+		mode = errorStyle.Render("fresh launch — captured session NOT restored")
+	}
+	b.WriteString(subtitleStyle.Render("Mode:     ") + mode + "\n\n")
 	b.WriteString(hintStyle.Render(
 		"Compiling workpath into sandbox, staging MEMORY.md, " +
 			"cloning online skills, recording session metadata..."))

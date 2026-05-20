@@ -106,6 +106,16 @@ func (m chatListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				c := m.items[m.cursor]
 				return m, wrap(newLaunchingModel(m.cfg, c))
 			}
+		case "F":
+			// Fresh-launch escape hatch: same as Enter but tells OpenChat
+			// to skip native session restore. Useful when you want to
+			// start over on a chat that already has captured sessions
+			// without manually `rm -rf <chat>/sessions/*`. The on-disk
+			// sessions/ dir is left intact — a subsequent plain Enter
+			// will resume normally.
+			if m.cursor < len(m.items) {
+				return m, wrap(newLaunchingModelFresh(m.cfg, m.items[m.cursor]))
+			}
 		case "n":
 			return m, wrap(newPickTemplateModel(m.cfg))
 		case "d":
@@ -128,15 +138,11 @@ func (m chatListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				parent := newChatListModel(m.cfg)
 				return m, wrap(newFilesModel(m.cfg, c.WorkpathDir, "chat "+c.Label, parent))
 			}
-		case "a":
-			// Per-chat agent override: open the agents picker pre-
-			// seeded on this chat's current agent. Picking a different
-			// one persists the swap into chat.json before launching, so
-			// the next time you open the chat it'll come up bound to
-			// the new agent.
-			if m.cursor < len(m.items) {
-				return m, wrap(newAgentsModelForChatOverride(m.cfg, m.items[m.cursor]))
-			}
+		// Per-chat agent override moved into the settings menu (Step 4
+		// of the settings list — "Agent"). The Agents tab in the left
+		// nav now serves install management only. Keeping the case
+		// empty here would shadow the layout-level `a` handler from
+		// jumping to the Agents tab, so we just don't register it.
 		case "o":
 			// Ollama config — per-chat (writes into chat.json via the
 			// smart saver). Surfaced here too so the user doesn't have
@@ -258,10 +264,10 @@ func chatListHelp(m chatListModel) string {
 	if chatSelected {
 		parts = append(parts,
 			"enter open",
-			"e settings",
+			"F fresh (skip resume)",
+			"e settings (agent, language, memory, mirror, skills)",
 			"f files",
 			"o ollama",
-			"a agents",
 			"p pin tab",
 			"d delete",
 		)

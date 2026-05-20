@@ -373,8 +373,17 @@ func locateCodexTranscript(sandboxDir string, sessionStart time.Time) (string, [
 	cutoff := sessionStart.Add(-2 * time.Second)
 	wantCwd := normaliseCwd(sandboxDir)
 
-	var picked string
-	var pickedMod time.Time
+	// Two passes through the walker: first prefer files whose first record
+	// names our sandbox cwd (handles concurrent codex sessions from other
+	// terminals — we don't want to steal an unrelated chat's session).
+	// On miss, fall back to the newest rollout in the session window,
+	// regardless of cwd. The strict pass was too brittle: codex stores cwd
+	// after a few path-normalisation steps (symlink resolution on macOS,
+	// drive-letter casing on Windows), and any mismatch silently produced
+	// "no transcript captured" with only summary.json left behind.
+	var strictPick, looseLatest string
+	var strictMod, looseMod time.Time
+	var looseNote string
 	err := filepath.WalkDir(base, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return nil // ignore unreadable subtrees
@@ -393,21 +402,32 @@ func locateCodexTranscript(sandboxDir string, sessionStart time.Time) (string, [
 		if info.ModTime().Before(cutoff) {
 			return nil
 		}
-		// Cheap: peek at first ~2KB to find the cwd field.
-		if !codexFileMatchesCwd(path, wantCwd) {
-			return nil
+		// Track the newest rollout in the window unconditionally (fallback).
+		if info.ModTime().After(looseMod) {
+			looseLatest = path
+			looseMod = info.ModTime()
 		}
-		if info.ModTime().After(pickedMod) {
-			picked = path
-			pickedMod = info.ModTime()
+		// Cheap: peek at first ~2KB to find the cwd field.
+		if codexFileMatchesCwd(path, wantCwd) {
+			if info.ModTime().After(strictMod) {
+				strictPick = path
+				strictMod = info.ModTime()
+			}
 		}
 		return nil
 	})
 	if err != nil {
 		return "", nil, nil, "", err
 	}
+	picked := strictPick
+	if picked == "" && looseLatest != "" {
+		picked = looseLatest
+		looseNote = "codex transcript captured via time-window fallback " +
+			"(cwd field in rollout didn't match the sandbox path verbatim; if you " +
+			"had concurrent codex sessions from another terminal this could be the wrong one)"
+	}
 	if picked == "" {
-		return "", nil, nil, "no codex transcript matched this sandbox after " + sessionStart.Format(time.RFC3339), nil
+		return "", nil, nil, "no codex transcript modified after " + sessionStart.Format(time.RFC3339) + " (codex may not have flushed yet, or its store rotated)", nil
 	}
 
 	raw, err := os.ReadFile(picked)
@@ -415,7 +435,7 @@ func locateCodexTranscript(sandboxDir string, sessionStart time.Time) (string, [
 		return "", nil, nil, "", err
 	}
 	parsed := parseCodexJSONL(raw)
-	return picked, raw, parsed, "", nil
+	return picked, raw, parsed, looseNote, nil
 }
 
 // normaliseCwd lower-cases the cwd on Windows (case-insensitive FS) and

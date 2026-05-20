@@ -393,7 +393,11 @@ func TestChatListModel_EKeyOpensSettings(t *testing.T) {
 	}
 }
 
-func TestChatListModel_AKeyOpensAgentsPicker(t *testing.T) {
+func TestChatListModel_AKeyDoesNotOpenAgentsPicker(t *testing.T) {
+	// The per-chat agent picker was moved into the settings menu
+	// (`e` key) — pressing `a` on the chat list should NOT open it
+	// anymore. The layout-level `a` handler still navigates to the
+	// (install-only) Agents tab; that's tested elsewhere.
 	tmp := seededRoot(t)
 	redirectConfig(t, t.TempDir())
 	cfg := &launcher.Config{WorkspacesRoot: tmp}
@@ -406,11 +410,13 @@ func TestChatListModel_AKeyOpensAgentsPicker(t *testing.T) {
 
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
 	if cmd == nil {
-		t.Fatal("'a' should open agents picker")
+		return // no-op — what we want
 	}
-	done := runCmd(t, cmd).(screenDoneMsg)
-	if _, ok := done.next.(agentsModel); !ok {
-		t.Errorf("expected agentsModel via 'a', got %T", done.next)
+	msg := runCmd(t, cmd)
+	if done, ok := msg.(screenDoneMsg); ok {
+		if _, isOverride := done.next.(agentsModel); isOverride {
+			t.Errorf("`a` on chat list still opens per-chat agent picker — should be moved to settings")
+		}
 	}
 }
 
@@ -660,17 +666,21 @@ func TestAgentsScreen_EnterOnUnavailableRoutesToInstall(t *testing.T) {
 	}
 }
 
-func TestRootModel_RoutesScreensAndCapturesLaunch(t *testing.T) {
+func TestRootModel_LaunchReturnsExecProcessCmd(t *testing.T) {
+	// rootModel.Update no longer quits on a launch — it returns a
+	// tea.ExecProcess command that runs the agent inside the running
+	// Bubbletea program (stay-in-Clade). We just confirm cfg gets
+	// persisted onto the rootModel and a non-nil Cmd is returned.
 	root := &rootModel{screen: newFirstRun()}
-	plan := launcher.LaunchPlan{Command: "echo", Dir: t.TempDir()}
+	plan := launcher.LaunchPlan{Command: fakeCmd(), Args: fakeArgs(), Dir: t.TempDir()}
 	cfg := &launcher.Config{WorkspacesRoot: "/tmp/x", LastAgent: "codex"}
 
 	_, cmd := root.Update(screenDoneMsg{launch: &plan, updateCfg: cfg})
 	if cmd == nil {
-		t.Fatal("expected a Cmd (tea.Quit)")
+		t.Fatal("expected a Cmd (tea.ExecProcess)")
 	}
-	if root.launch == nil || root.launch.Command != "echo" {
-		t.Errorf("root.launch not captured: %+v", root.launch)
+	if root.cfg == nil || root.cfg.LastAgent != "codex" {
+		t.Errorf("root.cfg not updated: %+v", root.cfg)
 	}
 }
 
@@ -685,10 +695,35 @@ func TestRootModel_ErrMsgIsFatal(t *testing.T) {
 	}
 }
 
-func TestExecAgent_RunsCommandAndPropagatesExit(t *testing.T) {
-	plan := launcher.LaunchPlan{Command: fakeCmd(), Args: fakeArgs(), Dir: t.TempDir()}
-	if code := execAgent(plan); code != 0 {
-		t.Errorf("execAgent returned %d for a successful command", code)
+func TestBuildAgentCmd_PreservesPlan(t *testing.T) {
+	plan := launcher.LaunchPlan{
+		Command: fakeCmd(),
+		Args:    fakeArgs(),
+		Dir:     t.TempDir(),
+		Env:     map[string]string{"X_CLADE_TEST": "1"},
+	}
+	cmd := buildAgentCmd(plan)
+	if cmd.Path == "" || filepath.Base(cmd.Path) != filepath.Base(plan.Command) {
+		t.Errorf("cmd.Path = %q, want a path to %q", cmd.Path, plan.Command)
+	}
+	if cmd.Dir != plan.Dir {
+		t.Errorf("cmd.Dir = %q, want %q", cmd.Dir, plan.Dir)
+	}
+	gotEnv := false
+	for _, kv := range cmd.Env {
+		if kv == "X_CLADE_TEST=1" {
+			gotEnv = true
+			break
+		}
+	}
+	if !gotEnv {
+		t.Error("plan.Env not merged into cmd.Env")
+	}
+}
+
+func TestExtractExitCode(t *testing.T) {
+	if extractExitCode(nil) != 0 {
+		t.Error("nil err → 0")
 	}
 }
 

@@ -14,6 +14,8 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/sPROFFEs/Clade/internal/version"
 )
 
 // Tracked state captured from the most recent tea.WindowSizeMsg. Package
@@ -83,8 +85,9 @@ func renderTitleBar(title string, w int) string {
 	app := titleStyle.Render("clade")
 	sep := lipgloss.NewStyle().Foreground(t.Border).Render(" │ ")
 	titleStyled := lipgloss.NewStyle().Foreground(t.Accent).Bold(true).Render(title)
+	verBadge := lipgloss.NewStyle().Foreground(t.Muted).Render("v" + version.Current)
 
-	left := app + sep + titleStyled
+	left := app + sep + verBadge + sep + titleStyled
 	// Right-align a hint that the user can always ctrl-c out.
 	right := lipgloss.NewStyle().Foreground(t.Muted).Render("ctrl-c quit")
 

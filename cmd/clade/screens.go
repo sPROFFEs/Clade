@@ -382,6 +382,14 @@ func (m agentsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, wrap(newInstallModel(m.cfg, m.ws, a.ID))
 			}
 
+			// Install-only mode (the left-nav Agents tab — no chat,
+			// no override). Enter on an INSTALLED agent now opens the
+			// install screen too so the user can upgrade / reinstall
+			// from here. Per-chat agent swap lives in chat settings.
+			if m.override == nil && m.ws.Name == "" {
+				return m, wrap(newInstallModel(m.cfg, m.ws, a.ID))
+			}
+
 			// Override mode: persist the new agent into the chat's
 			// manifest before launching. We always re-read the chat
 			// from disk so a stale in-memory copy can't clobber a
@@ -457,6 +465,10 @@ func (m agentsModel) Help() string {
 	if m.override != nil {
 		return "enter swap+launch · same agent re-launches as-is · i install · esc back"
 	}
+	if m.ws.Name == "" {
+		// Install-only mode (left-nav Agents tab).
+		return "↑/↓ select · enter install/update · i install · esc back"
+	}
 	return "↑/↓ select · enter launch/install · i install · o ollama · esc back"
 }
 func (m agentsModel) NavSection() string    { return navSectionAgents }
@@ -510,9 +522,16 @@ func (m agentsModel) Body() string {
 	}
 
 	b.WriteString("\n")
-	b.WriteString(hintStyle.Render(
-		"Grey entries aren't on PATH — press enter (or i) to install them.",
-	))
+	if m.ws.Name == "" && m.override == nil {
+		b.WriteString(hintStyle.Render(
+			"Install management. Enter opens the installer for the selected agent (whether installed or not). "+
+				"Per-chat agent swap lives in chat settings (e key on the chat list).",
+		))
+	} else {
+		b.WriteString(hintStyle.Render(
+			"Grey entries aren't on PATH — press enter (or i) to install them.",
+		))
+	}
 	return b.String()
 }
 

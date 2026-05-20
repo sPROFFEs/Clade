@@ -42,6 +42,15 @@ type WorkspaceSettings struct {
 	// vars for Claude so it routes to the local Ollama endpoint instead
 	// of Anthropic. Stored here so the choice follows the workspace.
 	Ollama OllamaSettings `json:"ollama,omitempty"`
+	// MirrorAgentState, when true, opts the chat into Step 3's
+	// mirror-in / mirror-out semantics: before launch the chat's
+	// captured per-agent slice replaces the agent's home-dir view of
+	// this cwd; after exit the home-dir view is mirrored back. Off by
+	// default because the data-loss failure modes (SIGKILL between
+	// agent exit and mirror-back, concurrent agent instances) are
+	// real. Step 2's snapshot-on-exit always runs regardless; this
+	// flag only controls whether we ALSO mirror IN at launch time.
+	MirrorAgentState bool `json:"mirrorAgentState,omitempty"`
 }
 
 // OllamaSettings duplicates internal/ollama.Settings to avoid an import

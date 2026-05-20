@@ -46,6 +46,13 @@ func CapturePostExit(ws Workspace, agent Agent, sessionStart, sessionEnd time.Ti
 	if err != nil {
 		return SessionSummary{}, err
 	}
+	// Step 2: snapshot the whole per-chat slice of the agent's native
+	// store into <ts>-<agent>/native/. Runs in the BACKGROUND so the
+	// TUI redraws immediately when the agent exits — slice copies
+	// (claude project dirs, opencode message trees) can be tens of
+	// MB / hundreds of files on slow disks. Best-effort: failures
+	// land in LastMirrorResult.Note, never block the UI.
+	StartMirrorOutAsync(agent, ws.SandboxDir, dir)
 	return WriteSummary(cap, dir, sessionStart, sessionEnd)
 }
 

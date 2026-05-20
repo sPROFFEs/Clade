@@ -82,6 +82,21 @@ var LastSessionDir string
 // grab a previous session's artifact for the same cwd.
 var LastSessionStartedAt time.Time
 
+// LastResumeNote / LastResumeRestoredTo carry the most recent native-
+// resume attempt's outcome (set by OpenChat after RestoreNativeSession).
+// The TUI's launching screen + chat-list diagnostics can render these
+// so the user sees "resumed from <path>" or "no prior session" without
+// needing a separate UI plumbing pass for every screen.
+var LastResumeNote string
+var LastResumeRestoredTo string
+
+// LastMirrorResult holds the most recent MirrorOutSlice outcome (set
+// by CapturePostExit). LastMirrorInResult is the most recent MirrorIn
+// (set by OpenChat when Step 3 mirror-in fires). Both are best-effort
+// diagnostics the TUI can surface without changing the plumbing.
+var LastMirrorResult MirrorResult
+var LastMirrorInResult MirrorResult
+
 // writeSandboxReadme drops an orientation file on first compile so the
 // user lands in something self-explanatory when they cd into the sandbox.
 func writeSandboxReadme(ws Workspace, agent Agent) error {
@@ -134,6 +149,10 @@ func Plan(ws Workspace, agent Agent) (LaunchPlan, error) {
 	// doesn't leak state into this one.
 	LastSessionDir = ""
 	LastSessionStartedAt = time.Time{}
+	LastResumeNote = ""
+	LastResumeRestoredTo = ""
+	LastMirrorResult = MirrorResult{}
+	LastMirrorInResult = MirrorResult{}
 	if err := PrepareSandbox(ws, agent); err != nil {
 		return LaunchPlan{}, err
 	}

@@ -86,7 +86,7 @@ func main() {
 		initial = newSplashModel(firstScreen)
 	}
 
-	root := &rootModel{screen: initial}
+	root := &rootModel{screen: initial, cfg: cfg}
 	// WithAltScreen takes over the terminal and restores the previous
 	// content on exit — matches what professional TUIs (lazygit, k9s,
 	// htop) do and keeps the user's shell scrollback clean.
@@ -94,51 +94,30 @@ func main() {
 	if _, err := prog.Run(); err != nil {
 		die(err)
 	}
-
-	if root.launch != nil {
-		// Persist the choice of agent for next session.
-		if root.updateCfg != nil {
-			_ = launcher.SaveConfig(root.updateCfg)
-		}
-		sessionStart := launcher.LastSessionStartedAt
-		if sessionStart.IsZero() {
-			sessionStart = time.Now().UTC()
-		}
-		code := execAgent(*root.launch)
-		sessionEnd := time.Now().UTC()
-		// Sync MEMORY.md back from the sandbox so the agent's writes
-		// persist across launches. Best-effort — failures don't change
-		// the exit code.
-		if root.launchedWS != nil {
-			_ = launcher.SyncMemoryBack(*root.launchedWS)
-		}
-		// Capture the just-ended session's transcript out of the
-		// agent's own store and write a markdown summary into the
-		// chat's sessions/<ts>-<agent>/ dir. Both are best-effort —
-		// any failure is swallowed so the user's exit code reflects
-		// the agent's exit code, nothing else.
-		if root.launchedWS != nil && root.launchedAgent != "" {
-			if agent, ok := launcher.ResolveAgentForChat(root.launchedAgent, 2*time.Second); ok {
-				_, _ = launcher.CapturePostExit(*root.launchedWS, agent, sessionStart, sessionEnd)
-			}
-		}
-		os.Exit(code)
-	}
+	// Stay-in-Clade model: agent runs are handled INSIDE the Bubbletea
+	// program via tea.ExecProcess (see rootModel.Update). main() only
+	// needs to bubble fatal errors back to the shell.
 	if root.fatal != nil {
 		die(root.fatal)
 	}
 }
 
-// rootModel keeps the active screen, plus two pieces of "result state" the
-// outer main() needs after Bubble Tea has finished: the launch plan and a
-// fatal error (if any).
+// rootModel keeps the active screen and Clade-global state (the loaded
+// config, last fatal error). Agent launches are handled inline via
+// tea.ExecProcess in Update — the program no longer quits on launch.
 type rootModel struct {
-	screen        tea.Model
-	launch        *launcher.LaunchPlan
-	updateCfg     *launcher.Config
-	launchedWS    *launcher.Workspace // remembered for post-launch sync-back
-	launchedAgent launcher.AgentID    // remembered for post-launch transcript capture
-	fatal         error
+	screen tea.Model
+	cfg    *launcher.Config
+	fatal  error
+}
+
+// agentExitedMsg is dispatched by the tea.ExecProcess callback after the
+// agent CLI returns. Carries everything the post-exit pipeline needs +
+// the next screen to route to.
+type agentExitedMsg struct {
+	exitErr  error
+	exitCode int
+	cfg      *launcher.Config
 }
 
 func (m *rootModel) Init() tea.Cmd { return m.screen.Init() }
@@ -159,11 +138,40 @@ func (m *rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case screenDoneMsg:
 		if msg.launch != nil {
-			m.launch = msg.launch
-			m.updateCfg = msg.updateCfg
-			m.launchedWS = msg.launchedWS
-			m.launchedAgent = msg.launchedAgent
-			return m, tea.Quit
+			// Persist cfg early so a SIGKILL mid-agent doesn't lose
+			// the LastAgent / WorkspacesRoot updates.
+			if msg.updateCfg != nil {
+				_ = launcher.SaveConfig(msg.updateCfg)
+				m.cfg = msg.updateCfg
+			}
+			cmd := buildAgentCmd(*msg.launch)
+			ws := msg.launchedWS
+			agentID := msg.launchedAgent
+			cfg := m.cfg
+			sessionStart := launcher.LastSessionStartedAt
+			if sessionStart.IsZero() {
+				sessionStart = time.Now().UTC()
+			}
+			// tea.ExecProcess hands the TTY to the agent, runs it,
+			// then calls the callback. We return its result message
+			// (agentExitedMsg) which Update handles below — staying
+			// in Clade, redrawing the chat list.
+			return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
+				sessionEnd := time.Now().UTC()
+				if ws != nil {
+					_ = launcher.SyncMemoryBack(*ws)
+				}
+				if ws != nil && agentID != "" {
+					if agent, ok := launcher.ResolveAgentForChat(agentID, 2*time.Second); ok {
+						_, _ = launcher.CapturePostExit(*ws, agent, sessionStart, sessionEnd)
+					}
+				}
+				return agentExitedMsg{
+					exitErr:  err,
+					exitCode: extractExitCode(err),
+					cfg:      cfg,
+				}
+			})
 		}
 		if msg.next != nil {
 			// Pre-launcher screens (splash, firstRun) don't intercept
@@ -177,6 +185,16 @@ func (m *rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			// fall through to the inner Update so layoutModel handles it
 		}
+	case agentExitedMsg:
+		// Agent finished. Land back on the chat list so the user can
+		// keep working in Clade. Diagnostics on the chat list will
+		// pick up the just-captured session via LoadRecentSummaries.
+		cfg := msg.cfg
+		if cfg == nil {
+			cfg = m.cfg
+		}
+		m.screen = newLayoutModel(cfg)
+		return m, m.screen.Init()
 	case errMsg:
 		// Bubble unrecoverable errors up to main() — most screen-level
 		// errors are caught inside the screen and surfaced inline.
@@ -190,19 +208,13 @@ func (m *rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *rootModel) View() string { return m.screen.View() }
 
-// execAgent spawns the agent CLI with stdio inherited from this process,
-// in the workspace's sandbox dir. Bubble Tea has already released the
-// terminal (program.Run returned), so the agent owns the TTY cleanly.
-//
-// We never use syscall.Exec, even on Unix: keeping a parent process means
-// the agent's exit code propagates back through our Exit, and we get one
-// uniform path on every OS.
-func execAgent(plan launcher.LaunchPlan) int {
+// buildAgentCmd assembles the *exec.Cmd for tea.ExecProcess. Bubbletea
+// itself wires stdin/stdout/stderr to the host terminal during execution
+// (releasing the alt screen, restoring it on exit), so we only set
+// command/args/dir/env here.
+func buildAgentCmd(plan launcher.LaunchPlan) *exec.Cmd {
 	cmd := exec.Command(plan.Command, plan.Args...)
 	cmd.Dir = plan.Dir
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
 	if len(plan.Env) > 0 {
 		env := os.Environ()
 		for k, v := range plan.Env {
@@ -210,14 +222,20 @@ func execAgent(plan launcher.LaunchPlan) int {
 		}
 		cmd.Env = env
 	}
-	if err := cmd.Run(); err != nil {
-		if ee, ok := err.(*exec.ExitError); ok {
-			return ee.ExitCode()
-		}
-		fmt.Fprintf(os.Stderr, "clade: launch %s: %v\n", plan.Command, err)
-		return 1
+	return cmd
+}
+
+// extractExitCode pulls the OS exit code out of cmd.Run-style errors.
+// Bubbletea's ExecProcess callback gets the same error shape exec.Cmd
+// would return synchronously. A nil error means exit 0.
+func extractExitCode(err error) int {
+	if err == nil {
+		return 0
 	}
-	return 0
+	if ee, ok := err.(*exec.ExitError); ok {
+		return ee.ExitCode()
+	}
+	return 1
 }
 
 func die(err error) {
