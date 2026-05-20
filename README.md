@@ -57,17 +57,28 @@ First run is two questions:
 
 1. **Workspaces root** — where templates + chats live. Default
    `~/clade-workspaces`.
-2. **Seed bundled samples?** — copies the `reversing` and
-   `code-review` example templates in so you have something to chat
-   against immediately.
+2. **Seed bundled samples?** — copies the `reversing`,
+   `code-review`, and `workpath-author` example templates in so you
+   have something to chat against immediately.
 
 Then: home screen → `n` (new chat) → pick a template → name the chat
 → pick an agent. The chat is created, the workpath is compiled into
 its sandbox, the agent launches with `cwd` set to that sandbox.
 
-Next time: chat list shows your past chats sorted by last-used.
-Enter resumes — the agent picks up its own session history because
-the working directory is stable.
+Clade **does not quit** when the agent runs. The TUI stays alive
+across the child's lifetime — when you exit the agent (`/exit`,
+`Ctrl-D`, etc.), control returns to the chat list with the
+just-ended session's diagnostics already visible. Launch another
+chat without leaving Clade.
+
+Next time you re-open a chat: the launcher inspects the agent's own
+session store, finds your previous session(s) for that chat's
+sandbox, and resumes natively — `claude --continue` or `claude
+--resume <UUID>` for Claude, `codex resume --last` / `codex resume
+<UUID>` for Codex. When two or more matching sessions exist, the
+agent's own picker opens scoped to this chat. Press `F` on the chat
+list (instead of Enter) for a deliberate fresh launch that skips
+resume but leaves the captured sessions on disk.
 
 ## Concepts
 
@@ -86,11 +97,18 @@ templates/
 └── code-review/workpath/
 chats/
 ├── 20251017-1430-cve-fix/          one cloned instance per session
-│   ├── chat.json                   {template, agent, createdAt, lastUsed}
+│   ├── chat.json                   {template, agent, createdAt, lastUsed, settings.{ollama,mirror,…}}
 │   ├── workpath/                   copied from template at creation
 │   ├── sandbox/                    agent cwd; gitignored
 │   ├── MEMORY.md                   persistent across re-opens
-│   └── sessions/                   per-launch metadata
+│   └── sessions/<ts>-<agent>/      per-launch artifacts
+│       ├── transcript.jsonl        canonical rollout (search / cross-agent recap)
+│       ├── summary.md              rule-based digest (turns, tools, headline)
+│       ├── summary.json            structured metadata
+│       └── native/                 full slice of the agent's home-dir store
+│                                   for this chat (claude project dir, codex
+│                                   rollouts matching cwd, opencode info+messages,
+│                                   gemini tmp). Makes the chat dir fully portable.
 └── 20251017-1500-pr-123-review/
 ```
 
@@ -184,19 +202,25 @@ syncing the file; existing notes stay on disk.
 <img width="2506" height="1190" alt="{5D687895-AE30-461F-AC76-004FA789BFE6}" src="https://github.com/user-attachments/assets/a966d13b-4a62-4ca6-8579-19ec7d2cf909" />
 ### Home (chat list)
 
-| Key       | Effect                              |
-|-----------|-------------------------------------|
-| `↑/↓ k/j` | Move selection                      |
-| `enter`   | Open chat (or `+ new chat`)         |
-| `n`       | New chat                            |
-| `d`       | Delete highlighted chat (confirms)  |
-| `e`       | Edit chat settings (per-chat)       |
-| `f`       | Edit chat files (mission, persona…) |
-| `a`       | Swap agent for this chat (persists) |
-| `o`       | Configure Ollama for this chat      |
-| `t`       | Template manager                    |
-| `r`       | Refresh                             |
-| `ctrl-c`  | Quit                                |
+| Key       | Effect                                                      |
+|-----------|-------------------------------------------------------------|
+| `↑/↓ k/j` | Move selection                                              |
+| `enter`   | Open chat (auto-resume if a native session exists)          |
+| `F`       | Fresh launch — skip resume, leave captured sessions on disk |
+| `n`       | New chat                                                    |
+| `d`       | Delete highlighted chat (confirms)                          |
+| `e`       | Edit chat settings — agent / language / memory / mirror state / local endpoint / online skills |
+| `f`       | Edit chat files (mission, persona…)                         |
+| `p`       | Pin chat to the tab strip                                   |
+| `/`       | Cross-chat search                                           |
+| `t`       | Template manager                                            |
+| `r`       | Refresh                                                     |
+| `ctrl-c`  | Quit                                                        |
+
+The per-chat **agent picker** and **local endpoint config** moved
+into the settings menu (`e`) in 0.1.10 — both were single-purpose
+keys on the chat list before. The left-nav Agents tab (`Ctrl-3`) is
+now install-management only.
 
 ### Template list (`t` from home)
 
@@ -208,55 +232,112 @@ syncing the file; existing notes stay on disk.
 | `f`     | Edit template files                               |
 | `esc`   | Back to chats                                     |
 
-### Agent picker
+### Agents tab (left nav, install-only)
 
-| Key     | Effect                                            |
-|---------|---------------------------------------------------|
-| `enter` | Launch (if installed) or open installer (if not)  |
-| `i`     | Install / upgrade the highlighted agent           |
-| `o`     | Open the Ollama configuration screen              |
+The left-nav Agents tab is for install management — installing,
+updating, or repairing the agent CLIs. Per-chat agent swap lives in
+the chat settings menu (`e` on the chat list → Agent row), since
+that's where chat-level config belongs.
 
-## Local models (Ollama)
+| Key     | Effect                                                  |
+|---------|---------------------------------------------------------|
+| `↑/↓`   | Move selection                                          |
+| `enter` | Open the installer for the highlighted agent (install or upgrade) |
+| `i`     | Same as Enter — explicit install                        |
+| `esc`   | Back                                                    |
 
-`o` from the home screen (or the agent picker) opens the Ollama
-config. It probes a remote endpoint, lists installed models, and
-writes per-agent config for whichever agents you tick.
+On Windows the install screen has an opt-in `n` keybinding to also
+install Node.js LTS via `winget` when the selected method needs
+Node — useful for fresh boxes that don't have a Node runtime yet.
+Off by default.
 
-| Agent       | What gets written                                                   |
-|-------------|---------------------------------------------------------------------|
-| Claude      | `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` per chat (env-only)   |
-| Codex       | `[model_providers.ollama_remote]` + profile in `~/.codex/config.toml` — launched with `-p ollama_remote` |
-| OpenCode    | `provider.ollama_remote` block in `~/.config/opencode/opencode.json` — set as the default model |
-| DeepSeek-TUI | `[providers.ollama]` block in `~/.deepseek/config.toml` with `provider = "ollama"` + default model set; wrapped in marker comments so re-applies don't touch surrounding config |
-| Gemini      | **Not auto-configured.** See below.                                 |
+## Local endpoint — Ollama / GPUStack / vLLM / LiteLLM
 
-### Gemini + Ollama
+The Local-endpoint wizard (settings menu → "Local endpoint" row)
+routes a chat through any **OpenAI-compatible local endpoint**, not
+just vanilla Ollama. Supported: Ollama, GPUStack, vLLM, LiteLLM,
+llama.cpp's server, LocalAI, anything that speaks
+`/v1/chat/completions`. With Bearer auth: GPUStack, gated vLLM /
+LiteLLM, anything else that requires a key.
 
-The Ollama screen leaves Gemini untouched. Gemini CLI 0.42+ ignores
-the `OPENAI_*` env vars that work for Codex / OpenCode and keeps
-hitting Google's API via its cached OAuth token, then fails with
-`Model "..." was not found or is invalid`. Routing it through Ollama
-needs `~/.gemini/settings.json` (`selectedAuthType` +
-provider section), whose schema has shifted across CLI versions —
-the launcher doesn't auto-write it because the wrong schema breaks
+Five wizard steps:
+
+1. **Endpoint** — `http://host[:port]`. The launcher normalises
+   missing schemes and trailing slashes.
+2. **API key** (optional) — Bearer token. Blank = no auth
+   (vanilla Ollama path). Sent as `Authorization: Bearer <key>` on
+   the probe and at launch.
+3. **Model** — probes the endpoint for available models (tries
+   `/api/tags`, falls back to `/v1/models`), falls back to manual
+   entry if the probe times out.
+4. **Agents to configure** — multi-select. The chat's locked agent
+   is pre-ticked. The tick state is **round-trip-correct**: tick =
+   apply, untick = strip. Disk state and the chat-level `Agents`
+   list stay in sync.
+5. **Apply** — writes per-agent config + a chat-level
+   `OllamaSettings` block with the list of opted-in agents.
+
+What gets written, per agent:
+
+| Agent | Where | Activated by |
+|---|---|---|
+| **Claude** | `chat.json` `settings.ollama` block — per-chat | `Plan()` injects `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` / `OPENAI_API_KEY` env + `--model <model>` flag |
+| **Codex** | `~/.codex/config.toml` `[model_providers.ollama_remote]` + `[profiles.ollama_remote]` | Launched with `-p ollama_remote`; codex reads `OPENAI_API_KEY` via `env_key` |
+| **OpenCode** | `opencode.json` `provider.ollama_remote` block, including inline `options.apiKey` when a key is set | OpenCode picks it up automatically; `OPENAI_API_KEY` also exported as fallback |
+| **DeepSeek-TUI** | `~/.deepseek/config.toml` managed block with `provider = "ollama"`, `[providers.ollama]`, and optional inline `api_key`. Wrapped in marker comments. | Read by deepseek-tui on startup |
+| **Gemini** | Not auto-configured (see below) | — |
+
+### Codex wire_api probe
+
+Before writing the codex profile, the wizard issues a stub `POST
+/v1/responses` to the endpoint and classifies the response:
+
+| Outcome | Behavior |
+|---|---|
+| 2xx, 401, 403 | Pass — route exists |
+| 502, 503, 504 | **Pass with warning** — route exists, upstream sick (e.g. GPUStack worker temporarily down) |
+| 404, 405, 501 | **Refuse** — endpoint doesn't implement `/v1/responses`. Codex 0.130+ requires this endpoint; OpenAI-compatible servers that only implement `/v1/chat/completions` (vanilla Ollama, many vLLM versions) are flagged. |
+| 400 with `chat/completions` hint in body | **Refuse** — chat-completions-only server |
+
+When the probe refuses, the wizard strips any stale
+`ollama_remote` block left by a previous apply, so the user isn't
+left with a config that codex would pick up at launch and choke on.
+The other three agents (claude / opencode / deepseek) use
+`/v1/chat/completions`, which every OpenAI-compat server speaks, so
+they work against the same endpoint without the probe.
+
+### Codex + GPUStack
+
+GPUStack's API gateway often routes `/v1/responses` to an internal
+worker chain that may not be fully implemented. If the probe
+returns 503 with a body like `Cannot connect to host …`, the route
+exists but your worker is unreachable — the wizard applies the
+config with a warning and you fix the worker side. If the probe
+returns 404, GPUStack's `/v1/responses` isn't implemented at all on
+your version; route through [LiteLLM](https://github.com/BerriAI/litellm)
+or switch the chat to claude / opencode / deepseek.
+
+### Gemini + Local endpoint
+
+The wizard leaves Gemini untouched. Gemini CLI 0.42+ ignores the
+`OPENAI_*` env vars that work for Codex / OpenCode and keeps
+hitting Google's API via cached OAuth, then fails with `Model "..."
+was not found or is invalid`. Routing it through a local endpoint
+needs `~/.gemini/settings.json` (`selectedAuthType` + provider
+section), whose schema has shifted across CLI versions — the
+launcher doesn't auto-write it because the wrong schema breaks
 your config worse than no config.
 
-Two paths that work today:
+Paths that work today:
 
-1. **[litellm](https://github.com/BerriAI/litellm) proxy**
-   ```sh
-   pip install 'litellm[proxy]'
-   litellm --model ollama/qwen3-coder --host 0.0.0.0 --port 4000
-   ```
-   Then point Gemini at the proxy via its own config — exact lines
-   depend on your installed Gemini version.
-2. **Hand-edit `~/.gemini/settings.json`** to flip
-   `selectedAuthType` to your CLI version's OpenAI provider. Check
-   `gemini --help` for the current schema.
+1. **[litellm](https://github.com/BerriAI/litellm) proxy** in front
+   of your endpoint; point Gemini at it via its own config (exact
+   lines depend on your installed Gemini version).
+2. **Hand-edit `~/.gemini/settings.json`** to your CLI version's
+   OpenAI provider section.
 
-Gemini still launches fine **without** Ollama routing — it just
-runs against its native Google auth, which is the default
-experience anyway.
+Gemini still launches fine **without** local-endpoint routing — it
+just uses its native Google auth, which is the default.
 
 ## Files on disk
 
@@ -271,24 +352,49 @@ experience anyway.
 | `<root>/chats/<chat-id>/sandbox/`                   | agent's cwd; compiled artifacts; gitignored             |
 | `<root>/chats/<chat-id>/chat.json`                  | `label`, `template`, `agent`, `lastUsed`, `settings`    |
 | `<root>/chats/<chat-id>/MEMORY.md`                  | persistent memory; synced from sandbox after exit       |
-| `<root>/chats/<chat-id>/sessions/<ts>-<agent>/`     | per-launch metadata                                     |
+| `<root>/chats/<chat-id>/sessions/<ts>-<agent>/`     | per-launch artifacts: `transcript.jsonl` (canonical rollout), `summary.md` / `summary.json` (rule-based digest), `native/` (full per-chat slice of the agent's home-dir store — see Session resume above) |
 
-## Past-chat resume
+## Session resume
 
-Each chat has a **stable cwd** (`<root>/chats/<id>/sandbox`), so when
-you re-open it the agent recognises the project and offers its own
-session resume:
+When you re-open a chat from the chat list, Clade inspects the
+agent's own session store, picks the right resume flag, and stays
+out of the way:
 
-- **Claude Code** — `claude /sessions` to browse, or `claude -c` for
-  the most recent.
-- **Codex CLI** — `codex resume`.
-- **OpenCode** — `opencode --continue`.
+| Native sessions for this chat | Args passed to the agent |
+|---|---|
+| 2 or more | `claude --resume` / `codex resume` — opens the **agent's native picker** scoped to this chat |
+| Exactly 1 | `claude --continue` / `codex resume <UUID>` — direct resume, no picker |
+| 0, but a captured transcript exists (e.g. chat dir copied from another machine) | Restore the captured rollout into the agent's store with the correct UUID-named file, then `--continue` / `resume` it |
+| 0 and nothing captured | Fresh launch |
 
-The launcher itself doesn't capture transcripts (each agent stores
-them differently). It hands the agent a consistent project and
-synchronises `MEMORY.md` between launches so notes that should
-outlast any specific agent session survive even if the agent's
-session store is wiped.
+**`F` instead of Enter** on the chat list bypasses resume on purpose:
+useful when you want to start a clean conversation on the same chat
+without deleting the captured sessions. The slice on disk is left
+intact so a subsequent plain Enter resumes normally.
+
+Per-session artifacts the launcher captures on every exit:
+
+```
+<chat>/sessions/<ts>-<agent>/
+├── transcript.jsonl          # the agent's native rollout, canonical copy
+├── summary.md                # rule-based digest (turns, tools, headline)
+├── summary.json              # structured metadata for diagnostics + search
+└── native/                   # full per-chat slice of the agent's store
+    └── <agent-subdir>/...    # claude project dir, codex rollouts matching
+                              # cwd, opencode info+messages, gemini tmp...
+```
+
+The `native/` snapshot runs in a background goroutine — the TUI
+redraws immediately on exit. The slice makes the chat dir fully
+self-contained: copy it to another machine and the next launch
+restores the conversation state into the agent's home dir on the
+new machine.
+
+The slice **restore** at launch is opt-in per chat (`e` → Mirror
+agent state). SIGKILL-safe: if Clade was force-killed mid-session,
+mirror-in compares per-file mtimes and preserves the agent's
+home-dir copy when it's newer than the slice. You don't lose
+turns to a partial snapshot.
 
 ## Workpath source format
 
@@ -360,7 +466,7 @@ bottom. Colour-stripped snippets follow.
 
 <img width="2507" height="1193" alt="{8304EDD7-FA23-416D-B692-20BDCE394075}" src="https://github.com/user-attachments/assets/b5bce049-cd23-4480-9ab2-f536acdba722" />
 
-### Ollama config
+### Local-endpoint wizard
 
 <img width="2505" height="1195" alt="{F7066226-6E62-4790-A960-ABFC5B14B4EB}" src="https://github.com/user-attachments/assets/e277fbad-fcde-4230-a114-43718dad083e" />
 
@@ -458,31 +564,45 @@ plus a `new-workpath.{sh,ps1}` scaffolding tool. Pick it from
 the template list (`t` on home) on first run, or any time you
 need to author a new template.
 
-## Per-chat agent override
+## Settings menu
 
-A chat is bound to one agent at creation, but you can swap that
-agent at any time without losing the chat's workpath, MEMORY.md, or
-session history:
+Each chat has a settings menu reached with `e` on the chat list.
+Five items, all editable in place — Esc on the list saves and
+returns:
 
-1. On the home screen, highlight the chat.
-2. Press `a`.
-3. The picker opens pre-seeded on the chat's current agent. Pick a
-   different one and press Enter — the new agent gets written into
-   `chat.json`, the workpath is recompiled into the sandbox for the
-   new target (`.claude/skills/…` for Claude, `AGENTS.md` for
-   Codex/OpenCode, `GEMINI.md` for Gemini), and the chat launches.
-4. Next time you open the chat it'll come up bound to the new agent.
+| Row | What it does |
+|---|---|
+| **Language** | Prepends a `respond in <lang>` directive to the agent's first turn. |
+| **Persistent MEMORY.md** | Toggle the staging/sync-back of `MEMORY.md` between sandbox and chat-root. |
+| **Mirror agent state** | Opt-in: restore the chat's captured slice into the agent's home dir before launch (cross-machine restore). Snapshot-on-exit always runs regardless of this flag. SIGKILL-safe via mtime comparison. |
+| **Agent** | Per-chat agent picker. Pick a different installed agent to swap; pick a missing one to open the install screen. Writes through to `chat.json` immediately so the swap survives a restart. |
+| **Local endpoint** | Opens the Local-endpoint wizard for this chat. Returns to settings when applied. |
+| **Online skills** | Multi-add list editor for git/zip URLs the launcher pulls into the sandbox on every launch. |
 
-Re-launching with the *same* agent skips the manifest write and
-behaves identically to pressing Enter on the chat — no churn.
+The per-chat agent override (formerly the `a` key on the chat list)
+and the local-endpoint config (formerly `o`) both moved into this
+menu in 0.1.10 to keep all chat-level configuration under one
+roof.
 
 ## Roadmap
 
 Not yet implemented; PRs welcome:
 
-- First-class transcript browser (per-agent adapter for
-  `~/.claude/projects/`, `~/.codex/sessions/`, etc.).
-- Rich chat search / tagging.
+- **OpenCode native session resume.** Slice snapshot is wired, but
+  the resume branch in `internal/launcher/resume.go` falls back to
+  the markdown-summary inject (multi-file session store + the CLI's
+  `--continue` / `--session <id>` flags need a per-agent restore
+  branch).
+- **Codex shape-aware probe.** The current probe checks status
+  codes; an endpoint that returns 200 with a non-responses-shaped
+  body (some Ollama versions) sneaks through. Tighten to check
+  body shape (`"id":"resp_"` / `"output":[`).
+- **Auto-spawn LiteLLM as a sidecar** for codex+GPUStack-style
+  setups. Currently the user runs LiteLLM externally and points the
+  wizard at the LiteLLM URL.
+- **Per-chat conversation tagging / saved searches.** Cross-chat
+  search exists (`/` on the chat list); structured tagging on top
+  would help.
 
 ## License
 
