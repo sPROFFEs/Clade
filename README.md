@@ -209,18 +209,17 @@ syncing the file; existing notes stay on disk.
 | `F`       | Fresh launch — skip resume, leave captured sessions on disk |
 | `n`       | New chat                                                    |
 | `d`       | Delete highlighted chat (confirms)                          |
-| `e`       | Edit chat settings — agent / language / memory / mirror state / local endpoint / online skills |
+| `e`       | Settings (agent / language / memory / mirror / local endpoint / online skills) |
 | `f`       | Edit chat files (mission, persona…)                         |
-| `p`       | Pin chat to the tab strip                                   |
 | `/`       | Cross-chat search                                           |
 | `t`       | Template manager                                            |
 | `r`       | Refresh                                                     |
 | `ctrl-c`  | Quit                                                        |
 
-The per-chat **agent picker** and **local endpoint config** moved
-into the settings menu (`e`) in 0.1.10 — both were single-purpose
-keys on the chat list before. The left-nav Agents tab (`Ctrl-3`) is
-now install-management only.
+The per-chat **agent picker** and **local endpoint config** live in
+the settings menu (`e`) — they were single-purpose keys on the chat
+list before 0.1.10. The left-nav Agents tab (`Ctrl-3`) is
+install-management only.
 
 ### Template list (`t` from home)
 
@@ -567,7 +566,7 @@ need to author a new template.
 ## Settings menu
 
 Each chat has a settings menu reached with `e` on the chat list.
-Five items, all editable in place — Esc on the list saves and
+Six items, all editable in place — Esc on the list saves and
 returns:
 
 | Row | What it does |
@@ -583,6 +582,105 @@ The per-chat agent override (formerly the `a` key on the chat list)
 and the local-endpoint config (formerly `o`) both moved into this
 menu in 0.1.10 to keep all chat-level configuration under one
 roof.
+
+## Backup (optional cloud sync over git)
+
+Added in 0.1.11. Optional, off by default. When enabled, the
+workspaces root becomes a git repository whose history mirrors your
+chats and templates across machines. No GitHub / Gitea REST API
+calls — pure git protocol over HTTPS or SSH, using the credentials
+your `git` client already has.
+
+### Three ways to start
+
+The first-run wizard offers three options after the workspaces-root
+prompt:
+
+1. **Empty folder** — just `chats/` + `templates/`. Backup stays off.
+2. **Empty folder + bundled samples** — same plus the bundled
+   starter templates. Backup stays off.
+3. **Clone from a git remote** — pulls existing chats and templates
+   from a remote you already pushed to from another machine. The
+   wizard runs a connection probe (`git ls-remote`) before cloning;
+   on failure it falls back to option 1 but preserves the URL in
+   your config so the Backup tab opens pre-filled for retry.
+   Successful clone implicitly enables backup.
+
+### Master switch
+
+The Backup tab (`Ctrl-4`) opens with the feature OFF. Flipping the
+master switch is the single explicit action that turns backup on. It
+initialises the workspaces root as a git repository, writes a
+managed `.gitignore` + `.gitattributes`, and unlocks the rest of the
+tab. Flipping it back off clears the remote URL and disables
+auto-sync; the local `.git` directory stays so re-enabling later is
+cheap.
+
+### What gets tracked
+
+Clade's managed `.gitignore` excludes every file at the workspaces
+root **except** `chats/` and `templates/`. Inside those two
+directories, **everything is tracked** — sandbox, captured
+transcripts, native session slices, the full per-chat
+`MEMORY.md` — so a fresh clone on another machine restores not just
+the workpaths but the actual conversation state. Stray files at the
+root (scratch notes, environment overrides, etc.) never propagate.
+
+If you hand-edit `.gitignore`, the absence of the Clade-managed
+marker line tells the launcher to leave it alone on the next sync.
+
+### Sync flow
+
+Once enabled, the Backup tab exposes:
+
+- **Remote URL** — edit at any time.
+- **Test connection** — lightweight `git ls-remote` probe.
+- **Sync now** — commits local changes, fetches, then decides:
+  in-sync → no-op; local-ahead-only → push; remote-ahead-only →
+  fast-forward pull; diverged → resolution popup.
+- **Reset from remote** — discards local; two confirmations.
+- **Force push** — overwrites remote; one confirmation.
+- **Disconnect** — clears the remote URL and disables auto-sync;
+  local files untouched.
+- **Auto-sync** — optional sync on every Clade startup and exit.
+- **Force always local** — sub-option of auto-sync. Forces local
+  state to win on divergence. Guarded by a per-commit Machine-ID
+  trailer and a 24-hour window: Clade refuses to overwrite when
+  another machine pushed recently.
+
+### Divergence resolution
+
+When both sides have unique commits, the launcher shows the
+local and remote commit lists with timestamps and offers four
+reconciliations:
+
+- **[m] Merge** — keep both sides via a merge commit.
+- **[r] Rebase** — replay local on top of remote.
+- **[p] Force push** — discard remote, keep local.
+- **[R] Reset** — discard local, keep remote.
+
+Merge or rebase conflicts surface a panel naming the conflicting
+files and pointing the user at the workspaces root for manual
+resolution.
+
+### MEMORY.md custom merge
+
+`MEMORY.md` in any chat or template uses a custom merge driver
+registered automatically when backup is enabled. Concurrent edits
+across machines concatenate under a
+`## --- merged from another machine at <ts> ---` separator instead
+of producing `<<<<<<<` conflict markers — so the agent's running
+notes are preserved on both sides rather than turning into a Git
+merge artefact the next session has to parse.
+
+### Credentials
+
+The launcher never prompts for credentials. Whatever auth your
+local `git` client uses (HTTPS credential helper, SSH agent,
+git-credentials file, …) is what backup uses. For a private repo:
+configure credentials on the command line first (`git clone <url>`
+in a terminal once is enough to confirm) before pointing Clade at
+it.
 
 ## Roadmap
 

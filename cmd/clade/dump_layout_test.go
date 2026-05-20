@@ -24,11 +24,6 @@ func TestDumpLayout(t *testing.T) {
 	l.focus = focusNav
 	l.navCursor = 2
 	os.Stdout.WriteString(l.View())
-	os.Stdout.WriteString("\n=== with two tabs ===\n")
-	l.tabs = []chatTab{{chatID: "a", label: "refactor-x"}, {chatID: "b", label: "docs"}}
-	l.activeTab = 0
-	l.focus = focusPane
-	os.Stdout.WriteString(l.View())
 	os.Stdout.WriteString("\n=== with palette open ===\n")
 	l.openPalette()
 	l.palette.input.SetValue("new")

@@ -23,7 +23,6 @@ package main
 // the Ollama endpoint field without the colon being eaten.
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -40,7 +39,6 @@ type focusRegion int
 const (
 	focusPane focusRegion = iota
 	focusNav
-	focusTabs
 	focusPalette
 	focusHelp
 )
@@ -107,24 +105,6 @@ var navEntries = []navEntry{
 	},
 }
 
-// --- tabs ----------------------------------------------------------------
-
-// chatTab is a pinned chat the user has stashed in the tab strip.
-// Tabs are session-only (not persisted). The chat list pane emits
-// pinChatMsg on `p`; ctrl-w closes the active tab.
-type chatTab struct {
-	chatID string
-	label  string
-}
-
-// pinChatMsg is emitted by the chat list pane on `p` and intercepted
-// by the layout to add a tab. We use a message (rather than touching
-// layout state directly) so panes stay pure and testable.
-type pinChatMsg struct {
-	chatID string
-	label  string
-}
-
 // --- layoutModel ---------------------------------------------------------
 
 type layoutModel struct {
@@ -136,10 +116,6 @@ type layoutModel struct {
 	// navigator
 	navCursor  int    // hover position
 	navCurrent string // which section the pane is rendering for
-
-	// tab strip
-	tabs      []chatTab
-	activeTab int // -1 means "no tab pinned, viewing nav section"
 
 	// focus
 	focus focusRegion
@@ -163,7 +139,6 @@ func newLayoutModel(cfg *launcher.Config) *layoutModel {
 		focus:      focusPane,
 		navCursor:  0,
 		navCurrent: navSectionChats,
-		activeTab:  -1,
 	}
 	l.pane = navEntries[0].makePane(cfg)
 	return l
@@ -177,10 +152,6 @@ func (m *layoutModel) Init() tea.Cmd {
 
 func (m *layoutModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
-	case pinChatMsg:
-		m.pinChatTab(msg.chatID, msg.label)
-		return m, nil
-
 	case screenDoneMsg:
 		// Internal pane swap. (screenDoneMsg.launch is handled in
 		// rootModel.Update before we ever see it — Bubble Tea routes
@@ -278,41 +249,8 @@ func (m *layoutModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "tab":
 				m.focus = focusNav
 				return m, nil
-			case "shift+tab":
-				if len(m.tabs) > 0 {
-					m.focus = focusTabs
-					return m, nil
-				}
-			case "ctrl+w":
-				// Close active tab.
-				m.closeTab(m.activeTab)
-				return m, nil
 			}
 			// Fall through to pane.
-		case focusTabs:
-			switch msg.String() {
-			case "tab", "esc":
-				m.focus = focusPane
-				return m, nil
-			case "left", "h":
-				if m.activeTab > 0 {
-					m.activeTab--
-					return m, m.openActiveTab()
-				}
-				return m, nil
-			case "right", "l":
-				if m.activeTab < len(m.tabs)-1 {
-					m.activeTab++
-					return m, m.openActiveTab()
-				}
-				return m, nil
-			case "enter":
-				return m, m.openActiveTab()
-			case "ctrl+w":
-				m.closeTab(m.activeTab)
-				return m, nil
-			}
-			return m, nil
 		}
 	}
 
@@ -326,66 +264,16 @@ func (m *layoutModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // --- nav helpers ---------------------------------------------------------
 
-// selectNav swaps the active pane to the given nav entry. Drops any
-// pinned tab focus so the user sees the section's root pane.
+// selectNav swaps the active pane to the given nav entry.
 func (m *layoutModel) selectNav(i int) tea.Cmd {
 	if i < 0 || i >= len(navEntries) {
 		return nil
 	}
 	m.navCursor = i
 	m.navCurrent = navEntries[i].id
-	m.activeTab = -1
 	m.pane = navEntries[i].makePane(m.cfg)
 	m.focus = focusPane
 	return m.pane.Init()
-}
-
-// pinChatTab adds a tab for the given chat if one doesn't exist, and
-// makes it active. Returns true if the tab was newly added. Called by
-// the chat list pane via a custom message.
-func (m *layoutModel) pinChatTab(chatID, label string) bool {
-	for i, t := range m.tabs {
-		if t.chatID == chatID {
-			m.activeTab = i
-			return false
-		}
-	}
-	m.tabs = append(m.tabs, chatTab{chatID: chatID, label: label})
-	m.activeTab = len(m.tabs) - 1
-	return true
-}
-
-// openActiveTab rebuilds the right-pane to render whichever chat the
-// active tab points at. We use the launching pane (the same one
-// triggered by Enter on the chat list) so the user sees the same
-// "compiling sandbox" feedback.
-func (m *layoutModel) openActiveTab() tea.Cmd {
-	if m.activeTab < 0 || m.activeTab >= len(m.tabs) {
-		return nil
-	}
-	tab := m.tabs[m.activeTab]
-	chat, err := launcher.LoadChat(m.cfg.WorkspacesRoot, tab.chatID)
-	if err != nil || chat == nil {
-		m.statusErr = "tab " + tab.label + ": " + fmt.Sprint(err)
-		return nil
-	}
-	m.pane = newLaunchingModel(m.cfg, *chat)
-	m.focus = focusPane
-	return m.pane.Init()
-}
-
-func (m *layoutModel) closeTab(i int) {
-	if i < 0 || i >= len(m.tabs) {
-		return
-	}
-	m.tabs = append(m.tabs[:i], m.tabs[i+1:]...)
-	if m.activeTab >= len(m.tabs) {
-		m.activeTab = len(m.tabs) - 1
-	}
-	if len(m.tabs) == 0 {
-		m.activeTab = -1
-		m.focus = focusPane
-	}
 }
 
 // --- view ----------------------------------------------------------------
@@ -402,13 +290,9 @@ func (m *layoutModel) View() string {
 
 	// Outer frame eats 2 cols (border) + 2 cols (padding) = 4.
 	innerW := w - 4
-	// Reserve rows for: top bar (2), tab strip (1 if any), help bar (2),
-	// statusline (1), bottom border (1). Roughly 6–7 chrome rows.
-	tabRows := 0
-	if len(m.tabs) > 0 {
-		tabRows = 1
-	}
-	chromeRows := 2 + tabRows + 2 + 1
+	// Reserve rows for: top bar (2), help bar (2), statusline (1),
+	// bottom border (1). Roughly 5 chrome rows.
+	chromeRows := 2 + 2 + 1
 	innerH := h - chromeRows - 2 // 2 for outer borders
 	if innerH < 6 {
 		innerH = 6
@@ -425,18 +309,10 @@ func (m *layoutModel) View() string {
 	navCol := m.renderNav(navW, innerH)
 	paneCol := m.renderPane(paneW, innerH)
 	body := lipgloss.JoinHorizontal(lipgloss.Top, navCol, " ", paneCol)
-	var tabRow string
-	if tabRows > 0 {
-		tabRow = m.renderTabs(innerW)
-	}
 	help := m.renderHelpBar(innerW)
 	status := m.renderStatusline(innerW)
 
-	parts := []string{top}
-	if tabRow != "" {
-		parts = append(parts, tabRow)
-	}
-	parts = append(parts, body, help, status)
+	parts := []string{top, body, help, status}
 	stack := lipgloss.JoinVertical(lipgloss.Left, parts...)
 	frame := chromeBorderStyle.Render(stack)
 
@@ -507,23 +383,6 @@ func (m *layoutModel) renderNav(w, h int) string {
 		b.WriteString(style.Render(row) + "\n")
 	}
 
-	if len(m.tabs) > 0 {
-		b.WriteString("\n")
-		b.WriteString(lipgloss.NewStyle().Foreground(t.Subtitle).Render("Open tabs") + "\n")
-		for i, tab := range m.tabs {
-			marker := "  "
-			if i == m.activeTab {
-				marker = "▸ "
-			}
-			row := marker + tab.label
-			style := lipgloss.NewStyle().Width(w).Foreground(t.Muted)
-			if i == m.activeTab {
-				style = style.Foreground(t.Body).Bold(true)
-			}
-			b.WriteString(style.Render(row) + "\n")
-		}
-	}
-
 	// Pad to height.
 	content := b.String()
 	lines := strings.Split(content, "\n")
@@ -579,25 +438,6 @@ func (m *layoutModel) renderPane(w, h int) string {
 }
 
 // renderTabs draws the chat tab strip above the body area.
-func (m *layoutModel) renderTabs(w int) string {
-	var parts []string
-	for i, tab := range m.tabs {
-		label := " " + tab.label + " "
-		style := lipgloss.NewStyle().Foreground(t.Muted).
-			Border(lipgloss.NormalBorder(), false, true, false, false).
-			BorderForeground(t.Border)
-		if i == m.activeTab {
-			style = style.Foreground(t.Accent).Bold(true)
-		}
-		parts = append(parts, style.Render(label))
-	}
-	row := strings.Join(parts, "")
-	if lipgloss.Width(row) > w {
-		row = ansiTruncate(row, w)
-	}
-	return row
-}
-
 // renderHelpBar shows the active pane's contextual key hints.
 func (m *layoutModel) renderHelpBar(w int) string {
 	rule := lipgloss.NewStyle().Foreground(t.Border).Render(strings.Repeat("─", w))
@@ -611,7 +451,6 @@ func (m *layoutModel) renderStatusline(w int) string {
 	focusLabel := map[focusRegion]string{
 		focusPane:    "pane",
 		focusNav:     "nav",
-		focusTabs:    "tabs",
 		focusPalette: "palette",
 		focusHelp:    "help",
 	}[m.focus]
@@ -732,7 +571,7 @@ func (m *layoutModel) toggleHelp() {
 
 func (m *layoutModel) renderHelpOverlay() string {
 	rows := [][2]string{
-		{"tab / shift-tab", "cycle focus between pane / nav / tabs"},
+		{"tab", "cycle focus between pane and nav"},
 		{"ctrl-1 .. ctrl-4", "jump to nav section directly"},
 		{"ctrl-p", "open command palette"},
 		{"F1", "toggle this help overlay"},

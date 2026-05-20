@@ -107,17 +107,9 @@ func (p *fakeCapturingPane) Body() string         { return "" }
 func (p *fakeCapturingPane) NavSection() string   { return "" }
 func (p *fakeCapturingPane) CapturingInput() bool { return true }
 
-func TestLayoutPinChatMsgAddsTab(t *testing.T) {
-	cfg := &launcher.Config{WorkspacesRoot: "/tmp/ws-layout-test4"}
-	setTermSize(120, 30)
-	l := newLayoutModel(cfg)
-	next, _ := l.Update(pinChatMsg{chatID: "abc", label: "demo"})
-	l = next.(*layoutModel)
-	if len(l.tabs) != 1 {
-		t.Fatalf("tabs = %d, want 1", len(l.tabs))
-	}
-	if l.tabs[0].label != "demo" {
-		t.Errorf("tab label = %q, want %q", l.tabs[0].label, "demo")
-	}
-}
+// Pin-tab feature removed in 0.1.12 — see git history. The test
+// previously here verified that `p` on the chat list emitted a
+// pinChatMsg the layout intercepted to add a tab strip entry. With
+// the feature gone, neither the message type nor the tab strip
+// exists.
 

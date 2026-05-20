@@ -149,15 +149,6 @@ func (m chatListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// roof matches the agent picker's move in 0.1.10.
 		case "t":
 			return m, wrap(newTemplateListModel(m.cfg))
-		case "p":
-			// Pin the highlighted chat to the tab strip. The layout
-			// intercepts pinChatMsg; this pane just emits.
-			if m.cursor < len(m.items) {
-				c := m.items[m.cursor]
-				return m, func() tea.Msg {
-					return pinChatMsg{chatID: c.ID, label: c.Label}
-				}
-			}
 		case "r":
 			return m, m.Init()
 		case "/":
@@ -261,10 +252,9 @@ func chatListHelp(m chatListModel) string {
 	if chatSelected {
 		parts = append(parts,
 			"enter open",
-			"F fresh (skip resume)",
-			"e settings (agent, local endpoint, language, memory, mirror, skills)",
+			"F fresh",
+			"e settings",
 			"f files",
-			"p pin tab",
 			"d delete",
 		)
 	} else {
