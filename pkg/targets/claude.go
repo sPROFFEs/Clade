@@ -30,6 +30,15 @@ func (claudeTarget) Compile(wp *workpath.Workpath, outDir string) error {
 	skillName := kebab(wp.Name)
 	skillDir := filepath.Join(outDir, ".claude", "skills", skillName)
 
+	// CLAUDE.md at sandbox root — claude reads this unconditionally
+	// at session start, unlike SKILL.md which only loads when the
+	// skill system decides it's relevant. We put the workpath's
+	// mission / playbook / rules / required-reading directive here
+	// so the agent has them in its system prompt from turn 1.
+	if err := writeFile(filepath.Join(outDir, "CLAUDE.md"), claudeRootBody(wp)); err != nil {
+		return err
+	}
+
 	body := claudeSkillBody(wp)
 	if err := writeFile(filepath.Join(skillDir, "SKILL.md"), body); err != nil {
 		return err
@@ -66,6 +75,60 @@ func (claudeTarget) Compile(wp *workpath.Workpath, outDir string) error {
 	}
 
 	return nil
+}
+
+// claudeRootBody renders the CLAUDE.md that lives at the sandbox
+// root. Claude auto-loads this on every session; the body therefore
+// is the workpath's primary "you must follow this" surface. Kept
+// compact (no full knowledge-base inventory, no agent rosters — those
+// are in SKILL.md for skill-discovery use) so it doesn't blow out the
+// system-prompt budget.
+func claudeRootBody(wp *workpath.Workpath) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "# %s\n\n", wp.Name)
+	if wp.Description != "" {
+		b.WriteString(wp.Description + "\n\n")
+	}
+	b.WriteString("## How this chat operates\n\n")
+	b.WriteString("This file is the contract for the current session. Read it on " +
+		"every turn before answering. Do not improvise around the rules below; " +
+		"if something here forbids what the user just asked for, say so and " +
+		"propose an alternative.\n\n")
+
+	if wp.Mission != "" {
+		b.WriteString(section("Mission", wp.Mission))
+		b.WriteString("\n")
+	}
+	if wp.Playbook != "" {
+		b.WriteString(section("Playbook", wp.Playbook))
+		b.WriteString("\n")
+	}
+	if wp.Rules != "" {
+		b.WriteString(section("Rules", wp.Rules))
+		b.WriteString("\n")
+	}
+
+	b.WriteString("## Required reading on every turn\n\n")
+	b.WriteString("- `MEMORY.md` — the persistent log of prior sessions. If it's empty " +
+		"or only headers, say so briefly; do not fabricate prior context.\n")
+	if len(wp.Knowledge) > 0 {
+		b.WriteString("- `knowledge/` — reference material indexed under the section " +
+			"in `.claude/skills/" + kebab(wp.Name) + "/SKILL.md`. Open any file whose " +
+			"title overlaps with the user's current question; cite the path inline.\n")
+	}
+	if len(wp.Tools) > 0 {
+		b.WriteString("- `.claude/skills/" + kebab(wp.Name) + "/scripts/` — workpath tools " +
+			"available via the Bash tool.\n")
+	}
+	if len(wp.Agents) > 0 {
+		b.WriteString("- `.claude/agents/` — named subagent prompts you can dispatch when " +
+			"a turn benefits from a focused persona.\n")
+	}
+	b.WriteString("\n")
+	b.WriteString("If you write durable notes the next session should know about, " +
+		"append them to `MEMORY.md` under a dated `### Title` subsection. Existing " +
+		"entries are append-only — never rewrite or delete prior turns' notes.\n")
+	return b.String()
 }
 
 func claudeSkillBody(wp *workpath.Workpath) string {

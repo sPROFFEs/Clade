@@ -17,48 +17,44 @@ import (
 func renderResumeDiagnostics(c launcher.Chat) string {
 	d := launcher.ComputeResumeDiagnostics(c)
 	if !diagnosticsHasAny(d) {
-		return descStyle.Render("   no prior session state · this will start cold")
+		return descStyle.Render("    ↩ resume: nothing captured yet · this will start cold")
 	}
 
 	var bits []string
 	if d.MemoryBytes > 0 {
 		size := humanBytes(d.MemoryBytes)
 		if d.MemoryHasContent {
-			bits = append(bits, fmt.Sprintf("MEMORY.md %s ✓", size))
+			bits = append(bits, fmt.Sprintf("memory %s", size))
 		} else {
-			bits = append(bits, fmt.Sprintf("MEMORY.md %s (headers only)", size))
+			bits = append(bits, fmt.Sprintf("memory %s (empty)", size))
 		}
 	}
 	if d.CapturedSessions > 0 {
-		label := fmt.Sprintf("%d captured session", d.CapturedSessions)
-		if d.CapturedSessions > 1 {
-			label += "s"
-		}
-		bits = append(bits, label)
+		bits = append(bits, fmt.Sprintf("%d captured", d.CapturedSessions))
 	}
 	switch {
 	case d.AgentNativeSessions > 0:
-		bits = append(bits, fmt.Sprintf("%d native session(s) resumable", d.AgentNativeSessions))
+		bits = append(bits, fmt.Sprintf("%d native resumable", d.AgentNativeSessions))
 	case d.AgentNativeSessions == 0 && d.AgentStorePath != "":
 		bits = append(bits, "native store empty")
 	}
 
 	var b strings.Builder
-	b.WriteString(diagStyle().Render("   ↩ resume: " + strings.Join(bits, " · ")))
+	b.WriteString(diagStyle().Render("    ↩ resume · " + strings.Join(bits, " · ")))
 	if d.LastHeadline != "" {
 		b.WriteString("\n")
 		hl := d.LastHeadline
-		if len(hl) > 100 {
-			hl = hl[:100] + "…"
+		if len(hl) > 90 {
+			hl = hl[:90] + "…"
 		}
-		b.WriteString(diagStyle().Render("     last: " + hl))
+		b.WriteString(diagStyle().Render("      last: " + hl))
 	} else if d.LastNote != "" {
 		b.WriteString("\n")
 		note := d.LastNote
-		if len(note) > 100 {
-			note = note[:100] + "…"
+		if len(note) > 90 {
+			note = note[:90] + "…"
 		}
-		b.WriteString(diagStyle().Render("     note: " + note))
+		b.WriteString(diagStyle().Render("      note: " + note))
 	}
 	return b.String()
 }

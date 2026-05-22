@@ -51,6 +51,14 @@ type WorkspaceSettings struct {
 	// real. Step 2's snapshot-on-exit always runs regardless; this
 	// flag only controls whether we ALSO mirror IN at launch time.
 	MirrorAgentState bool `json:"mirrorAgentState,omitempty"`
+	// DisableContextPrimer, when true, suppresses the Option-C
+	// fallback prompt that the launcher passes as the agent's
+	// first positional argument on fresh launches ("read MEMORY.md,
+	// playbook, rules; reply 'Context loaded'"). The primer is ON
+	// by default; this field exists so users can turn it off per
+	// chat from the settings menu when the agent's own auto-load
+	// is enough and the primer would just add noise.
+	DisableContextPrimer bool `json:"disableContextPrimer,omitempty"`
 }
 
 // OllamaSettings duplicates internal/ollama.Settings to avoid an import

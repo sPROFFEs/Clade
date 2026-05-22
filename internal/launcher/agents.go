@@ -83,12 +83,13 @@ func KnownAgents() []Agent {
 			// Upstream ships both `deepseek` (dispatcher) and
 			// `deepseek-tui`; the dispatcher is what users invoke.
 			Binary: "deepseek",
-			// DeepSeek-TUI reads Claude-style skill bundles from
-			// .claude/skills/ (one of its fallback discovery paths), so
-			// the existing claude wpc target works as-is — chats can
-			// share the same compiled skill between Claude Code and
-			// DeepSeek-TUI without dual-compilation.
-			WpcTarget: "claude",
+			// DeepSeek-TUI auto-loads AGENTS.md at session start (its
+			// `init` subcommand creates one as a starter file), with
+			// .claude/skills/ as a fallback discovery path. We
+			// compile via the codex target so AGENTS.md lands at the
+			// sandbox root and the agent picks up the workpath in its
+			// system prompt from turn 1.
+			WpcTarget: "codex",
 			InstallHint: "npm i -g deepseek-tui   |   brew tap Hmbown/deepseek-tui && brew install deepseek-tui   (macOS)   |   scoop install deepseek-tui   (Windows)",
 		},
 	}

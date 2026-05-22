@@ -146,8 +146,14 @@ func (m templateListModel) Body() string {
 		}
 		b.WriteString(selectionRow(marker+tpl.Name, isSel) + "\n")
 		if isSel && tpl.Description != "" {
-			b.WriteString(descStyle.Render(tpl.Description) + "\n")
+			b.WriteString(descStyle.Render("    "+tpl.Description) + "\n")
 		}
+		// Blank line between templates for the same reason as the
+		// chat list — easier to scan when there are many.
+		b.WriteString("\n")
+	}
+	if len(m.items) > 0 {
+		b.WriteString(descStyle.Render(strings.Repeat("─", 40)) + "\n")
 	}
 	isSelNew := m.cursor == len(m.items)
 	marker := "  "

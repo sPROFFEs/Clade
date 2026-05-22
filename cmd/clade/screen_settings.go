@@ -41,6 +41,7 @@ type settingsItem int
 const (
 	settingsItemLanguage settingsItem = iota
 	settingsItemMemory
+	settingsItemContextPrimer
 	settingsItemMirror
 	settingsItemAgent
 	settingsItemEndpoint // local OpenAI-compat / Ollama endpoint
@@ -81,7 +82,10 @@ type settingsModel struct {
 	language string
 	memory   bool
 	mirror   bool
-	skills   []string
+	// primer holds the LOGICAL state ("primer enabled?"); we invert
+	// to/from Settings.DisableContextPrimer at load and save time.
+	primer bool
+	skills []string
 
 	// Sub-editor state.
 	textInput   textinput.Model
@@ -119,6 +123,7 @@ func newSettingsModel(cfg *launcher.Config, ws launcher.Workspace) settingsModel
 		language:   ws.Settings.Language,
 		memory:     ws.Settings.MemoryEnabled,
 		mirror:     ws.Settings.MirrorAgentState,
+		primer:     !ws.Settings.DisableContextPrimer, // primer ON by default
 		skills:     append([]string(nil), ws.Settings.OnlineSkills...),
 		textInput:  lang,
 		skillInput: skill,
@@ -225,6 +230,7 @@ func (m settingsModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.ws.Settings.Language = m.language
 		m.ws.Settings.MemoryEnabled = m.memory
 		m.ws.Settings.MirrorAgentState = m.mirror
+		m.ws.Settings.DisableContextPrimer = !m.primer
 		m.ws.Settings.OnlineSkills = m.skills
 		if err := launcher.SaveWorkspaceLikeSettings(m.ws); err != nil {
 			m.err = err.Error()
@@ -246,6 +252,8 @@ func (m settingsModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.memory = !m.memory
 		case settingsItemMirror:
 			m.mirror = !m.mirror
+		case settingsItemContextPrimer:
+			m.primer = !m.primer
 		}
 	case "enter":
 		switch settingsItem(m.cursor) {
@@ -258,6 +266,8 @@ func (m settingsModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.memory = !m.memory
 		case settingsItemMirror:
 			m.mirror = !m.mirror
+		case settingsItemContextPrimer:
+			m.primer = !m.primer
 		case settingsItemAgent:
 			m.mode = settingsModeEditAgent
 			m.agentErr = ""
@@ -480,6 +490,7 @@ func (m settingsModel) renderList() string {
 	}{
 		{"Language", emptyValue(m.language, "(none)"), "Prepend a 'respond in <lang>' directive to the agent's first turn."},
 		{"Persistent MEMORY.md", boolValue(m.memory), "Stage a MEMORY.md the agent can read/write across sessions."},
+		{"Context primer", boolValue(m.primer), "On every fresh launch, send a short prompt telling the agent to read MEMORY.md / playbook / rules and ack with 'Context loaded'. ON by default; turn off if your agent's own auto-load is enough and the ack is noise."},
 		{"Mirror agent state", boolValue(m.mirror), "Restore the chat's captured slice into the agent's home dir before launch. SIGKILL-safe via mtime comparison. Snapshot on exit always runs regardless."},
 		{"Agent", agentLabel(m.currentAgent), "Press Enter to open the per-chat agent picker. Switching agents writes through to chat.json immediately."},
 		{"Local endpoint", endpointLabel(m.ws.Settings.Ollama), "Route this chat through an OpenAI-compatible local endpoint (Ollama, GPUStack, vLLM, …) instead of the agent's vendor API."},

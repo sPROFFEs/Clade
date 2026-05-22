@@ -154,9 +154,47 @@ func (m launchingModel) Body() string {
 	if m.fresh {
 		mode = errorStyle.Render("fresh launch — captured session NOT restored")
 	}
-	b.WriteString(subtitleStyle.Render("Mode:     ") + mode + "\n\n")
+	b.WriteString(subtitleStyle.Render("Mode:     ") + mode + "\n")
+
+	// Token estimate for the workpath injection. Rough — bytes/4 —
+	// but gives the user a "this chat warms up at ~N tokens" number
+	// before they pay the API cost. Skipped pre-launch if the
+	// sandbox hasn't been compiled yet (estimates would all read 0).
+	if agent, ok := launcher.ResolveAgentForChat(m.chat.AgentID, 2*time.Second); ok {
+		est := launcher.EstimateInjection(m.chat, agent)
+		if est.Total > 0 || est.KnowledgeBytes > 0 {
+			b.WriteString(subtitleStyle.Render("Tokens:   ") +
+				renderTokenEstimate(est) + "\n")
+		}
+	}
+	b.WriteString("\n")
 	b.WriteString(hintStyle.Render(
 		"Compiling workpath into sandbox, staging MEMORY.md, " +
 			"cloning online skills, recording session metadata..."))
 	return b.String()
+}
+
+// renderTokenEstimate formats a token estimate as a one-liner with a
+// dim breakdown.
+func renderTokenEstimate(est launcher.InjectionEstimate) string {
+	parts := []string{}
+	if est.RootMarkdownBytes > 0 {
+		parts = append(parts, fmt.Sprintf("root %d", est.RootMarkdownBytes/4))
+	}
+	if est.MemoryBytes > 0 {
+		parts = append(parts, fmt.Sprintf("memory %d", int(est.MemoryBytes)/4))
+	}
+	if est.PrimerBytes > 0 {
+		parts = append(parts, fmt.Sprintf("primer %d", est.PrimerBytes/4))
+	}
+	breakdown := ""
+	if len(parts) > 0 {
+		breakdown = "  " + descStyle.Render("("+strings.Join(parts, " · ")+" tokens)")
+	}
+	main := fmt.Sprintf("~%d tokens", est.Total)
+	if est.KnowledgeBytes > 0 {
+		main += fmt.Sprintf("  +%d KB knowledge (on demand)",
+			est.KnowledgeBytes/1024)
+	}
+	return main + breakdown
 }

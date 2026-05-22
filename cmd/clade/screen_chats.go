@@ -10,6 +10,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/sPROFFEs/Clade/internal/launcher"
 )
@@ -187,35 +188,56 @@ func (m chatListModel) Body() string {
 	}
 
 	for i, c := range m.items {
-		marker := "  "
 		isSel := i == m.cursor
+		marker := "  "
 		if isSel {
 			marker = "› "
 		}
-		line := marker + c.Label
+		// Compact one-liner. Label gets visual weight; metadata is dimmed.
 		meta := []string{}
-		if c.Template != "" {
-			meta = append(meta, c.Template)
-		}
 		if c.AgentID != "" {
 			meta = append(meta, string(c.AgentID))
 		}
 		if !c.LastUsed.IsZero() {
 			meta = append(meta, humanAgo(c.LastUsed))
 		}
+		line := marker + c.Label
 		if len(meta) > 0 {
-			line += "  " + lipglossDimRender("("+strings.Join(meta, " · ")+")", isSel)
+			pad := 32 - lipgloss.Width(line)
+			if pad < 2 {
+				pad = 2
+			}
+			line += strings.Repeat(" ", pad) +
+				lipglossDimRender(strings.Join(meta, " · "), isSel)
 		}
 		b.WriteString(selectionRow(line, isSel) + "\n")
+
 		if isSel {
-			if c.Description != "" {
-				b.WriteString(descStyle.Render(c.Description) + "\n")
+			// Expanded details block — indented, clearly visually
+			// separated, with a subtle subheading for the resume
+			// state instead of cramming everything into one dim line.
+			if c.Template != "" {
+				b.WriteString(descStyle.Render(
+					"    template · "+c.Template) + "\n")
 			}
-			b.WriteString(renderResumeDiagnostics(c) + "\n")
+			if c.Description != "" {
+				b.WriteString(descStyle.Render("    "+c.Description) + "\n")
+			}
+			diag := renderResumeDiagnostics(c)
+			if diag != "" {
+				b.WriteString(diag + "\n")
+			}
 		}
+		// Blank line between chats so the list breathes; especially
+		// important when several have long labels.
+		b.WriteString("\n")
 	}
 
-	// Persistent extra rows below the chat list.
+	// Persistent extra rows below the chat list. Separator from the
+	// chat list above for visual grouping.
+	if len(m.items) > 0 {
+		b.WriteString(descStyle.Render(strings.Repeat("─", 40)) + "\n")
+	}
 	extras := []string{
 		"+ new chat…",
 		"Manage templates →",

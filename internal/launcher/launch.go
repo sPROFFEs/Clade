@@ -82,6 +82,48 @@ var LastSessionDir string
 // grab a previous session's artifact for the same cwd.
 var LastSessionStartedAt time.Time
 
+// ContextPrimerPrompt is the Option-C fallback message the launcher
+// passes as the agent's first positional argument on fresh launches.
+// Tells the agent to read the workpath's MEMORY.md / playbook.md /
+// rules.md and ack with a short confirmation before waiting for the
+// user's first real message.
+//
+// Kept short — ~50 tokens — so the warm-up cost is negligible. The
+// "say so briefly if MEMORY.md is empty" guardrail prevents the
+// agent fabricating prior context on a fresh chat.
+const ContextPrimerPrompt = `Before doing anything else: read MEMORY.md, playbook.md, and rules.md from the current directory. They define how this chat operates. If MEMORY.md is empty or has only headers, say so briefly. When done, reply with exactly "Context loaded — ready for your first task." then wait for the user's first message.`
+
+// AppendContextPrimer appends the Option-C primer prompt to plan.Args
+// when the chat's settings allow it AND the agent supports first-prompt
+// injection via a positional CLI argument. Returns the (possibly
+// modified) plan. Idempotent: existing positional prompts in plan.Args
+// are NOT duplicated — we only append when the trailing args look like
+// flags (heuristic), so callers can chain this safely.
+//
+// Per-agent CLI-arg conventions (Linux man pages + --help):
+//
+//	claude [PROMPT]               → accepts positional prompt for new chats
+//	codex [GLOBAL_FLAGS] [PROMPT] → accepts positional prompt before subcommands
+//	codex resume <UUID>           → resume subcommand, no positional prompt
+//	gemini [PROMPT]               → typically accepts positional prompt
+//	opencode                      → interactive mode has no first-prompt flag
+//	deepseek                      → interactive mode has no first-prompt flag
+//
+// For agents in the "no positional prompt in interactive mode" bucket
+// (opencode / deepseek), this is a no-op; those agents rely on Option A
+// (AGENTS.md auto-load at session start).
+func AppendContextPrimer(plan LaunchPlan, agent Agent, ws Workspace) LaunchPlan {
+	if ws.Settings.DisableContextPrimer {
+		return plan
+	}
+	switch agent.ID {
+	case AgentClaude, AgentCodex, AgentGemini:
+		// These accept a positional prompt. Append.
+		plan.Args = append(plan.Args, ContextPrimerPrompt)
+	}
+	return plan
+}
+
 // LastResumeNote / LastResumeRestoredTo carry the most recent native-
 // resume attempt's outcome (set by OpenChat after RestoreNativeSession).
 // The TUI's launching screen + chat-list diagnostics can render these

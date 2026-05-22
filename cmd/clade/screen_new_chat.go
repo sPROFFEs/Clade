@@ -289,6 +289,10 @@ func (m newChatFromTemplateModel) finalize() tea.Cmd {
 					if perr != nil {
 						return errMsg{err: perr}
 					}
+					// New chat = always fresh launch, so always
+					// apply the Option-C primer (subject to the
+					// per-chat toggle, which defaults to ON).
+					plan = launcher.AppendContextPrimer(plan, pickedCopy, reloaded.AsWorkspace())
 					_ = launcher.TouchChat(reloaded)
 					ws := reloaded.AsWorkspace()
 					return screenDoneMsg{launch: &plan, updateCfg: &cfgCopy, launchedWS: &ws}
@@ -312,6 +316,7 @@ func (m newChatFromTemplateModel) finalize() tea.Cmd {
 		if err != nil {
 			return errMsg{err: err}
 		}
+		plan = launcher.AppendContextPrimer(plan, picked, chat.AsWorkspace())
 		_ = launcher.TouchChat(&chat)
 		wsCopy := chat.AsWorkspace()
 		return screenDoneMsg{launch: &plan, updateCfg: &cfg, launchedWS: &wsCopy}

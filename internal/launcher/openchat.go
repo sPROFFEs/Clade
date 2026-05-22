@@ -136,6 +136,13 @@ func OpenChatWithOptions(c Chat, opts OpenChatOptions) (LaunchPlan, Agent, error
 			// resume flag alongside flags like `--model`. Append.
 			plan.Args = append(plan.Args, resume.Args...)
 		}
+	} else {
+		// No resume args = fresh launch. Append the Option-C context
+		// primer (subject to the chat's DisableContextPrimer toggle).
+		// On resume, we skip the primer — the agent already has the
+		// prior context in its rehydrated conversation state, so an
+		// extra "read MEMORY.md" instruction would just be noise.
+		plan = AppendContextPrimer(plan, picked, c.AsWorkspace())
 	}
 	return plan, picked, nil
 }
