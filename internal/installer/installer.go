@@ -68,6 +68,17 @@ type Method struct {
 	Shell       Shell    // how to invoke Command
 	Recommended bool     // exactly one method per (agent,action,os) is the default
 	Prereqs     []string // names probed before running ("node", "pnpm")
+
+	// ManagedPrefix, when non-empty, switches Run from "execute Command
+	// as a shell line" to "install ManagedPrefixPkg into a Clade-owned
+	// prefix dir named <ManagedPrefix> with a hoisted node-linker."
+	// Command is still set for display but isn't executed verbatim.
+	// Used for agents (openclaude) whose upstream package has a phantom
+	// dependency that strict global pnpm refuses to resolve — see
+	// installIntoManagedPrefix. ManagedPrefix is the subdir name (and
+	// the agent's binary name); ManagedPrefixPkg is the npm spec.
+	ManagedPrefix    string
+	ManagedPrefixPkg string
 }
 
 // Shell tells Run how to execute Command. Direct means no shell wrapping
@@ -565,6 +576,12 @@ func RunWithOptions(ctx context.Context, m Method, opts RunOptions, stdout, stde
 		}
 		extraEnv = append(extraEnv, env...)
 	}
+	// Managed-prefix install: project-local pnpm into a Clade-owned dir
+	// with a hoisted node-linker. Bypasses buildCmd entirely — see
+	// installIntoManagedPrefix.
+	if m.ManagedPrefix != "" {
+		return installIntoManagedPrefix(ctx, m, extraEnv, stdout, stderr)
+	}
 	cmd := buildCmd(ctx, m)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
@@ -597,6 +614,130 @@ func buildCmd(ctx context.Context, m Method) *exec.Cmd {
 		parts := strings.Fields(m.Command)
 		return exec.CommandContext(ctx, parts[0], parts[1:]...)
 	}
+}
+
+// ManagedAgentPrefix returns the Clade-owned directory where an agent
+// with a non-standard install layout lives, alongside Clade's own
+// config under os.UserConfigDir()/clade/agents/<name>/. The agent's
+// executable ends up at <prefix>/node_modules/.bin/<name>. Used for
+// agents (openclaude) whose upstream package can't be installed cleanly
+// via `pnpm add -g` — see installIntoManagedPrefix.
+func ManagedAgentPrefix(name string) (string, error) {
+	base, err := os.UserConfigDir()
+	if err != nil {
+		return "", fmt.Errorf("locate user config dir: %w", err)
+	}
+	return filepath.Join(base, "clade", "agents", name), nil
+}
+
+// ManagedAgentBinDir returns <prefix>/node_modules/.bin for the named
+// managed agent — the dir pnpm drops the executable (and its .CMD /
+// .ps1 shims on Windows) into. Agent detection probes here.
+func ManagedAgentBinDir(name string) (string, error) {
+	prefix, err := ManagedAgentPrefix(name)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(prefix, "node_modules", ".bin"), nil
+}
+
+// installIntoManagedPrefix installs m.ManagedPrefixPkg into the
+// Clade-owned prefix dir named m.ManagedPrefix using a PROJECT-LOCAL
+// `pnpm add` (not `-g`). The prefix gets a private package.json (so
+// pnpm treats it as a standalone project and doesn't walk up to a
+// parent workspace) and a `.npmrc` carrying:
+//
+//	node-linker=hoisted     → flat, npm-like node_modules so openclaude's
+//	                          undeclared @aws-sdk/client-bedrock-runtime
+//	                          import resolves (the phantom-dep fix). Honored
+//	                          for project-local installs, unlike `pnpm add -g`.
+//	registry=...npmjs.org/  → supply-chain pin, same as pnpmRegistryFlag.
+//
+// extraEnv carries the PNPM_HOME / PATH additions EnsurePnpmReady built
+// so pnpm is usable in-process without a shell restart.
+func installIntoManagedPrefix(ctx context.Context, m Method, extraEnv []string, stdout, stderr io.Writer) error {
+	prefix, err := ManagedAgentPrefix(m.ManagedPrefix)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(prefix, 0o755); err != nil {
+		return fmt.Errorf("create managed prefix %s: %w", prefix, err)
+	}
+	fmt.Fprintf(stdout, "→ installing %s into Clade-managed prefix: %s\n", m.ManagedPrefixPkg, prefix)
+
+	// Private host manifest — marks this a standalone project so pnpm
+	// doesn't resolve against an ancestor workspace and so `pnpm add`
+	// has a package.json to record the dep in.
+	pkgJSON := `{
+  "name": "clade-` + m.ManagedPrefix + `-host",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Clade-managed install prefix for ` + m.ManagedPrefix + `. Do not edit by hand."
+}
+`
+	if err := os.WriteFile(filepath.Join(prefix, "package.json"), []byte(pkgJSON), 0o644); err != nil {
+		return fmt.Errorf("write host package.json: %w", err)
+	}
+	// .npmrc pins the registry for the prefix (supply-chain). NOTE the
+	// node-linker is NOT set here: pnpm v11 silently ignores a
+	// `node-linker=` line in a project .npmrc (verified) — it's only
+	// honored as the `--config.node-linker=hoisted` command flag we
+	// pass below. We still drop the registry line so any later manual
+	// `pnpm` run in this dir stays pinned.
+	npmrc := "registry=https://registry.npmjs.org/\n"
+	if err := os.WriteFile(filepath.Join(prefix, ".npmrc"), []byte(npmrc), 0o644); err != nil {
+		return fmt.Errorf("write prefix .npmrc: %w", err)
+	}
+
+	// --config.node-linker=hoisted: flat node_modules so the agent's
+	//   undeclared transitive import (openclaude → @aws-sdk/client-
+	//   bedrock-runtime) resolves. Honored as a flag for project-local
+	//   installs, unlike a .npmrc line or `pnpm add -g`.
+	// Build scripts stay BLOCKED (pnpm 10+ default): we deliberately do
+	//   NOT pass --config.dangerouslyAllowAllBuilds or approve sharp/
+	//   protobufjs. That's the supply-chain posture — and openclaude
+	//   runs fine without those native builds (its launch path doesn't
+	//   touch them). pnpm flags this with ERR_PNPM_IGNORED_BUILDS and a
+	//   non-zero exit; we treat that specific case as success below.
+	var cap bytes.Buffer
+	cmd := exec.CommandContext(ctx, "pnpm", "add",
+		"--config.node-linker=hoisted",
+		m.ManagedPrefixPkg)
+	cmd.Dir = prefix
+	cmd.Stdout = io.MultiWriter(stdout, &cap)
+	cmd.Stderr = io.MultiWriter(stderr, &cap)
+	if len(extraEnv) > 0 {
+		cmd.Env = append(os.Environ(), extraEnv...)
+	}
+	runErr := cmd.Run()
+
+	// Success criterion is the binary existing, not pnpm's exit code:
+	// pnpm returns non-zero purely because it ignored sharp/protobufjs
+	// build scripts (the supply-chain default we WANT). If the bin is
+	// present, the install worked; the ignored builds aren't needed at
+	// launch.
+	bin := filepath.Join(prefix, "node_modules", ".bin", m.ManagedPrefix)
+	binPresent := false
+	for _, cand := range []string{bin, bin + ".CMD", bin + ".cmd", bin + ".ps1"} {
+		if _, err := os.Stat(cand); err == nil {
+			binPresent = true
+			break
+		}
+	}
+	if runErr != nil {
+		ignoredBuildsOnly := strings.Contains(cap.String(), "ERR_PNPM_IGNORED_BUILDS")
+		if !(binPresent && ignoredBuildsOnly) {
+			return fmt.Errorf("pnpm add %s into %s: %w", m.ManagedPrefixPkg, prefix, runErr)
+		}
+		fmt.Fprintln(stdout, "  (pnpm blocked postinstall build scripts — left unbuilt by design; "+
+			m.ManagedPrefix+" does not need them at launch)")
+	}
+	if !binPresent {
+		return fmt.Errorf("pnpm add %s succeeded but %s binary not found under %s/node_modules/.bin",
+			m.ManagedPrefixPkg, m.ManagedPrefix, prefix)
+	}
+	fmt.Fprintf(stdout, "✓ %s installed; binary at %s\n", m.ManagedPrefix, bin)
+	return nil
 }
 
 // pnpmRegistryFlag pins the registry on every global pnpm install we
@@ -653,12 +794,34 @@ func allMethods(agent AgentID, action Action, current OS) []Method {
 	// release before bumping the pin" workflow, switch from @latest
 	// to a pin on install (keeping @latest on update for the
 	// opt-back-in case).
-	openclaudePnpm := func() string {
-		if action == ActionUpdate {
-			return "pnpm add -g" + pnpmRegistryFlag + " @gitlawb/openclaude@latest"
-		}
-		return "pnpm add -g" + pnpmRegistryFlag + " @gitlawb/openclaude@latest"
-	}
+	//
+	// KNOWN ISSUE — phantom dependency. OpenClaude (verified 0.13.0 +
+	// 0.14.0) imports `@aws-sdk/client-bedrock-runtime` as runtime
+	// values in dist/cli.mjs (its Bedrock gateway) but only declares
+	// `@anthropic-ai/bedrock-sdk` in package.json. Under npm's flat
+	// node_modules the undeclared import resolves by accident; under
+	// pnpm's strict symlinked layout it fails at gateway-init with
+	// `ERR_MODULE_NOT_FOUND: @aws-sdk/client-bedrock-runtime` — i.e.
+	// openclaude crashes on launch.
+	//
+	// We CANNOT fix this from a `pnpm add -g` command: pnpm ignores
+	// --node-linker / --config.node-linker / --shamefully-hoist /
+	// npm_config_node_linker for global installs (verified empirically
+	// — the global layout stays strict regardless). What DOES honor a
+	// hoisted node-linker is a project-local install. So we install
+	// openclaude into a Clade-owned prefix dir (see ManagedAgentPrefix
+	// + installIntoManagedPrefix) with a `.npmrc` carrying
+	// `node-linker=hoisted`, which flat-hoists the transitive
+	// @aws-sdk/client-bedrock-runtime to where openclaude's import can
+	// find it. The global pnpm config is untouched, so the other node
+	// agents (codex/opencode/gemini/deepseek) keep their strict layout.
+	//
+	// openclaudePkg is the spec; openclaudeDisplayCmd is what we show
+	// the user (it isn't executed verbatim — Run special-cases
+	// ManagedPrefix). The registry flag is shown for transparency and
+	// is also written into the prefix .npmrc.
+	const openclaudePkg = "@gitlawb/openclaude@latest"
+	openclaudeDisplayCmd := "pnpm add" + pnpmRegistryFlag + " " + openclaudePkg
 
 	switch agent {
 	case AgentClaude:
@@ -683,17 +846,18 @@ func allMethods(agent AgentID, action Action, current OS) []Method {
 		// pnpm-only on every OS. OpenClaude has no brew formula,
 		// no winget package, no curl|bash installer — npm/pnpm is
 		// upstream's only distribution channel. We pick pnpm
-		// exclusively (skipping npm) because pnpm's resolution
-		// honors the explicit --registry override even when
-		// ~/.npmrc has been tampered with, and lockfile semantics
-		// reduce the post-resolve mutation window. See the
-		// pnpmRegistryFlag comment for the full rationale.
+		// exclusively (skipping npm) for the registry-pinning +
+		// lockfile benefits, and install into a Clade-managed prefix
+		// with a hoisted .npmrc to work around the phantom aws-sdk
+		// dependency (see the openclaudePkg comment above).
 		return []Method{
 			{ID: "pnpm",
-				Label:       "pnpm global package",
-				Command:     openclaudePnpm(),
-				Recommended: true,
-				Prereqs:     []string{"node", "pnpm"}},
+				Label:            "pnpm into Clade-managed prefix (hoisted node-linker)",
+				Command:          openclaudeDisplayCmd,
+				ManagedPrefix:    "openclaude",
+				ManagedPrefixPkg: openclaudePkg,
+				Recommended:      true,
+				Prereqs:          []string{"node", "pnpm"}},
 		}
 
 	case AgentCodex:

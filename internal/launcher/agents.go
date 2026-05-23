@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/sPROFFEs/Clade/internal/installer"
 )
 
 // AgentID is one of "claude", "codex", "opencode", "gemini", "deepseek".
@@ -74,8 +76,12 @@ func KnownAgents() []Agent {
 			// pnpm-only on purpose — npm has been the vector for the
 			// recent supply-chain attacks (chalk/debug Sept 2025,
 			// lottiefiles, etc.). pnpm + explicit registry pinning in
-			// the installer narrows the trust surface.
-			InstallHint: "pnpm add -g --registry=https://registry.npmjs.org/ @gitlawb/openclaude   (needs Node 20+ and pnpm)",
+			// the installer narrows the trust surface. NOTE: openclaude
+			// 0.13/0.14 has a phantom dep on @aws-sdk/client-bedrock-runtime
+			// that crashes under strict pnpm at launch; until upstream
+			// fixes it the user needs a hoisted global pnpm linker. See
+			// the installer's openclaudePnpm comment.
+			InstallHint: "pnpm add -g --registry=https://registry.npmjs.org/ @gitlawb/openclaude   (needs Node 20+ and pnpm; requires hoisted pnpm linker — see notes)",
 		},
 		{
 			ID:          AgentCodex,
@@ -208,10 +214,16 @@ func knownInstallPaths(id AgentID, binary string) []string {
 			}
 		}
 	case AgentOpenClaude:
-		// OpenClaude installs via pnpm — ImportPnpmPathIfPresent
-		// covers the common case, but mirror codex's Windows-npm
-		// fallback so users who installed via a stray `npm i -g`
-		// (despite our pnpm-only hint) still get detected.
+		// OpenClaude installs into a Clade-managed prefix (hoisted
+		// node-linker) to dodge its phantom @aws-sdk dependency — its
+		// bin lives at <prefix>/node_modules/.bin/openclaude, NOT on
+		// the global pnpm path. Probe there first.
+		if binDir, err := installer.ManagedAgentBinDir("openclaude"); err == nil {
+			dirs = append(dirs, binDir)
+		}
+		// Fallback: a stray global install (pnpm or npm) from a user
+		// who installed by hand. ImportPnpmPathIfPresent covers the
+		// pnpm-global PATH case; mirror codex's Windows-npm fallback.
 		if runtime.GOOS == "windows" {
 			if appdata := os.Getenv("APPDATA"); appdata != "" {
 				dirs = append(dirs, filepath.Join(appdata, "npm"))

@@ -3,6 +3,7 @@ package installer
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -113,6 +114,49 @@ func TestCatalog_OpenClaudeIsPnpmOnly(t *testing.T) {
 				t.Errorf("openclaude on %s/%s: got method %q, want pnpm", o, act, got[0].ID)
 			}
 		}
+	}
+}
+
+// TestCatalog_OpenClaudeUsesManagedPrefix locks in the phantom-dep
+// workaround: openclaude installs into a Clade-managed prefix (hoisted
+// node-linker) rather than `pnpm add -g`. If a contributor "simplifies"
+// it back to a global install, openclaude crashes on launch under
+// strict pnpm — this test fails first so the reason gets re-checked.
+func TestCatalog_OpenClaudeUsesManagedPrefix(t *testing.T) {
+	for _, o := range []OS{OSMacOS, OSLinux, OSWSL, OSWindows} {
+		for _, act := range []Action{ActionInstall, ActionUpdate} {
+			m := allMethods(AgentOpenClaude, act, o)[0]
+			if m.ManagedPrefix != "openclaude" {
+				t.Errorf("openclaude %s/%s: ManagedPrefix=%q, want \"openclaude\"", o, act, m.ManagedPrefix)
+			}
+			if !strings.Contains(m.ManagedPrefixPkg, "@gitlawb/openclaude") {
+				t.Errorf("openclaude %s/%s: ManagedPrefixPkg=%q, want @gitlawb/openclaude spec", o, act, m.ManagedPrefixPkg)
+			}
+			// A managed-prefix install must NOT be a global one — the
+			// whole point is to avoid `-g`.
+			if strings.Contains(m.Command, " -g ") || strings.HasSuffix(m.Command, " -g") {
+				t.Errorf("openclaude %s/%s: command uses -g (%q); managed prefix must be project-local", o, act, m.Command)
+			}
+		}
+	}
+}
+
+// TestManagedAgentPrefix_PathShape checks the prefix lands under the
+// clade config dir and the bin dir is the pnpm .bin location.
+func TestManagedAgentPrefix_PathShape(t *testing.T) {
+	prefix, err := ManagedAgentPrefix("openclaude")
+	if err != nil {
+		t.Fatalf("ManagedAgentPrefix: %v", err)
+	}
+	if !strings.HasSuffix(filepath.ToSlash(prefix), "clade/agents/openclaude") {
+		t.Errorf("prefix = %q, want it to end with clade/agents/openclaude", prefix)
+	}
+	binDir, err := ManagedAgentBinDir("openclaude")
+	if err != nil {
+		t.Fatalf("ManagedAgentBinDir: %v", err)
+	}
+	if !strings.HasSuffix(filepath.ToSlash(binDir), "clade/agents/openclaude/node_modules/.bin") {
+		t.Errorf("binDir = %q, want .../clade/agents/openclaude/node_modules/.bin", binDir)
 	}
 }
 
