@@ -81,7 +81,7 @@ func EstimateInjection(c Chat, agent Agent) InjectionEstimate {
 	// Primer — only counts when enabled AND the agent supports it.
 	if !c.Settings.DisableContextPrimer {
 		switch agent.ID {
-		case AgentClaude, AgentCodex, AgentGemini:
+		case AgentClaude, AgentOpenClaude, AgentCodex, AgentGemini:
 			est.PrimerBytes = len(ContextPrimerPrompt)
 		}
 	}

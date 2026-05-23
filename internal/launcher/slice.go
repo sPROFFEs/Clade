@@ -66,6 +66,8 @@ func sliceSubdir(agent AgentID) string {
 	switch agent {
 	case AgentClaude:
 		return "claude-projects"
+	case AgentOpenClaude:
+		return "openclaude-projects"
 	case AgentCodex:
 		return "codex-rollouts"
 	case AgentOpenCode:
@@ -99,6 +101,10 @@ func MirrorOutSlice(agent Agent, sandboxDir, sessionDir string) MirrorResult {
 	switch agent.ID {
 	case AgentClaude:
 		return mirrorOutClaude(paths.SessionDir, dstRoot)
+	case AgentOpenClaude:
+		// Same file layout as claude (UUID-named .jsonl files in a
+		// slug dir) — mirrorOutClaude works verbatim.
+		return mirrorOutClaude(paths.SessionDir, dstRoot)
 	case AgentCodex:
 		return mirrorOutCodex(paths.SessionDir, sandboxDir, dstRoot)
 	case AgentOpenCode:
@@ -128,6 +134,9 @@ func MirrorInSlice(agent Agent, sandboxDir, sliceRoot string, preserveNewerHome 
 	}
 	switch agent.ID {
 	case AgentClaude:
+		return mirrorInClaude(paths.SessionDir, filepath.Join(sliceRoot, sliceSubdir(agent.ID)), preserveNewerHome)
+	case AgentOpenClaude:
+		// Same layout as claude — reuse the helper.
 		return mirrorInClaude(paths.SessionDir, filepath.Join(sliceRoot, sliceSubdir(agent.ID)), preserveNewerHome)
 	case AgentCodex:
 		return mirrorInCodex(paths.SessionDir, filepath.Join(sliceRoot, sliceSubdir(agent.ID)), preserveNewerHome)

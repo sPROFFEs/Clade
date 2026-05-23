@@ -72,6 +72,13 @@ func AgentHome(agent AgentID, sandboxDir string) AgentStorePaths {
 		return AgentStorePaths{
 			SessionDir: filepath.Join(home, ".claude", "projects", claudeProjectSlug(sandboxDir)),
 		}
+	case AgentOpenClaude:
+		// Same layout as claude but rooted at ~/.openclaude/ and
+		// using a more aggressive slug (any non-alphanumeric → '-').
+		// See openclaudeProjectSlug for the divergence.
+		return AgentStorePaths{
+			SessionDir: filepath.Join(home, ".openclaude", "projects", openclaudeProjectSlug(sandboxDir)),
+		}
 	case AgentCodex:
 		// Codex stores rollouts under date dirs across all cwds. The
 		// caller has to walk + filter by the cwd field in each file.

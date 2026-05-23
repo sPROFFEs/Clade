@@ -117,7 +117,7 @@ func AppendContextPrimer(plan LaunchPlan, agent Agent, ws Workspace) LaunchPlan 
 		return plan
 	}
 	switch agent.ID {
-	case AgentClaude, AgentCodex, AgentGemini:
+	case AgentClaude, AgentOpenClaude, AgentCodex, AgentGemini:
 		// These accept a positional prompt. Append.
 		plan.Args = append(plan.Args, ContextPrimerPrompt)
 	}
@@ -231,6 +231,23 @@ func Plan(ws Workspace, agent Agent) (LaunchPlan, error) {
 			}
 			// Without --model Claude sends its default model name to
 			// the local proxy, which doesn't have it → request fails.
+			plan.Args = []string{"--model", o.Model}
+		}
+	case AgentOpenClaude:
+		if ollamaConfigured && o.HasAgent(AgentOpenClaude) {
+			// OpenClaude exposes the OpenAI-compatible code path via
+			// CLAUDE_CODE_USE_OPENAI=1. Endpoint + key + model travel
+			// through the OPENAI_* env block — same convention as
+			// codex/opencode. The fork inherits Anthropic-flavoured
+			// flags too (--model), so we pass it for parity with
+			// claude in case openclaude's env-only model selection
+			// loses to a default elsewhere in the chain.
+			plan.Env = map[string]string{
+				"CLAUDE_CODE_USE_OPENAI": "1",
+				"OPENAI_API_KEY":         authToken,
+				"OPENAI_BASE_URL":        o.Endpoint,
+				"OPENAI_MODEL":           o.Model,
+			}
 			plan.Args = []string{"--model", o.Model}
 		}
 	case AgentCodex:

@@ -86,11 +86,12 @@ const (
 type AgentID string
 
 const (
-	AgentClaude   AgentID = "claude"
-	AgentCodex    AgentID = "codex"
-	AgentOpenCode AgentID = "opencode"
-	AgentGemini   AgentID = "gemini"
-	AgentDeepSeek AgentID = "deepseek"
+	AgentClaude     AgentID = "claude"
+	AgentOpenClaude AgentID = "openclaude"
+	AgentCodex      AgentID = "codex"
+	AgentOpenCode   AgentID = "opencode"
+	AgentGemini     AgentID = "gemini"
+	AgentDeepSeek   AgentID = "deepseek"
 )
 
 // Action is "install" or "update". Update reuses most install commands,
@@ -598,14 +599,65 @@ func buildCmd(ctx context.Context, m Method) *exec.Cmd {
 	}
 }
 
+// pnpmRegistryFlag pins the registry on every global pnpm install we
+// emit. Defends against three real-world attack vectors:
+//
+//  1. A poisoned ~/.npmrc or repo-local .npmrc that redirects `registry=`
+//     to a typosquatted mirror.
+//  2. An attacker-set npm_config_registry env var inherited from the
+//     user's shell.
+//  3. CI environments where the registry default was changed at the
+//     image level.
+//
+// Pinning here forces every pnpm command Clade emits through the
+// canonical registry regardless of those config layers. Users who
+// LEGITIMATELY use a private registry (Verdaccio, JFrog) install the
+// agent themselves outside Clade; the installer's job is to make the
+// default path safe, not to be configurable for proxied installs.
+//
+// Note: we do NOT add --ignore-scripts globally. Several of the CLIs
+// here (codex, opencode native binaries) need their postinstall to
+// fetch the platform binary; --ignore-scripts would leave the install
+// broken. The supply-chain risk is real but the mitigation breaks
+// functionality. A future hardening could ignore scripts on a per-
+// package allowlist once we audit each agent's postinstall.
+const pnpmRegistryFlag = " --registry=https://registry.npmjs.org/"
+
 // allMethods is the static catalog, before filtering by what's installed.
 // Mirror of agent-cli-installer.sh but pnpm-first and Windows-aware.
 func allMethods(agent AgentID, action Action, current OS) []Method {
 	pnpmPkg := func(pkg string) string {
 		if action == ActionUpdate {
-			return "pnpm add -g " + pkg + "@latest"
+			return "pnpm add -g" + pnpmRegistryFlag + " " + pkg + "@latest"
 		}
-		return "pnpm add -g " + pkg
+		return "pnpm add -g" + pnpmRegistryFlag + " " + pkg
+	}
+
+	// OpenClaude is a single-maintainer npm package, which is a known
+	// supply-chain risk profile (maintainer-account takeover → patch
+	// published under the same name; chalk/debug Sept 2025 followed
+	// this exact pattern). Real mitigations available to us:
+	//
+	//   - Registry pinning (pnpmRegistryFlag) — defends against
+	//     ~/.npmrc / env redirection. Always on.
+	//   - Version pinning — would defend against post-compromise
+	//     patches, but requires the Clade maintainer to vet+bump the
+	//     pin on every release. Not done yet: pinning to a stale
+	//     version with no upgrade plan is a worse UX than @latest
+	//     because users miss real bug fixes; pinning a placeholder
+	//     version we never verified is a footgun.
+	//   - --ignore-scripts — would block the postinstall vector but
+	//     also breaks OpenClaude's native-binary download. Not done.
+	//
+	// Tracking item: once Clade has a documented "vet this agent's
+	// release before bumping the pin" workflow, switch from @latest
+	// to a pin on install (keeping @latest on update for the
+	// opt-back-in case).
+	openclaudePnpm := func() string {
+		if action == ActionUpdate {
+			return "pnpm add -g" + pnpmRegistryFlag + " @gitlawb/openclaude@latest"
+		}
+		return "pnpm add -g" + pnpmRegistryFlag + " @gitlawb/openclaude@latest"
 	}
 
 	switch agent {
@@ -625,6 +677,23 @@ func allMethods(agent AgentID, action Action, current OS) []Method {
 				{ID: "winget", Label: "winget package", Command: wingetCmd(action, "Anthropic.ClaudeCode"), Recommended: true},
 				{ID: "powershell", Label: "PowerShell installer", Command: "irm https://claude.ai/install.ps1 | iex", Shell: ShellPowerShell},
 			}
+		}
+
+	case AgentOpenClaude:
+		// pnpm-only on every OS. OpenClaude has no brew formula,
+		// no winget package, no curl|bash installer — npm/pnpm is
+		// upstream's only distribution channel. We pick pnpm
+		// exclusively (skipping npm) because pnpm's resolution
+		// honors the explicit --registry override even when
+		// ~/.npmrc has been tampered with, and lockfile semantics
+		// reduce the post-resolve mutation window. See the
+		// pnpmRegistryFlag comment for the full rationale.
+		return []Method{
+			{ID: "pnpm",
+				Label:       "pnpm global package",
+				Command:     openclaudePnpm(),
+				Recommended: true,
+				Prereqs:     []string{"node", "pnpm"}},
 		}
 
 	case AgentCodex:

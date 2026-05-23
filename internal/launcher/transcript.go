@@ -141,6 +141,8 @@ func locateTranscript(id AgentID, sandboxDir string, sessionStart time.Time) (st
 	switch id {
 	case AgentClaude:
 		return locateClaudeTranscript(sandboxDir, sessionStart)
+	case AgentOpenClaude:
+		return locateOpenClaudeTranscript(sandboxDir, sessionStart)
 	case AgentCodex:
 		return locateCodexTranscript(sandboxDir, sessionStart)
 	case AgentOpenCode:
@@ -166,6 +168,85 @@ func homeDir() string {
 		return h
 	}
 	return ""
+}
+
+// openclaudeProjectSlug maps an absolute path to OpenClaude's on-disk
+// project slug. OpenClaude's sanitizePath (src/utils/sessionStoragePortable.ts)
+// replaces EVERY non-alphanumeric char with '-' — more aggressive than
+// claude code's targeted '/', '\\', '.', ':' replacement, so paths
+// containing '_' or other punctuation slug differently. Returns "" for
+// empty input.
+//
+// Truncation/hashing fallback (>120 chars in upstream) is omitted here
+// — sandbox paths are well under that limit in normal use.
+func openclaudeProjectSlug(cwd string) string {
+	if cwd == "" {
+		return ""
+	}
+	abs, err := filepath.Abs(cwd)
+	if err != nil {
+		abs = cwd
+	}
+	abs = filepath.ToSlash(abs)
+	var b strings.Builder
+	b.Grow(len(abs))
+	for _, r := range abs {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('-')
+		}
+	}
+	return b.String()
+}
+
+// locateOpenClaudeTranscript mirrors locateClaudeTranscript but against
+// ~/.openclaude/projects/<slug>/. The JSONL schema is inherited verbatim
+// from claude code so parseClaudeJSONL handles parsing.
+func locateOpenClaudeTranscript(sandboxDir string, sessionStart time.Time) (string, []byte, []TranscriptEntry, string, error) {
+	home := homeDir()
+	if home == "" {
+		return "", nil, nil, "no home dir resolved — openclaude store skipped", nil
+	}
+	dir := filepath.Join(home, ".openclaude", "projects", openclaudeProjectSlug(sandboxDir))
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return "", nil, nil, "openclaude store empty for this sandbox (path: " + dir + ")", nil
+		}
+		return "", nil, nil, "", err
+	}
+
+	type cand struct {
+		path    string
+		modTime time.Time
+	}
+	var cands []cand
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		if info.ModTime().Before(sessionStart.Add(-2 * time.Second)) {
+			continue
+		}
+		cands = append(cands, cand{filepath.Join(dir, e.Name()), info.ModTime()})
+	}
+	if len(cands) == 0 {
+		return "", nil, nil, "no openclaude transcript matched this launch (store: " + dir + ")", nil
+	}
+	sort.Slice(cands, func(i, j int) bool { return cands[i].modTime.After(cands[j].modTime) })
+	picked := cands[0].path
+
+	raw, err := os.ReadFile(picked)
+	if err != nil {
+		return "", nil, nil, "", err
+	}
+	parsed := parseClaudeJSONL(raw)
+	return picked, raw, parsed, "", nil
 }
 
 // claudeProjectSlug maps an absolute path to Claude Code's on-disk

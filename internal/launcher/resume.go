@@ -66,6 +66,8 @@ func RestoreNativeSession(agent Agent, c Chat) ResumePlan {
 	switch agent.ID {
 	case AgentClaude:
 		return resumeClaude(c)
+	case AgentOpenClaude:
+		return resumeOpenClaude(c)
 	case AgentCodex:
 		return resumeCodex(c)
 	case AgentOpenCode:
@@ -186,6 +188,62 @@ func extractClaudeSessionID(raw []byte) string {
 		}
 	}
 	return ""
+}
+
+// --- OpenClaude ------------------------------------------------------------
+
+// resumeOpenClaude is the resumeClaude twin for ~/.openclaude/projects/.
+// CLI surface (-c / --continue, -r / --resume [UUID]) and on-disk JSONL
+// schema (sessionId in the header records) are inherited from claude
+// code, so the decision matrix is identical: ≥2 native → open picker,
+// ==1 → --continue, 0 → restore from captured transcript if any.
+func resumeOpenClaude(c Chat) ResumePlan {
+	home := homeDir()
+	if home == "" {
+		return ResumePlan{Note: "openclaude resume: no home dir resolved"}
+	}
+	slug := openclaudeProjectSlug(c.SandboxDir)
+	storeDir := filepath.Join(home, ".openclaude", "projects", slug)
+	native := claudeNativeSessionFiles(storeDir)
+
+	switch {
+	case len(native) >= 2:
+		return ResumePlan{
+			Args: []string{"--resume"},
+			Note: "found " + itoa(len(native)) + " native openclaude sessions for this chat — opening openclaude's picker",
+		}
+	case len(native) == 1:
+		return ResumePlan{
+			Args: []string{"--continue"},
+			Note: "resuming the single native openclaude session for this chat",
+		}
+	}
+
+	pick, ok := newestCaptureForAgent(c.SessionsDir, AgentOpenClaude)
+	if !ok {
+		return ResumePlan{Note: "no previous openclaude session for this chat (no native store, no captured transcript)"}
+	}
+	src := filepath.Join(pick.dir, "transcript.jsonl")
+	raw, err := os.ReadFile(src)
+	if err != nil {
+		return ResumePlan{Note: "openclaude resume: couldn't read captured transcript: " + err.Error()}
+	}
+	uuid := extractClaudeSessionID(raw)
+	if uuid == "" {
+		return ResumePlan{Note: "openclaude resume: captured transcript has no sessionId field — can't restore safely; launch will start fresh"}
+	}
+	if err := os.MkdirAll(storeDir, 0o755); err != nil {
+		return ResumePlan{Note: "openclaude resume: mkdir " + storeDir + ": " + err.Error()}
+	}
+	dst := filepath.Join(storeDir, uuid+".jsonl")
+	if err := writeFileAtomic(dst, raw, 0o644); err != nil {
+		return ResumePlan{Note: "openclaude resume: write " + dst + ": " + err.Error()}
+	}
+	return ResumePlan{
+		Args:       []string{"--continue"},
+		RestoredTo: dst,
+		Note:       "no native openclaude session on this machine; restored from captured transcript (uuid " + uuid + ")",
+	}
 }
 
 // --- Codex -----------------------------------------------------------------

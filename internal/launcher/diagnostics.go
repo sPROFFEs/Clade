@@ -131,6 +131,9 @@ func countAgentNativeSessions(id AgentID, sandboxDir string) (int, string) {
 	case AgentClaude:
 		dir := filepath.Join(home, ".claude", "projects", claudeProjectSlug(sandboxDir))
 		return countJSONLFiles(dir), dir
+	case AgentOpenClaude:
+		dir := filepath.Join(home, ".openclaude", "projects", openclaudeProjectSlug(sandboxDir))
+		return countJSONLFiles(dir), dir
 	case AgentCodex:
 		// Codex stores sessions by date, not cwd; scanning every
 		// rollout to count matches would be expensive. Surface the

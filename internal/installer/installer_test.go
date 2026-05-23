@@ -71,6 +71,51 @@ func TestCatalog_PnpmMethodsCarryNodePrereq(t *testing.T) {
 	}
 }
 
+// TestCatalog_PnpmMethodsPinRegistry is the supply-chain regression
+// guard: every pnpm command Clade emits must include the explicit
+// --registry= flag pointing at registry.npmjs.org. Without it, a
+// poisoned ~/.npmrc / npm_config_registry env / project .npmrc could
+// silently redirect global installs to a malicious mirror. The flag
+// makes the registry choice non-configurable from outside Clade.
+func TestCatalog_PnpmMethodsPinRegistry(t *testing.T) {
+	wantFlag := "--registry=https://registry.npmjs.org/"
+	for _, a := range []AgentID{AgentClaude, AgentOpenClaude, AgentCodex, AgentOpenCode, AgentGemini, AgentDeepSeek} {
+		for _, o := range []OS{OSMacOS, OSLinux, OSWSL, OSWindows} {
+			for _, act := range []Action{ActionInstall, ActionUpdate} {
+				for _, m := range allMethods(a, act, o) {
+					if !strings.HasPrefix(m.Command, "pnpm ") {
+						continue
+					}
+					if !strings.Contains(m.Command, wantFlag) {
+						t.Errorf("agent=%s os=%s action=%s method=%s missing %s\n  command: %s",
+							a, o, act, m.ID, wantFlag, m.Command)
+					}
+				}
+			}
+		}
+	}
+}
+
+// TestCatalog_OpenClaudeIsPnpmOnly locks in the supply-chain decision
+// that openclaude only installs via pnpm — no npm fallback, no curl|
+// bash, no brew. If a future contributor adds an npm or curl method
+// to AgentOpenClaude, this test fails so the choice gets revisited
+// explicitly.
+func TestCatalog_OpenClaudeIsPnpmOnly(t *testing.T) {
+	for _, o := range []OS{OSMacOS, OSLinux, OSWSL, OSWindows} {
+		for _, act := range []Action{ActionInstall, ActionUpdate} {
+			got := allMethods(AgentOpenClaude, act, o)
+			if len(got) != 1 {
+				t.Errorf("openclaude on %s/%s: got %d methods, want exactly 1 (pnpm-only)", o, act, len(got))
+				continue
+			}
+			if got[0].ID != "pnpm" {
+				t.Errorf("openclaude on %s/%s: got method %q, want pnpm", o, act, got[0].ID)
+			}
+		}
+	}
+}
+
 func TestCatalog_UpdateUsesLatestForPnpmInstalls(t *testing.T) {
 	for _, m := range allMethods(AgentCodex, ActionUpdate, OSLinux) {
 		if m.ID != "pnpm" {

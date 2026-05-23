@@ -14,11 +14,12 @@ import (
 type AgentID string
 
 const (
-	AgentClaude   AgentID = "claude"
-	AgentCodex    AgentID = "codex"
-	AgentOpenCode AgentID = "opencode"
-	AgentGemini   AgentID = "gemini"
-	AgentDeepSeek AgentID = "deepseek"
+	AgentClaude     AgentID = "claude"
+	AgentOpenClaude AgentID = "openclaude"
+	AgentCodex      AgentID = "codex"
+	AgentOpenCode   AgentID = "opencode"
+	AgentGemini     AgentID = "gemini"
+	AgentDeepSeek   AgentID = "deepseek"
 )
 
 // Agent describes one supported CLI agent. WpcTarget is the wpc target
@@ -57,6 +58,26 @@ func KnownAgents() []Agent {
 			InstallHint: "curl -fsSL https://claude.ai/install.sh | bash   (macOS/Linux)  |  winget install Anthropic.ClaudeCode  (Windows)",
 		},
 		{
+			// OpenClaude is a Claude Code fork that routes through any
+			// OpenAI-compatible endpoint (Ollama, GPUStack, GitHub
+			// Models, OAuth'd Codex, etc.) via the CLAUDE_CODE_USE_OPENAI
+			// env switch. CLI surface, session-store layout
+			// (~/.openclaude/projects/<slug>/<uuid>.jsonl), --continue /
+			// --resume / --session-id flags, positional prompt arg,
+			// CLAUDE.md auto-discovery — all inherited from upstream.
+			// We compile via the same "claude" wpc target so SKILL.md +
+			// CLAUDE.md scaffolding lands where openclaude already looks.
+			ID:        AgentOpenClaude,
+			Label:     "OpenClaude",
+			Binary:    "openclaude",
+			WpcTarget: "claude",
+			// pnpm-only on purpose — npm has been the vector for the
+			// recent supply-chain attacks (chalk/debug Sept 2025,
+			// lottiefiles, etc.). pnpm + explicit registry pinning in
+			// the installer narrows the trust surface.
+			InstallHint: "pnpm add -g --registry=https://registry.npmjs.org/ @gitlawb/openclaude   (needs Node 20+ and pnpm)",
+		},
+		{
 			ID:          AgentCodex,
 			Label:       "Codex CLI",
 			Binary:      "codex",
@@ -90,7 +111,9 @@ func KnownAgents() []Agent {
 			// sandbox root and the agent picks up the workpath in its
 			// system prompt from turn 1.
 			WpcTarget: "codex",
-			InstallHint: "npm i -g deepseek-tui   |   brew tap Hmbown/deepseek-tui && brew install deepseek-tui   (macOS)   |   scoop install deepseek-tui   (Windows)",
+			// pnpm-only hint — see comment on AgentOpenClaude above for
+			// the supply-chain rationale.
+			InstallHint: "pnpm add -g deepseek-tui   |   brew tap Hmbown/deepseek-tui && brew install deepseek-tui   (macOS)   |   scoop install deepseek-tui   (Windows)",
 		},
 	}
 }
@@ -179,6 +202,16 @@ func knownInstallPaths(id AgentID, binary string) []string {
 	case AgentCodex:
 		// npm/pnpm globals — covered by ImportPnpmPathIfPresent at
 		// startup, but keep an explicit fallback for npm's location.
+		if runtime.GOOS == "windows" {
+			if appdata := os.Getenv("APPDATA"); appdata != "" {
+				dirs = append(dirs, filepath.Join(appdata, "npm"))
+			}
+		}
+	case AgentOpenClaude:
+		// OpenClaude installs via pnpm — ImportPnpmPathIfPresent
+		// covers the common case, but mirror codex's Windows-npm
+		// fallback so users who installed via a stray `npm i -g`
+		// (despite our pnpm-only hint) still get detected.
 		if runtime.GOOS == "windows" {
 			if appdata := os.Getenv("APPDATA"); appdata != "" {
 				dirs = append(dirs, filepath.Join(appdata, "npm"))
