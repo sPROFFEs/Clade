@@ -50,6 +50,7 @@ const (
 	navSectionTemplates = "templates"
 	navSectionAgents    = "agents"
 	navSectionBackup    = "backup"
+	navSectionLocalLLM  = "localllm"
 	navSectionHelp      = "help"
 )
 
@@ -96,9 +97,17 @@ var navEntries = []navEntry{
 		},
 	},
 	{
+		id:     navSectionLocalLLM,
+		label:  "Local LLM",
+		hotkey: "5",
+		makePane: func(cfg *launcher.Config) Pane {
+			return newLocalLLMModel(cfg)
+		},
+	},
+	{
 		id:     navSectionHelp,
 		label:  "Help",
-		hotkey: "5",
+		hotkey: "6",
 		makePane: func(cfg *launcher.Config) Pane {
 			return newHelpPane(cfg)
 		},
@@ -208,7 +217,7 @@ func (m *layoutModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.toggleHelp()
 				return m, nil
 			}
-		case "ctrl+1", "ctrl+2", "ctrl+3", "ctrl+4":
+		case "ctrl+1", "ctrl+2", "ctrl+3", "ctrl+4", "ctrl+5", "ctrl+6":
 			// Direct nav-section jumps.
 			digit := int(msg.String()[len(msg.String())-1] - '0')
 			if digit >= 1 && digit <= len(navEntries) {

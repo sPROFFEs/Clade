@@ -361,6 +361,62 @@ func TestOllamaModelWithReturn_NoUnconditionalClaudePreTick(t *testing.T) {
 	}
 }
 
+// TestOllamaScreen_GlobalDefaultStartStep covers the new-chat shortcut:
+// when a global default endpoint is configured AND the chat has no
+// endpoint of its own, the wizard opens on the use-default step with the
+// connection fields pre-filled. With no default (or an already-configured
+// chat) it opens on the normal blank endpoint step.
+func TestOllamaScreen_GlobalDefaultStartStep(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmpHome, "xdg"))
+
+	root := seededRoot(t)
+	tpl, _ := launcher.LoadTemplate(root, "reversing")
+
+	// Fresh chat + global default configured → use-default step, pre-filled.
+	freshChat, _ := launcher.CreateChat(root, *tpl, "fresh", launcher.AgentClaude)
+	cfgWithDefault := &launcher.Config{
+		WorkspacesRoot:       root,
+		DefaultLocalEndpoint: "http://192.168.1.50:11434",
+		DefaultLocalAPIKey:   "tok",
+		DefaultLocalWireAPI:  "responses",
+	}
+	m := newOllamaModel(cfgWithDefault, freshChat.AsWorkspace())
+	if m.step != ollamaStepUseDefault {
+		t.Errorf("fresh chat + global default: step = %d, want ollamaStepUseDefault (%d)", m.step, ollamaStepUseDefault)
+	}
+	if m.endpoint.Value() != cfgWithDefault.DefaultLocalEndpoint {
+		t.Errorf("endpoint not pre-filled from default: got %q", m.endpoint.Value())
+	}
+	if m.apiKey.Value() != cfgWithDefault.DefaultLocalAPIKey {
+		t.Errorf("api key not pre-filled from default: got %q", m.apiKey.Value())
+	}
+	if m.wireAPI != "responses" {
+		t.Errorf("wireAPI not carried from default: got %q", m.wireAPI)
+	}
+
+	// No global default → normal endpoint step, blank.
+	noDefault := &launcher.Config{WorkspacesRoot: root}
+	m2 := newOllamaModel(noDefault, freshChat.AsWorkspace())
+	if m2.step != ollamaStepEndpoint {
+		t.Errorf("no default: step = %d, want ollamaStepEndpoint (%d)", m2.step, ollamaStepEndpoint)
+	}
+
+	// Chat that ALREADY has an endpoint → don't hijack with the default.
+	configuredChat, _ := launcher.CreateChat(root, *tpl, "configured", launcher.AgentClaude)
+	configuredChat.Settings.Ollama = launcher.OllamaSettings{Endpoint: "http://10.0.0.9:11434", Model: "qwen3"}
+	_ = launcher.SaveChatSettings(configuredChat)
+	loaded, _ := launcher.LoadChat(root, configuredChat.ID)
+	m3 := newOllamaModel(cfgWithDefault, loaded.AsWorkspace())
+	if m3.step != ollamaStepEndpoint {
+		t.Errorf("already-configured chat: step = %d, want ollamaStepEndpoint (don't override per-chat endpoint)", m3.step)
+	}
+	if m3.endpoint.Value() != "http://10.0.0.9:11434" {
+		t.Errorf("already-configured chat should keep its own endpoint, got %q", m3.endpoint.Value())
+	}
+}
+
 func TestOllamaFlow_FallsBackToManualEntryOnProbeError(t *testing.T) {
 	tmp := t.TempDir()
 	redirectConfig(t, filepath.Join(tmp, "cfg"))

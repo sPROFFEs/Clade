@@ -33,6 +33,12 @@ const (
 	ollamaStepModel
 	ollamaStepAgents
 	ollamaStepApply
+	// ollamaStepUseDefault is an optional FIRST step shown only when a
+	// global default endpoint is configured (cfg.HasLocalDefault) and
+	// the chat has no endpoint of its own yet. It offers "use the saved
+	// endpoint" vs "enter a new one". Declared last so the zero value of
+	// the step field stays ollamaStepEndpoint (unchanged default).
+	ollamaStepUseDefault
 )
 
 type ollamaModel struct {
@@ -43,6 +49,13 @@ type ollamaModel struct {
 	endpoint   textinput.Model
 	apiKey     textinput.Model // optional; empty = no Bearer auth (Ollama)
 	modelInput textinput.Model // used when probe returns no models
+	// wireAPI is the saved wire-API choice ("", "responses", "chat")
+	// carried from the global default into the applied chat settings so
+	// the codex compat path reuses it. Empty = unset/auto.
+	wireAPI string
+	// useDefaultCursor indexes the two choices on ollamaStepUseDefault:
+	// 0 = use saved endpoint, 1 = enter a new one.
+	useDefaultCursor int
 
 	probing      bool
 	probeErr     string
@@ -100,11 +113,32 @@ func newOllamaModel(cfg *launcher.Config, ws launcher.Workspace) ollamaModel {
 		mi.SetValue(ws.Settings.Ollama.Model)
 	}
 
+	// Wire-API + start step. When the chat has no endpoint of its own
+	// but a global default IS configured, pre-fill the connection fields
+	// from the default and open on the "use saved endpoint?" step so the
+	// user doesn't retype it. Otherwise fall through to the normal blank
+	// endpoint entry (step zero value).
+	wireAPI := ws.Settings.Ollama.WireAPI
+	startStep := ollamaStepEndpoint
+	if ws.Settings.Ollama.Endpoint == "" && cfg.HasLocalDefault() {
+		ep.SetValue(cfg.DefaultLocalEndpoint)
+		if cfg.DefaultLocalAPIKey != "" {
+			ak.SetValue(cfg.DefaultLocalAPIKey)
+		}
+		if wireAPI == "" {
+			wireAPI = cfg.DefaultLocalWireAPI
+		}
+		startStep = ollamaStepUseDefault
+		ep.Blur()
+	}
+
 	// Pre-check each agent based on what's already on disk so a re-open
 	// shows the current state instead of resetting to "only Claude".
 	return ollamaModel{
 		cfg:          cfg,
 		ws:           ws,
+		step:         startStep,
+		wireAPI:      wireAPI,
 		endpoint:     ep,
 		apiKey:       ak,
 		modelInput:   mi,
@@ -204,6 +238,8 @@ func (m ollamaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		switch m.step {
+		case ollamaStepUseDefault:
+			return m.updateUseDefault(msg)
 		case ollamaStepEndpoint:
 			return m.updateEndpoint(msg)
 		case ollamaStepAPIKey:
@@ -238,6 +274,54 @@ func (m ollamaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, cmd
+}
+
+// updateUseDefault handles the optional first step offered when a global
+// default endpoint is configured. Two choices: [0] use the saved
+// endpoint (connection fields are already pre-filled, so we probe its
+// models straight away and jump to the model step), or [1] enter a new
+// endpoint (clears the pre-fill and drops into the normal endpoint step).
+func (m ollamaModel) updateUseDefault(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		return m, wrap(newChatListModel(m.cfg))
+	case "up", "k":
+		if m.useDefaultCursor > 0 {
+			m.useDefaultCursor--
+		}
+		return m, nil
+	case "down", "j":
+		if m.useDefaultCursor < 1 {
+			m.useDefaultCursor++
+		}
+		return m, nil
+	case "enter":
+		if m.useDefaultCursor == 1 {
+			// "Enter a new one" — clear the pre-fill and go to the
+			// normal blank endpoint step.
+			m.endpoint.SetValue("")
+			m.apiKey.SetValue("")
+			m.wireAPI = ""
+			m.step = ollamaStepEndpoint
+			m.endpoint.Focus()
+			return m, textinput.Blink
+		}
+		// "Use saved endpoint" — connection fields are already filled;
+		// probe its models and land on the model step, exactly as the
+		// API-key step's Enter does.
+		ep := ollama.NormalizeEndpoint(strings.TrimSpace(m.endpoint.Value()))
+		m.endpoint.SetValue(ep)
+		key := strings.TrimSpace(m.apiKey.Value())
+		m.probing = true
+		m.probeErr = ""
+		return m, func() tea.Msg {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			models, err := ollama.ListModels(ctx, ep, key)
+			return ollamaProbeDoneMsg{models: models, err: err}
+		}
+	}
+	return m, nil
 }
 
 func (m ollamaModel) updateEndpoint(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -359,6 +443,7 @@ func (m ollamaModel) updateAgents(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			Endpoint: m.endpoint.Value(),
 			Model:    strings.TrimSpace(m.modelInput.Value()),
 			APIKey:   strings.TrimSpace(m.apiKey.Value()),
+			WireAPI:  m.wireAPI,
 		}
 		ws := m.ws
 		picks := applyPicks{
@@ -545,6 +630,8 @@ func (m ollamaModel) View() string {
 func (m ollamaModel) Title() string { return "Local endpoint · Ollama / OpenAI-compat" }
 func (m ollamaModel) Help() string {
 	switch m.step {
+	case ollamaStepUseDefault:
+		return "↑/↓ select · enter choose · esc cancel"
 	case ollamaStepEndpoint:
 		return "enter next · esc back"
 	case ollamaStepAPIKey:
@@ -576,6 +663,27 @@ func (m ollamaModel) Body() string {
 	b.WriteString("\n\n")
 
 	switch m.step {
+	case ollamaStepUseDefault:
+		b.WriteString(subtitleStyle.Render("A default local endpoint is saved:") + "\n")
+		b.WriteString("  " + m.cfg.DefaultLocalEndpoint + "\n\n")
+		choices := []string{
+			"Use saved endpoint",
+			"Enter a new endpoint",
+		}
+		for i, c := range choices {
+			sel := i == m.useDefaultCursor
+			marker := "  "
+			if sel {
+				marker = "› "
+			}
+			b.WriteString(selectionRow(marker+c, sel) + "\n")
+		}
+		if m.probing {
+			b.WriteString("\n" + hintStyle.Render("Querying models from saved endpoint..."))
+		}
+		b.WriteString("\n" + hintStyle.Render(
+			"Saved endpoint comes from the Local LLM tab (^5). Model + agents are still chosen per chat."))
+
 	case ollamaStepEndpoint:
 		b.WriteString(inputLabelStyle.Render("Endpoint: "))
 		b.WriteString(m.endpoint.View())

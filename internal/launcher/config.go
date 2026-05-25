@@ -61,6 +61,33 @@ type Config struct {
 	// detect "another machine just pushed; refuse to clobber."
 	// Generated lazily on first auto-sync activation.
 	BackupMachineID string `json:"backupMachineId,omitempty"`
+
+	// --- local LLM default (self-hosted endpoint reused across chats) ---
+	// These are the GLOBAL default connection details for a local /
+	// self-hosted OpenAI-compatible endpoint (Ollama, GPUStack, vLLM,
+	// LiteLLM, …). Their only job is to spare the user retyping the
+	// same endpoint URL + key on every new chat: when set, the new-chat
+	// Ollama wizard offers "use the saved endpoint" as a one-keystroke
+	// alternative to typing a fresh one. They are NOT per-chat truth —
+	// the chat's own chat.Settings.Ollama remains authoritative; the
+	// wizard always proceeds to the live model query + per-agent picks
+	// so each chat can diverge. Model and agent selection are
+	// deliberately NOT stored here (connection-only by design).
+	//
+	// DefaultLocalEndpoint empty ⇒ no default configured; the wizard
+	// behaves exactly as before (blank endpoint entry).
+	DefaultLocalEndpoint string `json:"defaultLocalEndpoint,omitempty"`
+	DefaultLocalAPIKey   string `json:"defaultLocalApiKey,omitempty"`
+	// DefaultLocalWireAPI is "", "responses", or "chat" — carried so the
+	// codex compat path can reuse the saved choice. Empty = unset/auto.
+	DefaultLocalWireAPI string `json:"defaultLocalWireApi,omitempty"`
+}
+
+// HasLocalDefault reports whether a global default local-LLM endpoint is
+// configured. The new-chat Ollama wizard uses this to decide whether to
+// offer the "use saved endpoint" shortcut.
+func (c *Config) HasLocalDefault() bool {
+	return c != nil && c.DefaultLocalEndpoint != ""
 }
 
 // ConfigPaths returns the directory and file used for persistent config.

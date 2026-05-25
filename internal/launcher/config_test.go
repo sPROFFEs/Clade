@@ -73,3 +73,46 @@ func envHasKey(k string) bool {
 	_, ok := os.LookupEnv(k)
 	return ok
 }
+
+// TestHasLocalDefault covers the gate the new-chat wizard uses to decide
+// whether to offer the saved-endpoint shortcut, and that the three
+// DefaultLocal* fields round-trip through save/load.
+func TestHasLocalDefault(t *testing.T) {
+	if (&Config{}).HasLocalDefault() {
+		t.Error("empty config should not report a local default")
+	}
+	if (*Config)(nil).HasLocalDefault() {
+		t.Error("nil config should not report a local default")
+	}
+	if !(&Config{DefaultLocalEndpoint: "http://x:11434"}).HasLocalDefault() {
+		t.Error("config with endpoint should report a local default")
+	}
+
+	tmp := t.TempDir()
+	switch {
+	case envHasKey("XDG_CONFIG_HOME") || isLinux():
+		t.Setenv("XDG_CONFIG_HOME", tmp)
+	case isWindows():
+		t.Setenv("APPDATA", tmp)
+	default:
+		t.Setenv("HOME", tmp)
+	}
+	want := &Config{
+		WorkspacesRoot:       "/tmp/ws",
+		DefaultLocalEndpoint: "http://192.168.1.50:11434",
+		DefaultLocalAPIKey:   "secret",
+		DefaultLocalWireAPI:  "responses",
+	}
+	if err := SaveConfig(want); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+	got, err := LoadConfig()
+	if err != nil || got == nil {
+		t.Fatalf("LoadConfig: %v (got=%v)", err, got)
+	}
+	if got.DefaultLocalEndpoint != want.DefaultLocalEndpoint ||
+		got.DefaultLocalAPIKey != want.DefaultLocalAPIKey ||
+		got.DefaultLocalWireAPI != want.DefaultLocalWireAPI {
+		t.Errorf("DefaultLocal* round-trip mismatch: got %+v", got)
+	}
+}
