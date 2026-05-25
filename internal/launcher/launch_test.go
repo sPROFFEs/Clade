@@ -3,6 +3,7 @@ package launcher
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -264,6 +265,49 @@ func TestDetectAgents_PopulatesEntries(t *testing.T) {
 		}
 		if a.Binary == "" || a.WpcTarget == "" {
 			t.Errorf("agent %s has empty binary or target", a.ID)
+		}
+	}
+}
+
+// TestContextPrimer_NamesRootDocNotWorkpathFiles pins the fix for the
+// primer pointing at files that aren't in the sandbox. playbook.md and
+// rules.md live in the workpath SOURCE dir (a sibling of the sandbox),
+// never in the agent's cwd — wpc compiles them into the per-target root
+// doc (CLAUDE.md / AGENTS.md / GEMINI.md). The primer must name that
+// root doc, not the raw workpath filenames. The OLD primer said "read
+// MEMORY.md, playbook.md, and rules.md from the current directory",
+// which made the agent fail the read 3x and bail.
+func TestContextPrimer_NamesRootDocNotWorkpathFiles(t *testing.T) {
+	cases := map[AgentID]string{
+		AgentClaude:     "CLAUDE.md",
+		AgentOpenClaude: "CLAUDE.md",
+		AgentCodex:      "AGENTS.md",
+		AgentGemini:     "GEMINI.md",
+	}
+	for agent, wantDoc := range cases {
+		p := contextPrimerPrompt(agent)
+		if p == "" {
+			t.Errorf("%s: primer empty, want it to name %s", agent, wantDoc)
+			continue
+		}
+		if !strings.Contains(p, wantDoc) {
+			t.Errorf("%s: primer doesn't name root doc %s: %q", agent, wantDoc, p)
+		}
+		// Must NOT instruct reading the non-existent standalone files.
+		for _, bad := range []string{"playbook.md", "rules.md"} {
+			if strings.Contains(p, bad) {
+				t.Errorf("%s: primer references %s, which isn't in the sandbox: %q", agent, bad, p)
+			}
+		}
+		// Should still point at MEMORY.md (which IS at the sandbox root).
+		if !strings.Contains(p, "MEMORY.md") {
+			t.Errorf("%s: primer no longer mentions MEMORY.md: %q", agent, p)
+		}
+	}
+	// Agents without a positional-prompt entry get no primer.
+	for _, agent := range []AgentID{AgentOpenCode, AgentDeepSeek} {
+		if p := contextPrimerPrompt(agent); p != "" {
+			t.Errorf("%s: expected no primer, got %q", agent, p)
 		}
 	}
 }

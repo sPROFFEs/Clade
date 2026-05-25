@@ -79,11 +79,10 @@ func EstimateInjection(c Chat, agent Agent) InjectionEstimate {
 	})
 
 	// Primer — only counts when enabled AND the agent supports it.
+	// contextPrimerPrompt returns "" (len 0) for unsupported agents, so
+	// this naturally contributes nothing for opencode/deepseek.
 	if !c.Settings.DisableContextPrimer {
-		switch agent.ID {
-		case AgentClaude, AgentOpenClaude, AgentCodex, AgentGemini:
-			est.PrimerBytes = len(ContextPrimerPrompt)
-		}
+		est.PrimerBytes = len(contextPrimerPrompt(agent.ID))
 	}
 
 	est.Total = (est.RootMarkdownBytes + int(est.MemoryBytes) + est.PrimerBytes) / bytesPerToken

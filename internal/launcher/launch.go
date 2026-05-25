@@ -82,16 +82,52 @@ var LastSessionDir string
 // grab a previous session's artifact for the same cwd.
 var LastSessionStartedAt time.Time
 
-// ContextPrimerPrompt is the Option-C fallback message the launcher
-// passes as the agent's first positional argument on fresh launches.
-// Tells the agent to read the workpath's MEMORY.md / playbook.md /
-// rules.md and ack with a short confirmation before waiting for the
-// user's first real message.
+// contextPrimerRootDoc returns the compiled root-doc filename the given
+// agent's wpc target writes to the SANDBOX ROOT — the file that embeds
+// this chat's mission, playbook, and rules. Empty for agents we don't
+// prime via a positional prompt (opencode/deepseek).
 //
-// Kept short — ~50 tokens — so the warm-up cost is negligible. The
-// "say so briefly if MEMORY.md is empty" guardrail prevents the
-// agent fabricating prior context on a fresh chat.
-const ContextPrimerPrompt = `Before doing anything else: read MEMORY.md, playbook.md, and rules.md from the current directory. They define how this chat operates. If MEMORY.md is empty or has only headers, say so briefly. When done, reply with exactly "Context loaded — ready for your first task." then wait for the user's first message.`
+//	claude / openclaude → CLAUDE.md   (pkg/targets/claude.go)
+//	codex               → AGENTS.md   (pkg/targets/codex.go)
+//	gemini              → GEMINI.md   (pkg/targets/gemini.go)
+//
+// The primer MUST name this file, not the raw playbook.md / rules.md:
+// those live in the workpath SOURCE dir (often a sibling of the sandbox,
+// not under it) and are never copied into the sandbox — wpc compiles
+// them into the root doc instead. The earlier primer told the agent to
+// read "playbook.md and rules.md from the current directory", which
+// don't exist there, so the agent failed the read 3x and bailed.
+func contextPrimerRootDoc(agent AgentID) string {
+	switch agent {
+	case AgentClaude, AgentOpenClaude:
+		return "CLAUDE.md"
+	case AgentCodex:
+		return "AGENTS.md"
+	case AgentGemini:
+		return "GEMINI.md"
+	}
+	return ""
+}
+
+// contextPrimerPrompt builds the Option-C primer the launcher passes as
+// the agent's first positional argument on fresh launches. It points the
+// agent at the root doc that's guaranteed to be in its cwd (which embeds
+// the mission/playbook/rules) plus MEMORY.md, then asks for a short ack.
+// Returns "" for agents without a root doc / positional-prompt entry.
+//
+// Kept short — ~50 tokens — so the warm-up cost is negligible. The "say
+// so briefly if MEMORY.md is empty" guardrail prevents the agent
+// fabricating prior context on a fresh chat.
+func contextPrimerPrompt(agent AgentID) string {
+	doc := contextPrimerRootDoc(agent)
+	if doc == "" {
+		return ""
+	}
+	return "Before doing anything else: read " + doc + " and MEMORY.md in the current directory. " +
+		doc + " defines how this chat operates (its mission, playbook, and rules); MEMORY.md is the running log from prior sessions. " +
+		"If MEMORY.md is empty or has only headers, say so briefly. " +
+		`When done, reply with exactly "Context loaded — ready for your first task." then wait for the user's first message.`
+}
 
 // AppendContextPrimer appends the Option-C primer prompt to plan.Args
 // when the chat's settings allow it AND the agent supports first-prompt
@@ -116,10 +152,11 @@ func AppendContextPrimer(plan LaunchPlan, agent Agent, ws Workspace) LaunchPlan 
 	if ws.Settings.DisableContextPrimer {
 		return plan
 	}
-	switch agent.ID {
-	case AgentClaude, AgentOpenClaude, AgentCodex, AgentGemini:
-		// These accept a positional prompt. Append.
-		plan.Args = append(plan.Args, ContextPrimerPrompt)
+	// contextPrimerPrompt returns "" for agents without a positional-
+	// prompt entry (opencode/deepseek), so the empty check doubles as
+	// the per-agent gate.
+	if p := contextPrimerPrompt(agent.ID); p != "" {
+		plan.Args = append(plan.Args, p)
 	}
 	return plan
 }
