@@ -47,7 +47,7 @@ func (mikaTarget) Compile(wp *workpath.Workpath, outDir string) error {
 
 	for _, t := range wp.Tools {
 		for _, scriptRel := range t.AllScripts() {
-			src := filepath.Join(wp.SourceDir, filepath.FromSlash(scriptRel))
+			src := wp.ResolveToolScript(t, scriptRel)
 			dst := filepath.Join(root, "tools", filepath.Base(scriptRel))
 			if err := copyFile(src, dst); err != nil {
 				return fmt.Errorf("copy tool %s: %w", t.Name, err)
@@ -56,7 +56,7 @@ func (mikaTarget) Compile(wp *workpath.Workpath, outDir string) error {
 	}
 
 	for _, a := range wp.Agents {
-		src := filepath.Join(wp.SourceDir, filepath.FromSlash(a.Prompt))
+		src := wp.ResolveAgentPrompt(a)
 		dst := filepath.Join(root, "agents", filepath.Base(a.Prompt))
 		body, err := mikaAgentBody(a, src)
 		if err != nil {
@@ -70,19 +70,21 @@ func (mikaTarget) Compile(wp *workpath.Workpath, outDir string) error {
 	// Knowledge sits next to the module files so a mika module that
 	// ships reference material has it co-located with module.md.
 	for _, k := range wp.Knowledge {
-		src := filepath.Join(wp.SourceDir, filepath.FromSlash(k.RelPath))
+		src := wp.ResolveKnowledgePath(k)
 		dst := filepath.Join(root, filepath.FromSlash(k.RelPath))
 		if err := copyFile(src, dst); err != nil {
 			return fmt.Errorf("copy knowledge %s: %w", k.RelPath, err)
 		}
 	}
 	// Append a manifest section to module.md so the reader / agent
-	// sees the knowledge inventory next to the mission.
-	if block := renderKnowledgeBlock(wp); block != "" {
+	// sees the knowledge inventory next to the mission. The hook note
+	// (if any) appends after, on the same module.md.
+	tail := renderKnowledgeBlock(wp) + renderHookNote(wp, "mika")
+	if tail != "" {
 		modulePath := filepath.Join(root, "module.md")
 		existing, err := readFile(modulePath)
 		if err == nil {
-			if err := writeFile(modulePath, strings.TrimRight(existing, "\n")+"\n"+block); err != nil {
+			if err := writeFile(modulePath, strings.TrimRight(existing, "\n")+"\n"+tail); err != nil {
 				return err
 			}
 		}

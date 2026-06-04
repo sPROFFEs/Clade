@@ -72,6 +72,10 @@ func main() {
 	// when it exists on disk so agent detection finds tools installed in
 	// past sessions.
 	installer.ImportPnpmPathIfPresent()
+	// Same idea for Clade-managed tool prefixes (graphify, etc.): prepend
+	// each <config>/clade/tools/<name>/bin to PATH so wpc-staged template
+	// scripts can call those binaries by name without knowing the prefix.
+	installer.ImportClademToolsToPath()
 
 	// One-shot config migrations. Codex 0.40+ hard-errors on
 	// wire_api="chat" — rewrite our managed block to "responses" so

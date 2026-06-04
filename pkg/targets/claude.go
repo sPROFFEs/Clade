@@ -1,6 +1,7 @@
 package targets
 
 import (
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -46,7 +47,7 @@ func (claudeTarget) Compile(wp *workpath.Workpath, outDir string) error {
 
 	for _, t := range wp.Tools {
 		for _, scriptRel := range t.AllScripts() {
-			src := filepath.Join(wp.SourceDir, filepath.FromSlash(scriptRel))
+			src := wp.ResolveToolScript(t, scriptRel)
 			dst := filepath.Join(skillDir, "scripts", filepath.Base(scriptRel))
 			if err := copyFile(src, dst); err != nil {
 				return fmt.Errorf("copy tool %s: %w", t.Name, err)
@@ -55,7 +56,7 @@ func (claudeTarget) Compile(wp *workpath.Workpath, outDir string) error {
 	}
 
 	for _, a := range wp.Agents {
-		src := filepath.Join(wp.SourceDir, filepath.FromSlash(a.Prompt))
+		src := wp.ResolveAgentPrompt(a)
 		agentName := fmt.Sprintf("%s__%s", skillName, kebab(a.Name))
 		dst := filepath.Join(outDir, ".claude", "agents", agentName+".md")
 		body, err := claudeAgentBody(wp, a, src)
@@ -74,7 +75,93 @@ func (claudeTarget) Compile(wp *workpath.Workpath, outDir string) error {
 		return err
 	}
 
+	// Hooks: claude code reads them from .claude/settings.json at the
+	// sandbox root. No-op when the workpath has no hooks.
+	if err := writeClaudeHooks(wp, outDir); err != nil {
+		return err
+	}
+
 	return nil
+}
+
+// claudeHookEvent maps the portable Clade event name to claude code's
+// own event vocabulary. Returns ("", false) when no mapping exists —
+// caller drops the hook for this target and emits a note.
+func claudeHookEvent(e workpath.HookEvent) (string, bool) {
+	switch e {
+	case workpath.HookPreTool:
+		return "PreToolUse", true
+	case workpath.HookPostTool:
+		return "PostToolUse", true
+	case workpath.HookUserInput:
+		return "UserPromptSubmit", true
+	case workpath.HookSessionStart:
+		return "SessionStart", true
+	case workpath.HookSessionStop:
+		return "Stop", true
+	case workpath.HookSubagentStop:
+		return "SubagentStop", true
+	case workpath.HookNotification:
+		return "Notification", true
+	}
+	return "", false
+}
+
+// writeClaudeHooks emits .claude/settings.json with the portable hooks
+// translated to claude code's event vocabulary. Layout produced:
+//
+//	{
+//	  "hooks": {
+//	    "PreToolUse": [
+//	      {"matcher": "Bash", "hooks": [{"type": "command", "command": "..."}]}
+//	    ],
+//	    "Stop": [
+//	      {"hooks": [{"type": "command", "command": "..."}]}
+//	    ]
+//	  }
+//	}
+//
+// No-op when wp has no hooks. Always overwrites — Clade owns the file
+// (no target stages anything else into it today; if a future feature
+// needs to coexist we'll add a merge step).
+func writeClaudeHooks(wp *workpath.Workpath, outDir string) error {
+	if len(wp.Hooks) == 0 {
+		return nil
+	}
+	// Group portable hooks by their claude event name. Hooks whose
+	// event has no claude mapping are dropped silently here — they
+	// were already accepted by the loader's validator, so the only
+	// way to land in the "no mapping" branch is if a new portable
+	// event ships without a claude mapping line in claudeHookEvent.
+	type claudeCmd struct {
+		Type    string `json:"type"`
+		Command string `json:"command"`
+	}
+	type claudeEntry struct {
+		Matcher string      `json:"matcher,omitempty"`
+		Hooks   []claudeCmd `json:"hooks"`
+	}
+	groups := map[string][]claudeEntry{}
+	for _, h := range wp.Hooks {
+		evt, ok := claudeHookEvent(h.Event)
+		if !ok {
+			continue
+		}
+		groups[evt] = append(groups[evt], claudeEntry{
+			Matcher: h.Matcher,
+			Hooks:   []claudeCmd{{Type: "command", Command: h.Command}},
+		})
+	}
+	if len(groups) == 0 {
+		return nil
+	}
+	settings := map[string]any{"hooks": groups}
+	raw, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode .claude/settings.json: %w", err)
+	}
+	raw = append(raw, '\n')
+	return writeFile(filepath.Join(outDir, ".claude", "settings.json"), string(raw))
 }
 
 // claudeRootBody renders the CLAUDE.md that lives at the sandbox

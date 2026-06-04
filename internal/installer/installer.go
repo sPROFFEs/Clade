@@ -576,10 +576,22 @@ func RunWithOptions(ctx context.Context, m Method, opts RunOptions, stdout, stde
 		}
 		extraEnv = append(extraEnv, env...)
 	}
-	// Managed-prefix install: project-local pnpm into a Clade-owned dir
-	// with a hoisted node-linker. Bypasses buildCmd entirely — see
-	// installIntoManagedPrefix.
+	if strings.HasPrefix(m.Command, "uv ") {
+		env, err := EnsureUvReady(ctx, stdout)
+		if err != nil {
+			return err
+		}
+		extraEnv = append(extraEnv, env...)
+	}
+	// Managed-prefix install: dispatch by installer kind. pnpm methods
+	// land under clade/agents/<name>/ with a project-local hoisted
+	// node-linker (openclaude). uv methods land under clade/tools/<name>/
+	// with UV_TOOL_DIR / UV_TOOL_BIN_DIR redirected to that prefix
+	// (graphify). Bypasses buildCmd entirely.
 	if m.ManagedPrefix != "" {
+		if m.ID == "uv" {
+			return installUvIntoManagedPrefix(ctx, m, extraEnv, stdout, stderr)
+		}
 		return installIntoManagedPrefix(ctx, m, extraEnv, stdout, stderr)
 	}
 	cmd := buildCmd(ctx, m)

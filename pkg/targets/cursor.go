@@ -51,5 +51,6 @@ func cursorBody(wp *workpath.Workpath) string {
 	// copying files. The user keeps the originals wherever the
 	// workpath lives on disk.
 	b.WriteString(renderKnowledgeBlock(wp))
+	b.WriteString(renderHookNote(wp, "cursor"))
 	return b.String()
 }

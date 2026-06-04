@@ -112,6 +112,41 @@ func renderToolList(wp *workpath.Workpath) string {
 	return b.String()
 }
 
+// renderHookNote returns a "## Hooks" section noting that the
+// workpath declares hooks but THIS target has no documented hook
+// system yet, so they will NOT fire when launching this agent. Empty
+// string when wp has no hooks. Used by every target except claude
+// (claude has a real emitter — see writeClaudeHooks).
+//
+// The note lists each declared hook so authors can audit what's not
+// wired. When the upstream agent grows a stable hook system, swap
+// this call for a real emitter in that target's Compile().
+func renderHookNote(wp *workpath.Workpath, targetName string) string {
+	if len(wp.Hooks) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "\n## Hooks (declared, NOT wired for %s)\n\n", targetName)
+	fmt.Fprintf(&b, "This workpath declares %d hook(s). The %s target has no "+
+		"documented hook system yet, so these triggers will NOT fire when "+
+		"launching this agent. They are wired for the `claude` target only "+
+		"(via `.claude/settings.json`). See `hooks.json` in the workpath "+
+		"source for the declarations.\n\n",
+		len(wp.Hooks), targetName)
+	for _, h := range wp.Hooks {
+		matcher := h.Matcher
+		if matcher == "" {
+			matcher = "*"
+		}
+		desc := h.Description
+		if desc == "" {
+			desc = h.Command
+		}
+		fmt.Fprintf(&b, "- `%s` matcher=`%s` → %s\n", h.Event, matcher, desc)
+	}
+	return b.String()
+}
+
 // copyKnowledge stages every <workpath>/knowledge/** file into
 // outDir at the same relative path. Hidden files and dirs were
 // filtered by the loader already; here we just copy what made it
@@ -122,7 +157,7 @@ func renderToolList(wp *workpath.Workpath) string {
 // sandbox root, regardless of which agent CLI is consuming it.
 func copyKnowledge(wp *workpath.Workpath, outDir string) error {
 	for _, k := range wp.Knowledge {
-		src := filepath.Join(wp.SourceDir, filepath.FromSlash(k.RelPath))
+		src := wp.ResolveKnowledgePath(k)
 		dst := filepath.Join(outDir, filepath.FromSlash(k.RelPath))
 		if err := copyFile(src, dst); err != nil {
 			return fmt.Errorf("copy knowledge %s: %w", k.RelPath, err)

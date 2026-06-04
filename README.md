@@ -408,11 +408,12 @@ Full shape:
 
 ```
 my-workpath/
-├── workpath.json      optional metadata + tool/agent overrides
+├── workpath.json      optional metadata + tool/agent overrides + imports
 ├── mission.md         required
 ├── playbook.md        optional staged process
 ├── rules.md           optional hard constraints
 ├── personality.md     optional persona / system-prompt block
+├── hooks.json         optional chat-lifecycle hooks (see docs/SCHEMA.md)
 ├── tools/             auto-registered shell scripts
 │   ├── file_summary.sh
 │   └── count_lines.ps1
@@ -424,16 +425,24 @@ my-workpath/
     └── references/
 ```
 
+A workpath.json can also declare `"imports": ["_common/<bundle>"]` to
+pull a shared capability bundle (knowledge + tools + agents + hooks +
+playbook/rules fragments) from `templates/_common/` at compile time.
+Today's canonical bundle is `_common/graphify` — a graph-based
+impact-analysis capability used by every relationship-heavy template.
+See `docs/SCHEMA.md` for the full imports + hooks reference.
+
 The launcher compiles a chat's workpath into its sandbox using the
 matching wpc target:
 
 | Agent        | Target  | Output                                                                                |
 |--------------|---------|---------------------------------------------------------------------------------------|
-| Claude       | `claude`| `.claude/skills/<template>/SKILL.md` + `scripts/` + `.claude/agents/<template>__<agent>.md` |
+| Claude       | `claude`| `.claude/skills/<template>/SKILL.md` + `scripts/` + `.claude/agents/<template>__<agent>.md` + `.claude/settings.json` (hooks) |
+| OpenClaude   | `claude`| Same `.claude/skills/` layout — OpenClaude is a Claude Code fork and reads the same files |
 | Codex        | `codex` | `AGENTS.md` + `AGENTS.assets/`                                                        |
 | OpenCode     | `codex` | `AGENTS.md` + `AGENTS.assets/` (OpenCode reads `AGENTS.md` too)                       |
 | Gemini       | `gemini`| `GEMINI.md` (single-file digest the Gemini CLI reads on every prompt)                 |
-| DeepSeek-TUI | `claude`| Same `.claude/skills/<template>/SKILL.md` layout — DeepSeek lists `.claude/skills/` in its discovery fallbacks, so one compile feeds both Claude Code and DeepSeek-TUI |
+| DeepSeek-TUI | `codex` | `AGENTS.md` at the sandbox root — DeepSeek auto-loads it via its `init` subcommand convention |
 
 Two extra targets are useful when authoring templates for tools the
 launcher doesn't directly drive:

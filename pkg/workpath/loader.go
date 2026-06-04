@@ -37,7 +37,11 @@ func LoadDir(dir string) (*Workpath, error) {
 		SourceDir: abs,
 	}
 
-	// Optional manifest.
+	// Optional manifest. Imports are read here too — they're not applied by
+	// applyManifest (which only touches direct fields) but by mergeImports
+	// below, after the workpath's own knowledge / tools / agents are loaded
+	// so the consumer's entries take precedence on collisions.
+	var manifestImports []string
 	manifestPath := filepath.Join(abs, "workpath.json")
 	if raw, err := os.ReadFile(manifestPath); err == nil {
 		var m Manifest
@@ -45,6 +49,7 @@ func LoadDir(dir string) (*Workpath, error) {
 			return nil, fmt.Errorf("parse workpath.json: %w", err)
 		}
 		applyManifest(wp, &m)
+		manifestImports = m.Imports
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("read workpath.json: %w", err)
 	}
@@ -106,7 +111,208 @@ func LoadDir(dir string) (*Workpath, error) {
 	}
 	wp.Knowledge = knowledge
 
+	// Hooks (optional). Schema is a single hooks.json at the workpath
+	// root with {"hooks": [...]}. Per-target emit is in pkg/targets/.
+	hooks, err := loadHooks(abs)
+	if err != nil {
+		return nil, err
+	}
+	wp.Hooks = hooks
+
+	// Resolve and merge imports (declared in workpath.json -> manifestImports).
+	// Consumer's tools/agents/knowledge are loaded already, so collisions
+	// during the merge are resolved in the consumer's favor.
+	if len(manifestImports) > 0 {
+		if err := mergeImports(wp, manifestImports); err != nil {
+			return nil, err
+		}
+	}
+
 	return wp, nil
+}
+
+// LoadImport reads a capability-bundle directory and returns its Import.
+// Unlike LoadDir an Import has no mission requirement; only
+// playbook-fragment.md / rules-fragment.md (both optional) and the
+// usual tools/, agents/, knowledge/ subtrees are read.
+//
+// Returns an error if dir does not exist, or if tools / agents / knowledge
+// discovery fails. An empty bundle (no fragments, no tools, no agents, no
+// knowledge) is valid — though such an import is a no-op.
+func LoadImport(dir string) (*Import, error) {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return nil, fmt.Errorf("resolve import dir: %w", err)
+	}
+	info, err := os.Stat(abs)
+	if err != nil {
+		return nil, fmt.Errorf("stat import dir: %w", err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("import is not a directory: %s", abs)
+	}
+
+	imp := &Import{
+		Name:      filepath.Base(abs),
+		SourceDir: abs,
+	}
+
+	imp.PlaybookFragment, err = readTrimmed(abs, "playbook-fragment.md")
+	if err != nil {
+		return nil, fmt.Errorf("import %s: %w", imp.Name, err)
+	}
+	imp.RulesFragment, err = readTrimmed(abs, "rules-fragment.md")
+	if err != nil {
+		return nil, fmt.Errorf("import %s: %w", imp.Name, err)
+	}
+
+	imp.Tools, err = discoverTools(abs)
+	if err != nil {
+		return nil, fmt.Errorf("import %s: %w", imp.Name, err)
+	}
+	imp.Agents, err = discoverAgents(abs)
+	if err != nil {
+		return nil, fmt.Errorf("import %s: %w", imp.Name, err)
+	}
+	imp.Knowledge, err = discoverKnowledge(abs)
+	if err != nil {
+		return nil, fmt.Errorf("import %s: %w", imp.Name, err)
+	}
+	imp.Hooks, err = loadHooks(abs)
+	if err != nil {
+		return nil, fmt.Errorf("import %s: %w", imp.Name, err)
+	}
+	return imp, nil
+}
+
+// loadHooks reads hooks.json from dir. Missing file → nil (not an
+// error); malformed JSON or invalid events → error. The loader does
+// the validity check up front so authoring mistakes fail at compile
+// time, not at agent-launch time.
+func loadHooks(dir string) ([]Hook, error) {
+	raw, err := os.ReadFile(filepath.Join(dir, "hooks.json"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read hooks.json: %w", err)
+	}
+	var m HooksManifest
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil, fmt.Errorf("parse hooks.json: %w", err)
+	}
+	for i, h := range m.Hooks {
+		if !AllHookEvents[h.Event] {
+			return nil, fmt.Errorf("hooks[%d]: unknown event %q (valid: pre_tool, post_tool, user_input, session_start, session_stop, subagent_stop, notification)", i, h.Event)
+		}
+		if strings.TrimSpace(h.Command) == "" {
+			return nil, fmt.Errorf("hooks[%d] (%s): command is required", i, h.Event)
+		}
+	}
+	return m.Hooks, nil
+}
+
+// mergeImports resolves each path in manifestImports relative to the
+// PARENT of wp.SourceDir (the "templates root") and merges its tools,
+// agents, knowledge, and playbook/rules fragments into wp.
+//
+// Collision policy: the consumer (wp) always wins. An imported tool /
+// agent whose Name already exists on wp is skipped silently; an imported
+// knowledge file whose RelPath already exists on wp is skipped silently.
+// Fragment text is always appended — the consumer's playbook/rules
+// remain at the top, with imported fragments below under headings.
+//
+// Absolute import paths are honored as-is (useful for tests). Missing
+// imports produce a hard error so a typo in workpath.json doesn't
+// silently degrade the resulting workpath.
+func mergeImports(wp *Workpath, manifestImports []string) error {
+	templatesRoot := filepath.Dir(wp.SourceDir)
+	// Stable key sets for collision checks.
+	existingTools := map[string]bool{}
+	for _, t := range wp.Tools {
+		existingTools[t.Name] = true
+	}
+	existingAgents := map[string]bool{}
+	for _, a := range wp.Agents {
+		existingAgents[a.Name] = true
+	}
+	existingKnowledge := map[string]bool{}
+	for _, k := range wp.Knowledge {
+		existingKnowledge[k.RelPath] = true
+	}
+	// Hook collision key is event+matcher so a consumer can override
+	// the imported "pre_tool/Bash" hook without dropping an imported
+	// "pre_tool/Edit" hook.
+	hookKey := func(h Hook) string { return string(h.Event) + "|" + h.Matcher }
+	existingHooks := map[string]bool{}
+	for _, h := range wp.Hooks {
+		existingHooks[hookKey(h)] = true
+	}
+
+	for _, raw := range manifestImports {
+		path := raw
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(templatesRoot, filepath.FromSlash(raw))
+		}
+		imp, err := LoadImport(path)
+		if err != nil {
+			return fmt.Errorf("import %q: %w", raw, err)
+		}
+
+		for _, t := range imp.Tools {
+			if existingTools[t.Name] {
+				continue // consumer wins
+			}
+			t.ImportedFrom = imp.SourceDir
+			wp.Tools = append(wp.Tools, t)
+			existingTools[t.Name] = true
+		}
+		for _, a := range imp.Agents {
+			if existingAgents[a.Name] {
+				continue
+			}
+			a.ImportedFrom = imp.SourceDir
+			wp.Agents = append(wp.Agents, a)
+			existingAgents[a.Name] = true
+		}
+		for _, k := range imp.Knowledge {
+			if existingKnowledge[k.RelPath] {
+				continue
+			}
+			k.ImportedFrom = imp.SourceDir
+			wp.Knowledge = append(wp.Knowledge, k)
+			existingKnowledge[k.RelPath] = true
+		}
+		for _, h := range imp.Hooks {
+			if existingHooks[hookKey(h)] {
+				continue
+			}
+			h.ImportedFrom = imp.SourceDir
+			wp.Hooks = append(wp.Hooks, h)
+			existingHooks[hookKey(h)] = true
+		}
+
+		// Append fragments under named sub-headings so the agent sees
+		// where each rule/stage comes from. Empty fragments are no-ops.
+		if imp.PlaybookFragment != "" {
+			if wp.Playbook != "" {
+				wp.Playbook += "\n\n"
+			}
+			wp.Playbook += "## Imported capabilities: " + imp.Name + "\n\n" + imp.PlaybookFragment
+		}
+		if imp.RulesFragment != "" {
+			if wp.Rules != "" {
+				wp.Rules += "\n\n"
+			}
+			wp.Rules += "## Imported rules: " + imp.Name + "\n\n" + imp.RulesFragment
+		}
+	}
+
+	// Re-sort the appended slices so the manifest renders deterministically.
+	sort.Slice(wp.Tools, func(i, j int) bool { return wp.Tools[i].Name < wp.Tools[j].Name })
+	sort.Slice(wp.Agents, func(i, j int) bool { return wp.Agents[i].Name < wp.Agents[j].Name })
+	sort.Slice(wp.Knowledge, func(i, j int) bool { return wp.Knowledge[i].RelPath < wp.Knowledge[j].RelPath })
+	return nil
 }
 
 // textExts is the set of file extensions we treat as AI-legible

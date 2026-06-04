@@ -46,7 +46,7 @@ func (geminiTarget) Compile(wp *workpath.Workpath, outDir string) error {
 	assetsDir := filepath.Join(outDir, "GEMINI.assets")
 	for _, t := range wp.Tools {
 		for _, scriptRel := range t.AllScripts() {
-			src := filepath.Join(wp.SourceDir, filepath.FromSlash(scriptRel))
+			src := wp.ResolveToolScript(t, scriptRel)
 			dst := filepath.Join(assetsDir, "tools", filepath.Base(scriptRel))
 			if err := copyFile(src, dst); err != nil {
 				return fmt.Errorf("copy tool %s: %w", t.Name, err)
@@ -54,7 +54,7 @@ func (geminiTarget) Compile(wp *workpath.Workpath, outDir string) error {
 		}
 	}
 	for _, a := range wp.Agents {
-		src := filepath.Join(wp.SourceDir, filepath.FromSlash(a.Prompt))
+		src := wp.ResolveAgentPrompt(a)
 		dst := filepath.Join(assetsDir, "agents", filepath.Base(a.Prompt))
 		if err := copyFile(src, dst); err != nil {
 			return fmt.Errorf("copy agent %s: %w", a.Name, err)
@@ -78,6 +78,7 @@ func geminiBody(wp *workpath.Workpath) string {
 	b.WriteString(renderToolList(wp))
 	b.WriteString(renderAgentList(wp))
 	b.WriteString(renderKnowledgeBlock(wp))
+	b.WriteString(renderHookNote(wp, "gemini"))
 	if len(wp.Tools) > 0 {
 		b.WriteString("\nTool scripts live under `GEMINI.assets/tools/`. " +
 			"Invoke with the shell tool using the relative path.\n")
