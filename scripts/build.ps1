@@ -80,24 +80,47 @@ function Build-One($triplet) {
         if ($goos -eq "windows") {
             $zip = Join-Path "dist" "$archiveBase.zip"
             if (Test-Path $zip) { Remove-Item $zip }
-            # IMPORTANT: do NOT use `Compress-Archive` on Windows
-            # PowerShell 5.1. It writes Windows backslash separators
-            # into the ZIP central directory in violation of the ZIP
-            # spec (PKWARE APPNOTE §4.4.17.1 mandates forward slashes).
-            # Go's archive/zip reads names raw, so a `\`-laden zip
-            # makes path.Base() return the whole path and the
-            # self-updater fails with "clade.exe not found in archive"
-            # (regression caught between 0.1.13 and 0.1.14).
+            # IMPORTANT: Compress-Archive AND
+            # [IO.Compression.ZipFile]::CreateFromDirectory both write
+            # Windows BACKSLASH separators into the ZIP central
+            # directory on PowerShell 5.1 / .NET Framework 4.x —
+            # because both go through the same buggy underlying
+            # API. The ZIP spec (PKWARE APPNOTE §4.4.17.1) requires
+            # forward slashes, and Go's archive/zip reads raw, so a
+            # backslash-laden zip makes path.Base() return the whole
+            # path. The self-updater then fails with
+            # "clade.exe not found in archive" (the 0.1.14 regression).
             #
-            # System.IO.Compression.ZipFile.CreateFromDirectory writes
-            # spec-compliant `/` separators on every PowerShell version.
+            # The fix is to write entries one by one with explicitly
+            # normalized "/" names. Same .NET API, no auto-conversion.
+            #
+            # Both assemblies are needed on a clean PS session:
+            # System.IO.Compression carries ZipArchiveMode / CompressionLevel;
+            # System.IO.Compression.FileSystem carries ZipFile.
+            Add-Type -AssemblyName System.IO.Compression
             Add-Type -AssemblyName System.IO.Compression.FileSystem
-            [System.IO.Compression.ZipFile]::CreateFromDirectory(
-                (Resolve-Path $out).Path,
-                (Join-Path (Resolve-Path "dist").Path "$archiveBase.zip"),
-                [System.IO.Compression.CompressionLevel]::Optimal,
-                $true   # includeBaseDirectory: keep the top-level <triplet>/ entry
-            )
+            $distAbs = (Resolve-Path "dist").Path
+            $zipAbs = Join-Path $distAbs "$archiveBase.zip"
+            $srcAbs = (Resolve-Path $out).Path
+            $srcParent = Split-Path $srcAbs -Parent
+            $zw = [System.IO.Compression.ZipFile]::Open(
+                $zipAbs,
+                [System.IO.Compression.ZipArchiveMode]::Create)
+            try {
+                Get-ChildItem -Path $srcAbs -Recurse -File | ForEach-Object {
+                    $relPath = $_.FullName.Substring($srcParent.Length + 1)
+                    $entryName = $relPath.Replace([char]92, [char]47)
+                    $entry = $zw.CreateEntry(
+                        $entryName,
+                        [System.IO.Compression.CompressionLevel]::Optimal)
+                    $entryStream = $entry.Open()
+                    try {
+                        $fileStream = [System.IO.File]::OpenRead($_.FullName)
+                        try { $fileStream.CopyTo($entryStream) }
+                        finally { $fileStream.Dispose() }
+                    } finally { $entryStream.Dispose() }
+                }
+            } finally { $zw.Dispose() }
         } else {
             # tar -czf — works on Windows 10+ (bsdtar bundled in System32).
             $tgz = "$archiveBase.tar.gz"
