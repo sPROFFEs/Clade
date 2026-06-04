@@ -80,10 +80,24 @@ function Build-One($triplet) {
         if ($goos -eq "windows") {
             $zip = Join-Path "dist" "$archiveBase.zip"
             if (Test-Path $zip) { Remove-Item $zip }
-            # Pass the directory itself (not "$out\*") so the archive
-            # contains a top-level <triplet>/ entry matching what
-            # install.ps1's Expand-Archive step expects to find.
-            Compress-Archive -Path $out -DestinationPath $zip
+            # IMPORTANT: do NOT use `Compress-Archive` on Windows
+            # PowerShell 5.1. It writes Windows backslash separators
+            # into the ZIP central directory in violation of the ZIP
+            # spec (PKWARE APPNOTE §4.4.17.1 mandates forward slashes).
+            # Go's archive/zip reads names raw, so a `\`-laden zip
+            # makes path.Base() return the whole path and the
+            # self-updater fails with "clade.exe not found in archive"
+            # (regression caught between 0.1.13 and 0.1.14).
+            #
+            # System.IO.Compression.ZipFile.CreateFromDirectory writes
+            # spec-compliant `/` separators on every PowerShell version.
+            Add-Type -AssemblyName System.IO.Compression.FileSystem
+            [System.IO.Compression.ZipFile]::CreateFromDirectory(
+                (Resolve-Path $out).Path,
+                (Join-Path (Resolve-Path "dist").Path "$archiveBase.zip"),
+                [System.IO.Compression.CompressionLevel]::Optimal,
+                $true   # includeBaseDirectory: keep the top-level <triplet>/ entry
+            )
         } else {
             # tar -czf — works on Windows 10+ (bsdtar bundled in System32).
             $tgz = "$archiveBase.tar.gz"
