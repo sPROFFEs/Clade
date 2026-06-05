@@ -1,11 +1,14 @@
 package launcher
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/sPROFFEs/Clade/pkg/targets"
@@ -279,17 +282,26 @@ func Plan(ws Workspace, agent Agent) (LaunchPlan, error) {
 		if ollamaConfigured && o.HasAgent(AgentOpenClaude) {
 			// OpenClaude exposes the OpenAI-compatible code path via
 			// CLAUDE_CODE_USE_OPENAI=1. Endpoint + key + model travel
-			// through the OPENAI_* env block — same convention as
-			// codex/opencode. The fork inherits Anthropic-flavoured
-			// flags too (--model), so we pass it for parity with
-			// claude in case openclaude's env-only model selection
-			// loses to a default elsewhere in the chain.
+			// through the OPENAI_* env block. OpenClaude expects the
+			// OpenAI-compatible base URL to include /v1, unlike Claude's
+			// ANTHROPIC_BASE_URL path above.
+			openAIBaseURL := openAICompatibleBaseURL(o.Endpoint)
 			plan.Env = map[string]string{
 				"CLAUDE_CODE_USE_OPENAI": "1",
 				"OPENAI_API_KEY":         authToken,
-				"OPENAI_BASE_URL":        o.Endpoint,
+				"OPENAI_BASE_URL":        openAIBaseURL,
+				"OPENAI_API_BASE":        openAIBaseURL,
 				"OPENAI_MODEL":           o.Model,
 			}
+			if raw := openClaudeLimitJSON(o.Model, openAIBaseURL, o.ContextTokens); raw != "" {
+				plan.Env["CLAUDE_CODE_OPENAI_CONTEXT_WINDOWS"] = raw
+			}
+			if raw := openClaudeLimitJSON(o.Model, openAIBaseURL, o.OutputTokens); raw != "" {
+				plan.Env["CLAUDE_CODE_OPENAI_MAX_OUTPUT_TOKENS"] = raw
+			}
+			// The fork inherits Anthropic-flavoured flags too (--model),
+			// so we pass it for parity with claude in case env-only
+			// model selection loses to a default elsewhere in the chain.
 			plan.Args = []string{"--model", o.Model}
 		}
 	case AgentCodex:
@@ -336,6 +348,42 @@ func Plan(ws Workspace, agent Agent) (LaunchPlan, error) {
 		}
 	}
 	return plan, nil
+}
+
+func openAICompatibleBaseURL(endpoint string) string {
+	ep := strings.TrimRight(strings.TrimSpace(endpoint), "/")
+	if ep == "" {
+		return ""
+	}
+	if strings.HasSuffix(strings.ToLower(ep), "/v1") {
+		return ep
+	}
+	return ep + "/v1"
+}
+
+func openClaudeLimitJSON(model, baseURL string, limit int) string {
+	if strings.TrimSpace(model) == "" || limit <= 0 {
+		return ""
+	}
+	entries := map[string]int{
+		model: limit,
+	}
+	if host := baseURLHost(baseURL); host != "" {
+		entries[host+":"+model] = limit
+	}
+	raw, err := json.Marshal(entries)
+	if err != nil {
+		return ""
+	}
+	return string(raw)
+}
+
+func baseURLHost(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return ""
+	}
+	return u.Host
 }
 
 // PlanWithEnv is Plan + env overrides — the launcher injects these when

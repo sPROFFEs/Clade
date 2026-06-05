@@ -648,7 +648,7 @@ func applyOllama(ws launcher.Workspace, s ollama.Settings, picks applyPicks) []s
 		// CLAUDE_CODE_USE_OPENAI=1 + OPENAI_BASE_URL/KEY/MODEL +
 		// --model on next launch. No config file to write — the env
 		// switch is openclaude's only routing knob.
-		out = append(out, "✓ openclaude: per-chat CLAUDE_CODE_USE_OPENAI=1 + OPENAI_* env on next launch (token caps not exposed by OpenClaude env config)")
+		out = append(out, fmt.Sprintf("✓ openclaude: per-chat CLAUDE_CODE_USE_OPENAI=1 + OPENAI_* env on next launch (caps %d/%d)", s.ContextTokens, s.OutputTokens))
 	}
 	if picks.codex {
 		// Probe BEFORE writing the profile. codex 0.130+ requires

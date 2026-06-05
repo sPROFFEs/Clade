@@ -213,6 +213,51 @@ func TestPlan_AppendsProfileArgForCodexWhenOllamaConfigured(t *testing.T) {
 	}
 }
 
+func TestPlan_OpenClaudeUsesOpenAICompatibleEndpointAndLimits(t *testing.T) {
+	chat := chatFromSeededReversing(t)
+	chat.Settings = WorkspaceSettings{
+		Ollama: OllamaSettings{
+			Endpoint:      "http://10.0.0.1:8000",
+			Model:         "qwen3",
+			Agents:        []string{"openclaude"},
+			ContextTokens: 4096,
+			OutputTokens:  1024,
+		},
+	}
+	_ = SaveChatSettings(chat)
+	loaded, _ := LoadChat(filepath.Dir(filepath.Dir(chat.Root)), chat.ID)
+	ws := loaded.AsWorkspace()
+	agent := Agent{ID: AgentOpenClaude, Binary: "openclaude", WpcTarget: "claude", Available: true}
+	plan, err := Plan(ws, agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Env["CLAUDE_CODE_USE_OPENAI"] != "1" {
+		t.Errorf("CLAUDE_CODE_USE_OPENAI = %q", plan.Env["CLAUDE_CODE_USE_OPENAI"])
+	}
+	if plan.Env["OPENAI_BASE_URL"] != "http://10.0.0.1:8000/v1" {
+		t.Errorf("OPENAI_BASE_URL = %q", plan.Env["OPENAI_BASE_URL"])
+	}
+	if plan.Env["OPENAI_API_BASE"] != "http://10.0.0.1:8000/v1" {
+		t.Errorf("OPENAI_API_BASE = %q", plan.Env["OPENAI_API_BASE"])
+	}
+	if plan.Env["OPENAI_MODEL"] != "qwen3" {
+		t.Errorf("OPENAI_MODEL = %q", plan.Env["OPENAI_MODEL"])
+	}
+	for key, want := range map[string]string{
+		"CLAUDE_CODE_OPENAI_CONTEXT_WINDOWS":   `"qwen3":4096`,
+		"CLAUDE_CODE_OPENAI_MAX_OUTPUT_TOKENS": `"qwen3":1024`,
+	} {
+		if !strings.Contains(plan.Env[key], want) ||
+			!strings.Contains(plan.Env[key], `"10.0.0.1:8000:qwen3"`) {
+			t.Errorf("%s = %q", key, plan.Env[key])
+		}
+	}
+	if !equalStrings(plan.Args, []string{"--model", "qwen3"}) {
+		t.Errorf("Args = %v, want [--model qwen3]", plan.Args)
+	}
+}
+
 func TestPlan_NoExtraArgsWhenOllamaNotConfigured(t *testing.T) {
 	chat := chatFromSeededReversing(t)
 	ws := chat.AsWorkspace()
