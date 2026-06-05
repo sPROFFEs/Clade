@@ -2,6 +2,7 @@ package launcher
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,6 +13,13 @@ import (
 
 	"github.com/sPROFFEs/Clade/internal/installer"
 )
+
+// ErrProbeTimeout is returned by probeVersion when the binary exists
+// and runs, but takes longer than the deadline to print --version
+// output. DetectAgents treats this case as "available, version unknown"
+// rather than "broken install" — slow Node CLIs on Windows can take
+// 10+s for a cold start.
+var ErrProbeTimeout = errors.New("--version probe timed out")
 
 // AgentID is one of "claude", "codex", "opencode", "gemini", "deepseek".
 type AgentID string
@@ -33,11 +41,10 @@ type Agent struct {
 	Label     string
 	Binary    string
 	WpcTarget string // "claude" or "codex"
-	// Available is true only when the binary is on PATH AND `--version`
-	// exits cleanly. We require the version probe to succeed because a
-	// binary that exists but crashes on launch (e.g. an opencode-ai npm
-	// package shipped for an incompatible Windows build) shouldn't appear
-	// launchable.
+	// Available is true when the binary is on PATH and either `--version`
+	// exits cleanly OR the version probe times out. A real probe failure
+	// still means the install is broken, but a slow cold-starting Node CLI
+	// should remain launchable.
 	Available bool
 	Version   string
 	// ProbeError, when set, is the reason --version failed even though the
@@ -129,8 +136,8 @@ func KnownAgents() []Agent {
 // agent and picks the first one whose `--version` actually exits 0.
 // The order is:
 //
-//   1. exec.LookPath (whatever's on PATH first)
-//   2. known per-agent install dirs (~/.opencode/bin, ~/.claude/local, ...)
+//  1. exec.LookPath (whatever's on PATH first)
+//  2. known per-agent install dirs (~/.opencode/bin, ~/.claude/local, ...)
 //
 // Trying every candidate matters because a broken binary can be on PATH
 // while a working one sits in a known install dir — the real user case:
@@ -152,6 +159,11 @@ func DetectAgents(ctx context.Context) []Agent {
 			}
 			version, perr := probeVersion(ctx, candidate)
 			if perr != nil {
+				if errors.Is(perr, ErrProbeTimeout) {
+					agents[i].Available = true
+					agents[i].Binary = candidate
+					break
+				}
 				if lastErr == nil {
 					lastErr = perr
 				}
@@ -242,9 +254,8 @@ func knownInstallPaths(id AgentID, binary string) []string {
 }
 
 // probeVersion runs `<bin> --version` with a generous timeout. Returns
-// the version line and a non-nil error if the binary couldn't produce
-// a clean exit — caller uses that to decide whether the install is
-// actually usable.
+// the version line on clean exit, ErrProbeTimeout on timeout, and any
+// other non-nil error for a real broken install.
 //
 // Timeout note: bumped to 8s. The previous 3s killed Node-based agents
 // on Windows (opencode, codex, deepseek-tui) where the first --version
@@ -264,8 +275,8 @@ func probeVersion(parent context.Context, path string) (string, error) {
 	out, err := exec.CommandContext(ctx, path, "--version").CombinedOutput()
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
-			return "", fmt.Errorf("--version timed out after %s (binary is slow to start, "+
-				"not necessarily broken — try invoking it directly to confirm)", deadline)
+			return "", fmt.Errorf("%w after %s (binary is slow to start, "+
+				"not necessarily broken — try invoking it directly to confirm)", ErrProbeTimeout, deadline)
 		}
 		return "", err
 	}
