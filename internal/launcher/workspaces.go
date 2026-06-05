@@ -66,10 +66,12 @@ type WorkspaceSettings struct {
 // callers in cmd/clade; keeping these types separate keeps the
 // dependency graph one-way).
 type OllamaSettings struct {
-	Endpoint string `json:"endpoint,omitempty"`
-	Model    string `json:"model,omitempty"`
-	WireAPI  string `json:"wireApi,omitempty"`
-	APIKey   string `json:"apiKey,omitempty"`
+	Endpoint      string `json:"endpoint,omitempty"`
+	Model         string `json:"model,omitempty"`
+	WireAPI       string `json:"wireApi,omitempty"`
+	APIKey        string `json:"apiKey,omitempty"`
+	ContextTokens int    `json:"contextTokens,omitempty"`
+	OutputTokens  int    `json:"outputTokens,omitempty"`
 
 	// Agents lists which agent IDs are opted into routing through
 	// this endpoint at launch time. Each agent's Plan() branch
@@ -126,9 +128,9 @@ func SaveWorkspaceSettings(ws Workspace) error {
 // SaveWorkspaceLikeSettings inspects ws.Root and persists settings to the
 // canonical manifest for whatever it represents:
 //
-//   <root>/chats/<id>/      → patches chat.json (via SaveChatSettings)
-//   <root>/templates/<name>/→ patches template.json (via SaveTemplateSettings)
-//   <root>/<name>/          → legacy workspace.json
+//	<root>/chats/<id>/      → patches chat.json (via SaveChatSettings)
+//	<root>/templates/<name>/→ patches template.json (via SaveTemplateSettings)
+//	<root>/<name>/          → legacy workspace.json
 //
 // Used by screens (Ollama, settings) that take a generic Workspace but
 // need the write to land in the right place.

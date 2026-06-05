@@ -75,6 +75,14 @@ func TestOllamaFlow_FullWizardWritesPerChatClaudeSettings(t *testing.T) {
 	if m.modelInput.Value() != "qwen3" {
 		t.Errorf("modelInput = %q, want qwen3", m.modelInput.Value())
 	}
+	if m.step != ollamaStepTokenLimits {
+		t.Fatalf("after model pick, step = %d, want token limits", m.step)
+	}
+	nx, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = nx.(ollamaModel)
+	if m.step != ollamaStepAgents {
+		t.Fatalf("after token limits Enter, step = %d, want agents", m.step)
+	}
 
 	// Boxes are now pre-checked from disk state — a brand-new chat
 	// starts with NONE checked. Tick Claude explicitly with space, then
@@ -104,6 +112,11 @@ func TestOllamaFlow_FullWizardWritesPerChatClaudeSettings(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), srv.URL) || !strings.Contains(string(raw), "qwen3") {
 		t.Errorf("chat.json doesn't contain Ollama settings:\n%s", raw)
+	}
+	for _, want := range []string{`"contextTokens": 4096`, `"outputTokens": 1024`} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("chat.json missing %q:\n%s", want, raw)
+		}
 	}
 	// And ensure we did NOT pollute with a stray workspace.json.
 	if _, err := os.Stat(filepath.Join(ws.Root, "workspace.json")); err == nil {
@@ -228,6 +241,11 @@ func TestOllamaFlow_PersistsAPIKeyAndPlanUsesIt(t *testing.T) {
 	}
 
 	// Pick the only model, tick Claude, apply.
+	nx, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = nx.(ollamaModel)
+	if m.step != ollamaStepTokenLimits {
+		t.Fatalf("after model pick, step = %d, want token limits", m.step)
+	}
 	nx, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m = nx.(ollamaModel)
 	nx, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
@@ -377,10 +395,12 @@ func TestOllamaScreen_GlobalDefaultStartStep(t *testing.T) {
 	// Fresh chat + global default configured → use-default step, pre-filled.
 	freshChat, _ := launcher.CreateChat(root, *tpl, "fresh", launcher.AgentClaude)
 	cfgWithDefault := &launcher.Config{
-		WorkspacesRoot:       root,
-		DefaultLocalEndpoint: "http://192.168.1.50:11434",
-		DefaultLocalAPIKey:   "tok",
-		DefaultLocalWireAPI:  "responses",
+		WorkspacesRoot:            root,
+		DefaultLocalEndpoint:      "http://192.168.1.50:11434",
+		DefaultLocalAPIKey:        "tok",
+		DefaultLocalWireAPI:       "responses",
+		DefaultLocalContextTokens: 8192,
+		DefaultLocalOutputTokens:  2048,
 	}
 	m := newOllamaModel(cfgWithDefault, freshChat.AsWorkspace())
 	if m.step != ollamaStepUseDefault {
@@ -394,6 +414,9 @@ func TestOllamaScreen_GlobalDefaultStartStep(t *testing.T) {
 	}
 	if m.wireAPI != "responses" {
 		t.Errorf("wireAPI not carried from default: got %q", m.wireAPI)
+	}
+	if m.contextTokens.Value() != "8192" || m.outputTokens.Value() != "2048" {
+		t.Errorf("token defaults not carried: context=%q output=%q", m.contextTokens.Value(), m.outputTokens.Value())
 	}
 
 	// No global default → normal endpoint step, blank.
@@ -414,6 +437,25 @@ func TestOllamaScreen_GlobalDefaultStartStep(t *testing.T) {
 	}
 	if m3.endpoint.Value() != "http://10.0.0.9:11434" {
 		t.Errorf("already-configured chat should keep its own endpoint, got %q", m3.endpoint.Value())
+	}
+}
+
+func TestOllamaTokenLimitsRejectOutputAboveContext(t *testing.T) {
+	root := seededRoot(t)
+	tpl, _ := launcher.LoadTemplate(root, "reversing")
+	chat, _ := launcher.CreateChat(root, *tpl, "limit-validation", launcher.AgentClaude)
+	m := newOllamaModel(&launcher.Config{WorkspacesRoot: root}, chat.AsWorkspace())
+	m.step = ollamaStepTokenLimits
+	m.contextTokens.SetValue("1024")
+	m.outputTokens.SetValue("4096")
+
+	nx, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = nx.(ollamaModel)
+	if m.step != ollamaStepTokenLimits {
+		t.Fatalf("invalid limits should stay on token step, got %d", m.step)
+	}
+	if !strings.Contains(m.limitErr, "cannot exceed") {
+		t.Errorf("limitErr = %q", m.limitErr)
 	}
 }
 

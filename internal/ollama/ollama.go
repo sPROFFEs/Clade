@@ -32,10 +32,12 @@ import (
 // agent's env as OPENAI_API_KEY at launch, and written into the
 // per-agent config files where the provider expects it inline.
 type Settings struct {
-	Endpoint string `json:"endpoint"`          // e.g. http://192.168.1.50:11434
-	Model    string `json:"model"`             // e.g. qwen3-coder
-	WireAPI  string `json:"wireApi,omitempty"` // codex: "chat" or "responses"
-	APIKey   string `json:"apiKey,omitempty"`  // Bearer token; empty for Ollama
+	Endpoint      string `json:"endpoint"`                // e.g. http://192.168.1.50:11434
+	Model         string `json:"model"`                   // e.g. qwen3-coder
+	WireAPI       string `json:"wireApi,omitempty"`       // codex: "chat" or "responses"
+	APIKey        string `json:"apiKey,omitempty"`        // Bearer token; empty for Ollama
+	ContextTokens int    `json:"contextTokens,omitempty"` // model context window hint
+	OutputTokens  int    `json:"outputTokens,omitempty"`  // model max generation tokens
 }
 
 // NormalizeEndpoint trims, ensures the URL starts with http:// (we do
@@ -387,6 +389,10 @@ func ApplyCodex(s Settings) (configPath string, err error) {
 		// new installs hit the deprecation error otherwise.
 		wireAPI = "responses"
 	}
+	var limitLines strings.Builder
+	if s.ContextTokens > 0 {
+		fmt.Fprintf(&limitLines, "model_context_window = %d\n", s.ContextTokens)
+	}
 	block := fmt.Sprintf(`
 [model_providers.%s]
 name = "Ollama Remote"
@@ -397,7 +403,7 @@ wire_api = "%s"
 [profiles.%s]
 model_provider = "%s"
 model = "%s"
-`, codexProviderName, NormalizeEndpoint(s.Endpoint), wireAPI, codexProfileName, codexProviderName, s.Model)
+%s`, codexProviderName, NormalizeEndpoint(s.Endpoint), wireAPI, codexProfileName, codexProviderName, s.Model, limitLines.String())
 	final := strings.TrimRight(stripped, "\n") + "\n" + block
 	return configPath, atomicWrite(configPath, []byte(final))
 }
@@ -537,12 +543,23 @@ func ApplyOpenCode(s Settings, makeDefault bool) (string, error) {
 		// other gated OpenAI-compatible backends.
 		options["apiKey"] = s.APIKey
 	}
+	modelEntry := map[string]any{"name": s.Model}
+	if s.ContextTokens > 0 || s.OutputTokens > 0 {
+		limit := map[string]any{}
+		if s.ContextTokens > 0 {
+			limit["context"] = s.ContextTokens
+		}
+		if s.OutputTokens > 0 {
+			limit["output"] = s.OutputTokens
+		}
+		modelEntry["limit"] = limit
+	}
 	providers[openCodeProviderName] = map[string]any{
 		"npm":     "@ai-sdk/openai-compatible",
 		"name":    "Ollama Remote",
 		"options": options,
 		"models": map[string]any{
-			s.Model: map[string]any{"name": s.Model},
+			s.Model: modelEntry,
 		},
 	}
 	cfg["provider"] = providers

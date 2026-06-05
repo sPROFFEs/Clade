@@ -23,10 +23,10 @@ func TestNormalizeEndpoint(t *testing.T) {
 		// Real bug the user hit: a missing-slashes typo in the scheme.
 		// Without the fix, the value would later be prepended with
 		// another "http://" downstream, producing "http://http:host:port".
-		"http:192.168.1.42:11434":     "http://192.168.1.42:11434",
-		"https:example.com":           "http://example.com",
-		"HTTP:192.168.1.10:11434":     "http://192.168.1.10:11434",
-		"http:/lonely.slash:11434":    "http://lonely.slash:11434",
+		"http:192.168.1.42:11434":  "http://192.168.1.42:11434",
+		"https:example.com":        "http://example.com",
+		"HTTP:192.168.1.10:11434":  "http://192.168.1.10:11434",
+		"http:/lonely.slash:11434": "http://lonely.slash:11434",
 	}
 	for in, want := range cases {
 		if got := NormalizeEndpoint(in); got != want {
@@ -271,6 +271,33 @@ func TestApplyOpenCode_WritesAPIKeyIntoOptions(t *testing.T) {
 	}
 }
 
+func TestApplyOpenCode_WritesModelTokenLimits(t *testing.T) {
+	tmp := t.TempDir()
+	redirectHome(t, tmp)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmp, "xdg"))
+
+	path, err := ApplyOpenCode(Settings{
+		Endpoint:      "10.0.0.1:11434",
+		Model:         "qwen3",
+		ContextTokens: 4096,
+		OutputTokens:  1024,
+	}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(path)
+	var cfg map[string]any
+	_ = json.Unmarshal(raw, &cfg)
+	prov := cfg["provider"].(map[string]any)
+	entry := prov["ollama_remote"].(map[string]any)
+	models := entry["models"].(map[string]any)
+	model := models["qwen3"].(map[string]any)
+	limit := model["limit"].(map[string]any)
+	if limit["context"] != float64(4096) || limit["output"] != float64(1024) {
+		t.Errorf("limit = %#v, want context=4096 output=1024\n%s", limit, raw)
+	}
+}
+
 // TestApplyOpenCode_OmitsAPIKeyWhenBlank: vanilla Ollama path — no
 // apiKey field should appear in the options block.
 func TestApplyOpenCode_OmitsAPIKeyWhenBlank(t *testing.T) {
@@ -346,6 +373,29 @@ func TestApplyCodex_RoundTripAndIdempotent(t *testing.T) {
 	raw2, _ := os.ReadFile(path)
 	if strings.Count(string(raw2), "[model_providers.ollama_remote]") != 1 {
 		t.Errorf("expected exactly 1 model_providers block after re-apply, got\n%s", raw2)
+	}
+}
+
+func TestApplyCodex_WritesContextTokenLimit(t *testing.T) {
+	tmp := t.TempDir()
+	redirectHome(t, tmp)
+
+	path, err := ApplyCodex(Settings{
+		Endpoint:      "192.168.1.10:11434",
+		Model:         "qwen3",
+		ContextTokens: 4096,
+		OutputTokens:  1024,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(path)
+	body := string(raw)
+	if !strings.Contains(body, `model_context_window = 4096`) {
+		t.Errorf("config missing model_context_window\n%s", body)
+	}
+	if strings.Contains(body, `model_max_output_tokens`) {
+		t.Errorf("Codex no longer exposes model_max_output_tokens; should not write it\n%s", body)
 	}
 }
 

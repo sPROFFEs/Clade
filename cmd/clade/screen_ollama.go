@@ -6,8 +6,9 @@ package main
 //   step 0: endpoint input
 //   step 1: API key (optional — leave blank for vanilla Ollama)
 //   step 2: model picker (loaded via probe) — falls back to manual entry
-//   step 3: agent multi-select (which agents to configure)
-//   step 4: apply + per-agent result
+//   step 3: token limits (context + output caps for supported CLIs)
+//   step 4: agent multi-select (which agents to configure)
+//   step 5: apply + per-agent result
 //
 // Claude is configured per-workspace (env injected at launch). Codex
 // and OpenCode get their per-user config files written.
@@ -15,6 +16,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,6 +33,7 @@ const (
 	ollamaStepEndpoint ollamaStep = iota
 	ollamaStepAPIKey
 	ollamaStepModel
+	ollamaStepTokenLimits
 	ollamaStepAgents
 	ollamaStepApply
 	// ollamaStepUseDefault is an optional FIRST step shown only when a
@@ -45,10 +48,14 @@ type ollamaModel struct {
 	cfg *launcher.Config
 	ws  launcher.Workspace
 
-	step       ollamaStep
-	endpoint   textinput.Model
-	apiKey     textinput.Model // optional; empty = no Bearer auth (Ollama)
-	modelInput textinput.Model // used when probe returns no models
+	step          ollamaStep
+	endpoint      textinput.Model
+	apiKey        textinput.Model // optional; empty = no Bearer auth (Ollama)
+	modelInput    textinput.Model // used when probe returns no models
+	contextTokens textinput.Model
+	outputTokens  textinput.Model
+	limitCursor   int
+	limitErr      string
 	// wireAPI is the saved wire-API choice ("", "responses", "chat")
 	// carried from the global default into the applied chat settings so
 	// the codex compat path reuses it. Empty = unset/auto.
@@ -63,14 +70,15 @@ type ollamaModel struct {
 	modelCursor  int
 
 	// agent multi-select. agentCursor indexes into the entries list
-	// rendered below, in this order: claude / codex / opencode /
-	// deepseek. Bump the comment + bounds when you add another agent.
+	// rendered below, in this order: claude / openclaude / codex /
+	// opencode / deepseek. Bump the comment + bounds when you add
+	// another agent.
 	pickClaude     bool
 	pickOpenClaude bool
 	pickCodex      bool
 	pickOpenCode   bool
 	pickDeepSeek   bool
-	agentCursor  int // 0..3
+	agentCursor    int // 0..4
 
 	// returnTo, when set, names the Cmd to fire after the user
 	// dismisses the apply screen. New-chat uses this to immediately
@@ -113,6 +121,27 @@ func newOllamaModel(cfg *launcher.Config, ws launcher.Workspace) ollamaModel {
 		mi.SetValue(ws.Settings.Ollama.Model)
 	}
 
+	ct := textinput.New()
+	ct.Placeholder = strconv.Itoa(defaultLocalContextTokens)
+	ct.Width = 12
+	ct.CharLimit = 8
+	contextDefault := localContextDefault(cfg)
+	if ws.Settings.Ollama.ContextTokens > 0 {
+		contextDefault = ws.Settings.Ollama.ContextTokens
+	}
+	ct.SetValue(strconv.Itoa(contextDefault))
+	ct.Blur()
+
+	ot := textinput.New()
+	ot.Placeholder = strconv.Itoa(defaultLocalOutputTokens)
+	ot.Width = 12
+	ot.CharLimit = 8
+	outputDefault := localOutputDefault(cfg)
+	if ws.Settings.Ollama.OutputTokens > 0 {
+		outputDefault = ws.Settings.Ollama.OutputTokens
+	}
+	ot.SetValue(strconv.Itoa(outputDefault))
+
 	// Wire-API + start step. When the chat has no endpoint of its own
 	// but a global default IS configured, pre-fill the connection fields
 	// from the default and open on the "use saved endpoint?" step so the
@@ -128,6 +157,12 @@ func newOllamaModel(cfg *launcher.Config, ws launcher.Workspace) ollamaModel {
 		if wireAPI == "" {
 			wireAPI = cfg.DefaultLocalWireAPI
 		}
+		if cfg.DefaultLocalContextTokens > 0 && ws.Settings.Ollama.ContextTokens == 0 {
+			ct.SetValue(strconv.Itoa(cfg.DefaultLocalContextTokens))
+		}
+		if cfg.DefaultLocalOutputTokens > 0 && ws.Settings.Ollama.OutputTokens == 0 {
+			ot.SetValue(strconv.Itoa(cfg.DefaultLocalOutputTokens))
+		}
 		startStep = ollamaStepUseDefault
 		ep.Blur()
 	}
@@ -135,13 +170,15 @@ func newOllamaModel(cfg *launcher.Config, ws launcher.Workspace) ollamaModel {
 	// Pre-check each agent based on what's already on disk so a re-open
 	// shows the current state instead of resetting to "only Claude".
 	return ollamaModel{
-		cfg:          cfg,
-		ws:           ws,
-		step:         startStep,
-		wireAPI:      wireAPI,
-		endpoint:     ep,
-		apiKey:       ak,
-		modelInput:   mi,
+		cfg:           cfg,
+		ws:            ws,
+		step:          startStep,
+		wireAPI:       wireAPI,
+		endpoint:      ep,
+		apiKey:        ak,
+		modelInput:    mi,
+		contextTokens: ct,
+		outputTokens:  ot,
 		// Per-chat ticks come from the chat-level Agents list — the
 		// authoritative record of "did the user tick this in this
 		// chat's wizard?" Codex/opencode/deepseek also fall through
@@ -246,6 +283,8 @@ func (m ollamaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateAPIKey(msg)
 		case ollamaStepModel:
 			return m.updateModel(msg)
+		case ollamaStepTokenLimits:
+			return m.updateTokenLimits(msg)
 		case ollamaStepAgents:
 			return m.updateAgents(msg)
 		case ollamaStepApply:
@@ -271,6 +310,12 @@ func (m ollamaModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ollamaStepModel:
 		if len(m.probedModels) == 0 {
 			m.modelInput, cmd = m.modelInput.Update(msg)
+		}
+	case ollamaStepTokenLimits:
+		if m.limitCursor == 0 {
+			m.contextTokens, cmd = m.contextTokens.Update(msg)
+		} else {
+			m.outputTokens, cmd = m.outputTokens.Update(msg)
 		}
 	}
 	return m, cmd
@@ -389,7 +434,8 @@ func (m ollamaModel) updateModel(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if strings.TrimSpace(m.modelInput.Value()) == "" {
 				return m, nil
 			}
-			m.step = ollamaStepAgents
+			m.step = ollamaStepTokenLimits
+			m.contextTokens.Focus()
 			return m, nil
 		}
 		var cmd tea.Cmd
@@ -407,9 +453,56 @@ func (m ollamaModel) updateModel(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "enter":
 		m.modelInput.SetValue(m.probedModels[m.modelCursor])
-		m.step = ollamaStepAgents
+		m.step = ollamaStepTokenLimits
+		m.contextTokens.Focus()
 	}
 	return m, nil
+}
+
+func (m ollamaModel) updateTokenLimits(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.step = ollamaStepModel
+		m.limitErr = ""
+		m.contextTokens.Blur()
+		m.outputTokens.Blur()
+		if len(m.probedModels) == 0 {
+			m.modelInput.Focus()
+			return m, textinput.Blink
+		}
+		return m, nil
+	case "up", "k":
+		if m.limitCursor > 0 {
+			m.limitCursor--
+			m.outputTokens.Blur()
+			m.contextTokens.Focus()
+		}
+		return m, textinput.Blink
+	case "down", "j":
+		if m.limitCursor < 1 {
+			m.limitCursor++
+			m.contextTokens.Blur()
+			m.outputTokens.Focus()
+		}
+		return m, textinput.Blink
+	case "enter":
+		if _, _, err := parseTokenLimits(m.contextTokens.Value(), m.outputTokens.Value()); err != nil {
+			m.limitErr = err.Error()
+			return m, nil
+		}
+		m.limitErr = ""
+		m.contextTokens.Blur()
+		m.outputTokens.Blur()
+		m.step = ollamaStepAgents
+		return m, nil
+	}
+	var cmd tea.Cmd
+	if m.limitCursor == 0 {
+		m.contextTokens, cmd = m.contextTokens.Update(msg)
+	} else {
+		m.outputTokens, cmd = m.outputTokens.Update(msg)
+	}
+	return m, cmd
 }
 
 func (m ollamaModel) updateAgents(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -439,11 +532,20 @@ func (m ollamaModel) updateAgents(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.pickDeepSeek = !m.pickDeepSeek
 		}
 	case "enter":
+		contextTokens, outputTokens, err := parseTokenLimits(m.contextTokens.Value(), m.outputTokens.Value())
+		if err != nil {
+			m.step = ollamaStepTokenLimits
+			m.limitErr = err.Error()
+			m.contextTokens.Focus()
+			return m, textinput.Blink
+		}
 		settings := ollama.Settings{
-			Endpoint: m.endpoint.Value(),
-			Model:    strings.TrimSpace(m.modelInput.Value()),
-			APIKey:   strings.TrimSpace(m.apiKey.Value()),
-			WireAPI:  m.wireAPI,
+			Endpoint:      m.endpoint.Value(),
+			Model:         strings.TrimSpace(m.modelInput.Value()),
+			APIKey:        strings.TrimSpace(m.apiKey.Value()),
+			WireAPI:       m.wireAPI,
+			ContextTokens: contextTokens,
+			OutputTokens:  outputTokens,
 		}
 		ws := m.ws
 		picks := applyPicks{
@@ -518,6 +620,7 @@ func applyOllama(ws launcher.Workspace, s ollama.Settings, picks applyPicks) []s
 		ws.Settings.Ollama = launcher.OllamaSettings{
 			Endpoint: s.Endpoint, Model: s.Model,
 			WireAPI: s.WireAPI, APIKey: s.APIKey,
+			ContextTokens: s.ContextTokens, OutputTokens: s.OutputTokens,
 			Agents: agents,
 		}
 		if err := launcher.SaveWorkspaceLikeSettings(ws); err != nil {
@@ -538,14 +641,14 @@ func applyOllama(ws launcher.Workspace, s ollama.Settings, picks applyPicks) []s
 	// 3. Per-agent: claude is purely chat-level; the others write
 	//    global config when ticked, strip it when unticked.
 	if picks.claude {
-		out = append(out, "✓ claude: per-chat ANTHROPIC_BASE_URL + --model on next launch")
+		out = append(out, "✓ claude: per-chat ANTHROPIC_BASE_URL + --model on next launch (token caps not exposed by Claude env config)")
 	}
 	if picks.openclaude {
 		// OpenClaude is purely chat-level too: Plan() injects
 		// CLAUDE_CODE_USE_OPENAI=1 + OPENAI_BASE_URL/KEY/MODEL +
 		// --model on next launch. No config file to write — the env
 		// switch is openclaude's only routing knob.
-		out = append(out, "✓ openclaude: per-chat CLAUDE_CODE_USE_OPENAI=1 + OPENAI_* env on next launch")
+		out = append(out, "✓ openclaude: per-chat CLAUDE_CODE_USE_OPENAI=1 + OPENAI_* env on next launch (token caps not exposed by OpenClaude env config)")
 	}
 	if picks.codex {
 		// Probe BEFORE writing the profile. codex 0.130+ requires
@@ -580,7 +683,7 @@ func applyOllama(ws launcher.Workspace, s ollama.Settings, picks applyPicks) []s
 			if path, err := ollama.ApplyCodex(s); err != nil {
 				out = append(out, "✗ codex: "+err.Error())
 			} else {
-				out = append(out, "✓ codex: "+path+" (launched with -p ollama_remote)")
+				out = append(out, fmt.Sprintf("✓ codex: %s (launched with -p ollama_remote; context cap %d; output cap not exposed by current Codex config)", path, s.ContextTokens))
 			}
 			if probeWarn != "" {
 				out = append(out, "  ⚠ codex: "+probeWarn)
@@ -599,7 +702,7 @@ func applyOllama(ws launcher.Workspace, s ollama.Settings, picks applyPicks) []s
 		if path, err := ollama.ApplyOpenCode(s, true); err != nil {
 			out = append(out, "✗ opencode: "+err.Error())
 		} else {
-			out = append(out, "✓ opencode: "+path)
+			out = append(out, fmt.Sprintf("✓ opencode: %s (caps %d/%d)", path, s.ContextTokens, s.OutputTokens))
 		}
 	} else if ollama.OpenCodeConfigured() {
 		if path, err := ollama.DisableOpenCode(); err == nil {
@@ -610,7 +713,7 @@ func applyOllama(ws launcher.Workspace, s ollama.Settings, picks applyPicks) []s
 		if path, err := ollama.ApplyDeepSeek(s); err != nil {
 			out = append(out, "✗ deepseek: "+err.Error())
 		} else {
-			out = append(out, "✓ deepseek: "+path+" (provider=ollama; default model set)")
+			out = append(out, "✓ deepseek: "+path+" (provider=ollama; token caps not exposed by current config docs)")
 		}
 	} else if ollama.DeepSeekConfigured() {
 		if path, err := ollama.DisableDeepSeek(); err == nil {
@@ -641,6 +744,8 @@ func (m ollamaModel) Help() string {
 			return "enter to continue · esc back"
 		}
 		return "↑/↓ select · enter pick · esc back"
+	case ollamaStepTokenLimits:
+		return "↑/↓ select · type digits · enter continue · esc back"
 	case ollamaStepAgents:
 		return "↑/↓ select · space/x toggle · enter apply · esc back"
 	case ollamaStepApply:
@@ -649,6 +754,7 @@ func (m ollamaModel) Help() string {
 	return "enter / esc"
 }
 func (m ollamaModel) NavSection() string { return navSectionChats }
+
 // Endpoint + model input steps need ':' to flow through (URLs!).
 // The agent multi-select and apply screens are list-driven but we
 // keep the claim true throughout the wizard for consistency.
@@ -722,6 +828,31 @@ func (m ollamaModel) Body() string {
 				}
 				b.WriteString(selectionRow(marker+name, isSel) + "\n")
 			}
+		}
+
+	case ollamaStepTokenLimits:
+		b.WriteString(subtitleStyle.Render("Endpoint: ") + m.endpoint.Value() + "\n")
+		b.WriteString(subtitleStyle.Render("Model: ") + m.modelInput.Value() + "\n\n")
+		b.WriteString(hintStyle.Render("Token limits sent to supported agent CLI configs.") + "\n\n")
+		rows := []struct {
+			label string
+			view  string
+		}{
+			{"Context tokens", m.contextTokens.View()},
+			{"Output tokens", m.outputTokens.View()},
+		}
+		for i, r := range rows {
+			isSel := i == m.limitCursor
+			marker := "  "
+			if isSel {
+				marker = "› "
+			}
+			b.WriteString(selectionRow(fmt.Sprintf("%s%-16s %s", marker, r.label+":", r.view), isSel) + "\n")
+		}
+		b.WriteString("\n" + descStyle.Render(
+			"Defaults: context 4096, output 1024. For vLLM, output must stay below the server's max model length."))
+		if m.limitErr != "" {
+			b.WriteString("\n\n" + errorStyle.Render("✗ "+m.limitErr))
 		}
 
 	case ollamaStepAgents:

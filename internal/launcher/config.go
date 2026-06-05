@@ -66,13 +66,14 @@ type Config struct {
 	// These are the GLOBAL default connection details for a local /
 	// self-hosted OpenAI-compatible endpoint (Ollama, GPUStack, vLLM,
 	// LiteLLM, …). Their only job is to spare the user retyping the
-	// same endpoint URL + key on every new chat: when set, the new-chat
-	// Ollama wizard offers "use the saved endpoint" as a one-keystroke
+	// same endpoint URL + key + token caps on every new chat: when set,
+	// the new-chat Ollama wizard offers "use the saved endpoint" as a
+	// one-keystroke
 	// alternative to typing a fresh one. They are NOT per-chat truth —
 	// the chat's own chat.Settings.Ollama remains authoritative; the
 	// wizard always proceeds to the live model query + per-agent picks
 	// so each chat can diverge. Model and agent selection are
-	// deliberately NOT stored here (connection-only by design).
+	// deliberately NOT stored here (backend defaults only by design).
 	//
 	// DefaultLocalEndpoint empty ⇒ no default configured; the wizard
 	// behaves exactly as before (blank endpoint entry).
@@ -81,6 +82,11 @@ type Config struct {
 	// DefaultLocalWireAPI is "", "responses", or "chat" — carried so the
 	// codex compat path can reuse the saved choice. Empty = unset/auto.
 	DefaultLocalWireAPI string `json:"defaultLocalWireApi,omitempty"`
+	// DefaultLocalContextTokens / DefaultLocalOutputTokens are copied into
+	// each chat's Local endpoint wizard as model capability hints. The
+	// chat-level OllamaSettings remains authoritative after apply.
+	DefaultLocalContextTokens int `json:"defaultLocalContextTokens,omitempty"`
+	DefaultLocalOutputTokens  int `json:"defaultLocalOutputTokens,omitempty"`
 }
 
 // HasLocalDefault reports whether a global default local-LLM endpoint is

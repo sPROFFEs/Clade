@@ -98,10 +98,12 @@ func TestHasLocalDefault(t *testing.T) {
 		t.Setenv("HOME", tmp)
 	}
 	want := &Config{
-		WorkspacesRoot:       "/tmp/ws",
-		DefaultLocalEndpoint: "http://192.168.1.50:11434",
-		DefaultLocalAPIKey:   "secret",
-		DefaultLocalWireAPI:  "responses",
+		WorkspacesRoot:            "/tmp/ws",
+		DefaultLocalEndpoint:      "http://192.168.1.50:11434",
+		DefaultLocalAPIKey:        "secret",
+		DefaultLocalWireAPI:       "responses",
+		DefaultLocalContextTokens: 4096,
+		DefaultLocalOutputTokens:  1024,
 	}
 	if err := SaveConfig(want); err != nil {
 		t.Fatalf("SaveConfig: %v", err)
@@ -112,7 +114,9 @@ func TestHasLocalDefault(t *testing.T) {
 	}
 	if got.DefaultLocalEndpoint != want.DefaultLocalEndpoint ||
 		got.DefaultLocalAPIKey != want.DefaultLocalAPIKey ||
-		got.DefaultLocalWireAPI != want.DefaultLocalWireAPI {
+		got.DefaultLocalWireAPI != want.DefaultLocalWireAPI ||
+		got.DefaultLocalContextTokens != want.DefaultLocalContextTokens ||
+		got.DefaultLocalOutputTokens != want.DefaultLocalOutputTokens {
 		t.Errorf("DefaultLocal* round-trip mismatch: got %+v", got)
 	}
 }
