@@ -104,11 +104,20 @@ func toolCandidatePaths(id ToolID, binary string) []string {
 	return paths
 }
 
+// probeToolVersion matches probeVersion in internal/launcher/agents.go:
+// 8s deadline (Node / uv tools on Windows can take 3-6s to cold-start),
+// with the timeout-vs-real-failure distinction surfaced as a readable
+// error instead of the bare "signal: killed".
 func probeToolVersion(parent context.Context, path string) (string, error) {
-	ctx, cancel := context.WithTimeout(parent, 3*time.Second)
+	const deadline = 8 * time.Second
+	ctx, cancel := context.WithTimeout(parent, deadline)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, path, "--version").CombinedOutput()
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return "", fmt.Errorf("--version timed out after %s (binary is slow to start, "+
+				"not necessarily broken — try invoking it directly to confirm)", deadline)
+		}
 		return "", err
 	}
 	line := strings.SplitN(strings.TrimSpace(string(out)), "\n", 2)[0]

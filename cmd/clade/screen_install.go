@@ -58,13 +58,26 @@ type runningOutput struct {
 	lines []string
 }
 
+// Write splits incoming bytes on BOTH \n and \r (treating either as a
+// line terminator) so pnpm/uv progress bars — which use \r to overwrite
+// the same row — don't accumulate into one giant 80-char-per-update
+// mega-line. Empty segments are dropped. Lines are capped at 240 chars
+// to keep the TUI legible when an install command emits an extremely
+// long line (e.g. a deep dep tree on one line).
 func (o *runningOutput) Write(p []byte) (int, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	for _, line := range strings.Split(strings.TrimRight(string(p), "\n"), "\n") {
-		if line != "" {
-			o.lines = append(o.lines, line)
+	// Normalise \r\n and bare \r to \n, then split.
+	s := strings.ReplaceAll(string(p), "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
+	for _, line := range strings.Split(strings.TrimRight(s, "\n"), "\n") {
+		if line == "" {
+			continue
 		}
+		if len(line) > 240 {
+			line = line[:237] + "…"
+		}
+		o.lines = append(o.lines, line)
 	}
 	return len(p), nil
 }
@@ -76,6 +89,12 @@ func (o *runningOutput) snapshot() []string {
 	copy(out, o.lines)
 	return out
 }
+
+// installOutputTailLines is how many output lines the install screen
+// keeps visible in the "Running..." view. We tail (not head) because
+// the interesting bits — final status, errors, the actual ✓/✗ marker —
+// come at the END of an install. Older lines scroll out of view.
+const installOutputTailLines = 25
 
 func newInstallModel(cfg *launcher.Config, ws launcher.Workspace, agent launcher.AgentID) installModel {
 	id := installer.AgentID(agent)
@@ -287,10 +306,20 @@ func (m installModel) Body() string {
 		return b.String()
 	}
 
-	// Running / done view.
+	// Running / done view. Show only the tail so screens don't overflow
+	// when an install produces hundreds of lines (pnpm fetching ~400
+	// deps, uv resolving a full graphify dep graph, etc.). The
+	// interesting bits — final status + errors + the ✓/✗ marker — live
+	// at the end anyway.
 	b.WriteString(hintStyle.Render("Running...") + "\n\n")
 	lines := m.output.snapshot()
-	for _, l := range lines {
+	start := 0
+	if len(lines) > installOutputTailLines {
+		start = len(lines) - installOutputTailLines
+		b.WriteString(descStyle.Render(
+			fmt.Sprintf("  … (%d earlier lines hidden) …\n", start)))
+	}
+	for _, l := range lines[start:] {
 		b.WriteString("  " + l + "\n")
 	}
 	if m.exitDone {

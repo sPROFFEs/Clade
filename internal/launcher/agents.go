@@ -2,6 +2,7 @@ package launcher
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -240,15 +241,32 @@ func knownInstallPaths(id AgentID, binary string) []string {
 	return paths
 }
 
-// probeVersion runs `<bin> --version` with a short timeout. Returns the
-// version line and a non-nil error if the binary couldn't even produce
+// probeVersion runs `<bin> --version` with a generous timeout. Returns
+// the version line and a non-nil error if the binary couldn't produce
 // a clean exit — caller uses that to decide whether the install is
 // actually usable.
+//
+// Timeout note: bumped to 8s. The previous 3s killed Node-based agents
+// on Windows (opencode, codex, deepseek-tui) where the first --version
+// invocation per shell takes 3-6s due to Node startup + first-run
+// telemetry/cache priming. The verdict became "broken install" on a
+// perfectly working binary. 8s leaves headroom for cold-start while
+// still failing fast on hung binaries.
+//
+// When the deadline IS hit, the error string is reshaped from the raw
+// "signal: killed" (which reads as "the binary crashed") to an
+// explicit "--version timed out after 8s" so the install screen
+// surfaces actionable text.
 func probeVersion(parent context.Context, path string) (string, error) {
-	ctx, cancel := context.WithTimeout(parent, 3*time.Second)
+	const deadline = 8 * time.Second
+	ctx, cancel := context.WithTimeout(parent, deadline)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, path, "--version").CombinedOutput()
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return "", fmt.Errorf("--version timed out after %s (binary is slow to start, "+
+				"not necessarily broken — try invoking it directly to confirm)", deadline)
+		}
 		return "", err
 	}
 	line := strings.SplitN(strings.TrimSpace(string(out)), "\n", 2)[0]

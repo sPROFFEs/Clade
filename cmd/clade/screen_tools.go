@@ -310,10 +310,18 @@ func (m toolInstallModel) Body() string {
 		return b.String()
 	}
 
-	// Running / done view.
+	// Running / done view — tail only, same shape as the agent install
+	// screen. Older lines scroll out so the final status + error stays
+	// readable when the install emits a long progress wall.
 	b.WriteString(hintStyle.Render("Running...") + "\n\n")
 	lines := m.output.snapshot()
-	for _, l := range lines {
+	start := 0
+	if len(lines) > installOutputTailLines {
+		start = len(lines) - installOutputTailLines
+		b.WriteString(descStyle.Render(
+			fmt.Sprintf("  … (%d earlier lines hidden) …\n", start)))
+	}
+	for _, l := range lines[start:] {
 		b.WriteString("  " + l + "\n")
 	}
 	if m.exitDone {
