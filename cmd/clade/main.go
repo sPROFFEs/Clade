@@ -41,6 +41,11 @@ func main() {
 	checkUpdateFlag := flag.Bool("check-update", false, "check GitHub for a newer release and exit")
 	updateFlag := flag.Bool("update", false, "download and install the latest release, then exit")
 	yesFlag := flag.Bool("y", false, "auto-confirm the update prompt (use with -update for non-interactive installs)")
+	installTool := flag.String("install-tool", "",
+		"install a Clade-managed tool into <config>/clade/tools/<name>/ and exit. "+
+			"Currently supported: graphify. Use this when a workpath imports a "+
+			"_common/<bundle> whose wrapper scripts need a binary that's not yet "+
+			"on PATH.")
 	mergeMemory := flag.Bool("merge-memory", false,
 		"git merge driver hook: concatenate %O %A %B and write result to %A. "+
 			"Wired into .git/config by the backup feature; not for direct use.")
@@ -60,6 +65,9 @@ func main() {
 	}
 	if *updateFlag {
 		os.Exit(runUpdate(*yesFlag))
+	}
+	if *installTool != "" {
+		os.Exit(runInstallTool(*installTool))
 	}
 	// screen_splash.go reads this to decide whether to show the
 	// reveal animation. Also disabled when CLADE_NO_SPLASH=1 or
@@ -524,5 +532,45 @@ func runUpdate(autoYes bool) int {
 		return 1
 	}
 	fmt.Printf("\n✓ installed %s. Re-run `clade` to start the new version.\n", rel.TagName)
+	return 0
+}
+
+// runInstallTool installs a single Clade-managed tool (e.g. graphify)
+// via the same installer.Run path the (future) TUI Tools tab will use.
+// Streams pnpm/uv progress to stdout so the user sees what's happening.
+// Returns 0 on success, non-zero on every failure path.
+//
+// Today's recognised names: "graphify". Anything else returns a helpful
+// "available tools: ..." error so the user can pick.
+func runInstallTool(name string) int {
+	id := installer.ToolID(name)
+	known := false
+	var hint string
+	for _, t := range installer.KnownTools() {
+		hint += " " + string(t.ID)
+		if t.ID == id {
+			known = true
+		}
+	}
+	if !known {
+		fmt.Fprintf(os.Stderr, "clade: unknown tool %q. Available:%s\n", name, hint)
+		return 2
+	}
+	methods := installer.ToolMethods(id, installer.ActionInstall, installer.DetectOS())
+	if len(methods) == 0 {
+		fmt.Fprintf(os.Stderr, "clade: no install method available for %s on this OS\n", name)
+		fmt.Fprintf(os.Stderr, "       (prereq probe failed — install uv first if this is graphify:\n")
+		fmt.Fprintf(os.Stderr, "        curl -LsSf https://astral.sh/uv/install.sh | sh   on Linux/macOS\n")
+		fmt.Fprintf(os.Stderr, "        irm https://astral.sh/uv/install.ps1 | iex        on Windows)\n")
+		return 1
+	}
+	m := methods[0]
+	fmt.Printf("Installing %s\n  method: %s\n  command: %s\n\n", name, m.Label, m.Command)
+	if err := installer.Run(context.Background(), m, os.Stdout, os.Stderr); err != nil {
+		fmt.Fprintf(os.Stderr, "\nclade: install %s failed: %v\n", name, err)
+		return 1
+	}
+	fmt.Printf("\n✓ %s installed. New chats / sandboxes will pick it up automatically.\n", name)
+	fmt.Printf("  (current Clade processes already have the bin dir on PATH via ImportClademToolsToPath)\n")
 	return 0
 }

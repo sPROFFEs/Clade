@@ -49,6 +49,7 @@ const (
 	navSectionChats     = "chats"
 	navSectionTemplates = "templates"
 	navSectionAgents    = "agents"
+	navSectionTools     = "tools"
 	navSectionBackup    = "backup"
 	navSectionLocalLLM  = "localllm"
 	navSectionHelp      = "help"
@@ -89,9 +90,22 @@ var navEntries = []navEntry{
 		},
 	},
 	{
+		id:     navSectionTools,
+		label:  "Tools",
+		hotkey: "4",
+		makePane: func(cfg *launcher.Config) Pane {
+			// Tools tab: Clade-managed companion CLIs (graphify, …).
+			// Installed via the same installer.Method flow as agents
+			// but kept in a separate section because they aren't
+			// launchable as a primary chat target — they're called
+			// by wpc-staged template scripts.
+			return newToolsBrowser(cfg)
+		},
+	},
+	{
 		id:     navSectionBackup,
 		label:  "Backup",
-		hotkey: "4",
+		hotkey: "5",
 		makePane: func(cfg *launcher.Config) Pane {
 			return newBackupModel(cfg)
 		},
@@ -99,7 +113,7 @@ var navEntries = []navEntry{
 	{
 		id:     navSectionLocalLLM,
 		label:  "Local LLM",
-		hotkey: "5",
+		hotkey: "6",
 		makePane: func(cfg *launcher.Config) Pane {
 			return newLocalLLMModel(cfg)
 		},
@@ -107,7 +121,7 @@ var navEntries = []navEntry{
 	{
 		id:     navSectionHelp,
 		label:  "Help",
-		hotkey: "6",
+		hotkey: "7",
 		makePane: func(cfg *launcher.Config) Pane {
 			return newHelpPane(cfg)
 		},
@@ -217,7 +231,7 @@ func (m *layoutModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.toggleHelp()
 				return m, nil
 			}
-		case "ctrl+1", "ctrl+2", "ctrl+3", "ctrl+4", "ctrl+5", "ctrl+6":
+		case "ctrl+1", "ctrl+2", "ctrl+3", "ctrl+4", "ctrl+5", "ctrl+6", "ctrl+7":
 			// Direct nav-section jumps.
 			digit := int(msg.String()[len(msg.String())-1] - '0')
 			if digit >= 1 && digit <= len(navEntries) {

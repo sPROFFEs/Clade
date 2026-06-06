@@ -458,6 +458,163 @@ Full schema + per-target reference:
 [`docs/ACTIVATION.md`](docs/ACTIVATION.md),
 [`docs/QUICKSTART.md`](docs/QUICKSTART.md).
 
+## Imports, managed tools, hooks (the 0.1.14+ feature set)
+
+Three features that extend the wpc compile-once-for-N-agents model.
+This section is the practical "what to type" tour. From 0.1.15 the
+**Tools** tab in the launcher TUI (Ctrl-4) hosts the install / update
+UX for graphify and any future managed tools.
+
+### Shared capability bundles via `imports:`
+
+Workpath templates can pull in shared knowledge / tools / agents / hooks
+from sibling bundles under `templates/_common/`. The six shipped
+analysis templates (`code-review`, `reversing`, `reverse-ghidra`,
+`cve-analysis`, `cc-evidence-dossier`, `clade-dev`) already import
+`_common/graphify` — no extra work to use them; just launch:
+
+```
+clade                       # pick code-review (or any analysis template)
+# the agent's sandbox now contains graphify_impact.sh, graphify_query.sh,
+# and a graphify-usage.md cheat-sheet — all merged from _common/graphify.
+```
+
+To add the import to a new template you author:
+
+```json
+{
+  "description": "...",
+  "imports": ["_common/graphify"]
+}
+```
+
+For nested templates (e.g. the `templates/<name>/workpath/` shape that
+`clade-dev` uses), or for adding the import directly to an existing
+chat's workpath, use the relative form that escapes the extra depth:
+
+```json
+{ "imports": ["../_common/graphify"] }              // nested template
+{ "imports": ["../../templates/_common/graphify"] } // chat workpath
+```
+
+The bundle's playbook + rules fragments append to the consumer's own
+sections under `## Imported capabilities: <bundle>` headings; tool /
+agent / knowledge / hook collisions are resolved in the consumer's
+favor. Missing imports are a hard compile error.
+
+See `docs/SCHEMA.md` for the full reference and
+`templates/_common/README.md` for the bundle inventory.
+
+### Clade-managed tools (the graphify case)
+
+Templates that import `_common/<bundle>` assume the wrapped binary is
+on PATH. Clade installs its known tools into an isolated managed prefix
+so they don't touch your global Python / pnpm state.
+
+The shipped tool today is **graphify** (a tree-sitter-AST + LLM
+knowledge-graph builder for code). Two ways to install:
+
+```
+# In the TUI (0.1.15+): Ctrl-4 → Tools tab → enter on graphify
+clade
+
+# Or from the CLI (any 0.1.14+):
+clade -install-tool graphify
+```
+
+This calls `uv tool install graphifyy` with `UV_TOOL_DIR` and
+`UV_TOOL_BIN_DIR` pointed at `<config>/clade/tools/graphify/`, and the
+PyPI index pinned to `https://pypi.org/simple/`. The bin dir is
+prepended to `PATH` on every Clade startup
+(`installer.ImportClademToolsToPath`), so the graphify-wrapper scripts
+in the imported bundle find the binary by name without you editing
+your shell rc.
+
+If `uv` isn't installed, Clade refuses to auto-install it (single-Go-
+binary policy — you opt into the uv install yourself) and prints the
+official one-liner:
+
+```
+curl -LsSf https://astral.sh/uv/install.sh | sh    # Linux/macOS
+irm https://astral.sh/uv/install.ps1 | iex         # Windows
+brew install uv                                    # macOS (Homebrew)
+winget install --id=astral-sh.uv -e                # Windows (winget)
+```
+
+After uv lands, re-run `clade -install-tool graphify`. The bin ends up
+at `<config>/clade/tools/graphify/bin/graphify`.
+
+**Friction signal on launch.** If a chat's workpath imports a `_common/
+<bundle>` whose underlying tool isn't reachable yet, the launching
+screen surfaces a one-line note with the exact install command. No
+silent failure — the agent would just hit "graphify: command not
+found" inside the chat otherwise.
+
+### Cross-harness hooks (`hooks.json`)
+
+Drop a `hooks.json` next to `mission.md` to register chat-lifecycle
+triggers. Source schema is target-agnostic; each wpc target compiles
+the hooks into its native format.
+
+```json
+{
+  "hooks": [
+    {
+      "event": "pre_tool",
+      "matcher": "Bash",
+      "command": "echo \"[$(date -Iseconds)] bash invoked\" >> .clade-audit.log",
+      "description": "Audit every bash call"
+    },
+    {
+      "event": "session_start",
+      "command": "git fetch --quiet origin main"
+    }
+  ]
+}
+```
+
+Today the `claude` target emits a real `.claude/settings.json` that
+Claude Code reads on every turn. Other targets (codex / opencode /
+gemini / mika) append a `## Hooks (declared, NOT wired for <target>)`
+section to the compiled instructions listing each declared hook, so
+the agent can see what was intended even though Clade can't fire them
+automatically yet. Real emitters land per target when each upstream
+agent grows a stable hook spec.
+
+Portable events (Clade name → Claude Code name):
+
+| Clade            | Claude Code         |
+|------------------|---------------------|
+| `pre_tool`       | `PreToolUse`        |
+| `post_tool`      | `PostToolUse`       |
+| `user_input`     | `UserPromptSubmit`  |
+| `session_start`  | `SessionStart`      |
+| `session_stop`   | `Stop`              |
+| `subagent_stop`  | `SubagentStop`      |
+| `notification`   | `Notification`      |
+
+Hooks can also live in a `_common/<bundle>/hooks.json` and travel with
+imports. Collisions resolve in the consumer's favor, keyed on
+`event + matcher` — your `pre_tool/Bash` overrides an imported one,
+but an imported `pre_tool/Edit` still fires alongside.
+
+See `docs/SCHEMA.md` for per-field semantics and validation rules.
+
+### Verify end-to-end
+
+```
+# 1. confirm the import merged into an analysis template:
+wpc compile templates/code-review --target claude --out /tmp/cr-test
+ls /tmp/cr-test/.claude/skills/code-review/scripts/
+#  → graphify_impact.sh, graphify_query.sh
+
+# 2. confirm a hooks.json compiled into settings.json:
+ls /tmp/cr-test/.claude/settings.json   # exists when the template has hooks
+
+# 3. confirm graphify is reachable:
+graphify --version
+```
+
 ## Screens
 
 The launcher renders with [Bubble Tea](https://github.com/charmbracelet/bubbletea)

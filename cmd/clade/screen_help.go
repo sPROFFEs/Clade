@@ -31,7 +31,7 @@ func (m helpPaneModel) Title() string         { return "Help · keybinds & conce
 func (m helpPaneModel) NavSection() string    { return navSectionHelp }
 func (m helpPaneModel) CapturingInput() bool  { return false }
 func (m helpPaneModel) Help() string {
-	return "ctrl-p palette · tab focus · ctrl-1..4 sections · ctrl-c quit"
+	return "ctrl-p palette · tab focus · ctrl-1..7 sections · ctrl-c quit"
 }
 
 func (m helpPaneModel) Body() string {
@@ -46,7 +46,7 @@ func (m helpPaneModel) Body() string {
 	b.WriteString(subtitleStyle.Render("Global keys") + "\n")
 	for _, r := range [][2]string{
 		{"tab / shift-tab", "cycle focus between pane / nav / tabs"},
-		{"ctrl-1 .. ctrl-4", "jump to a nav section directly"},
+		{"ctrl-1 .. ctrl-7", "jump to a nav section directly (chats/templates/agents/tools/backup/local-llm/help)"},
 		{"ctrl-p", "open the command palette"},
 		{"F1", "toggle the help overlay"},
 		{":", "palette shortcut (only when no text input is focused)"},

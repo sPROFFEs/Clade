@@ -56,6 +56,11 @@ func PrepareSandbox(ws Workspace, agent Agent) error {
 	// surfaced via the LastDecorationNotes accessor — non-fatal so a
 	// flaky network fetch doesn't block the launch.
 	notes := applyDecorations(ws, agent)
+	// Append a hint for any imported bundle whose underlying tool
+	// isn't on PATH yet (e.g. graphify). The note carries the exact
+	// `clade -install-tool <name>` command the user should run, so
+	// no extra UI work to surface it.
+	notes = append(notes, missingImportedToolNotes(wp)...)
 	if len(notes) > 0 {
 		LastDecorationNotes = notes
 	} else {
