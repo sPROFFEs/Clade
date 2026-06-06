@@ -25,12 +25,15 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/sPROFFEs/Clade/internal/installer"
 	"github.com/sPROFFEs/Clade/internal/launcher"
+	"github.com/sPROFFEs/Clade/pkg/workpath"
 )
 
 // settingsItem indexes the rows in the settings list. Keep in sync
@@ -46,6 +49,7 @@ const (
 	settingsItemAgent
 	settingsItemEndpoint // local OpenAI-compat / Ollama endpoint
 	settingsItemSkills
+	settingsItemBundles  // _common/<bundle> imports toggled on this workpath
 	settingsItemCount
 )
 
@@ -57,6 +61,7 @@ const (
 	settingsModeEditLanguage
 	settingsModeEditSkills
 	settingsModeEditAgent
+	settingsModeEditBundles
 )
 
 type settingsModel struct {
@@ -98,6 +103,18 @@ type settingsModel struct {
 	agentItems  []launcher.Agent
 	agentCursor int
 	agentErr    string
+
+	// Bundles sub-editor state. bundles is the catalog from
+	// templates/_common/; bundleActive[name] tracks whether the
+	// workpath currently imports it; bundleTools maps a bundle name
+	// to the matching managed tool's availability (if any) so the
+	// row shows "✓ installed" / "✗ missing — install via Tools tab".
+	bundles       []launcher.Bundle
+	bundleActive  map[string]bool
+	bundleTools   map[string]bool // true when the matching Tool is installed (Available)
+	bundleCursor  int
+	bundlesErr    string
+	bundlesLoaded bool
 
 	// Diagnostic strings shown in the list footer.
 	err string
@@ -204,6 +221,8 @@ func (m settingsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateEditSkills(msg)
 		case settingsModeEditAgent:
 			return m.updateEditAgent(msg)
+		case settingsModeEditBundles:
+			return m.updateEditBundles(msg)
 		}
 	}
 	// Forward unhandled messages to the focused sub-editor for cursor
@@ -298,6 +317,10 @@ func (m settingsModel) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.skillInput.SetValue("")
 			m.skillInput.Focus()
 			return m, textinput.Blink
+		case settingsItemBundles:
+			m.mode = settingsModeEditBundles
+			m.loadBundles()
+			return m, nil
 		}
 	}
 	return m, nil
@@ -429,6 +452,8 @@ func (m settingsModel) Title() string {
 		return fmt.Sprintf("Settings · %s · online skills", m.ws.Name)
 	case settingsModeEditAgent:
 		return fmt.Sprintf("Settings · %s · agent", m.ws.Name)
+	case settingsModeEditBundles:
+		return fmt.Sprintf("Settings · %s · bundles", m.ws.Name)
 	}
 	return fmt.Sprintf("Settings · %s", m.ws.Name)
 }
@@ -443,6 +468,8 @@ func (m settingsModel) Help() string {
 		return "enter add · blank enter finish · ctrl-d remove last · esc back"
 	case settingsModeEditAgent:
 		return "↑/↓ select · enter swap+launch / install · i install · esc back"
+	case settingsModeEditBundles:
+		return "↑/↓ select · space or enter toggle · esc back"
 	}
 	return "esc back"
 }
@@ -475,6 +502,9 @@ func (m settingsModel) Body() string {
 
 	case settingsModeEditAgent:
 		return m.renderAgentPicker()
+
+	case settingsModeEditBundles:
+		return m.renderBundlesEditor()
 	}
 
 	// List view.
@@ -495,6 +525,7 @@ func (m settingsModel) renderList() string {
 		{"Agent", agentLabel(m.currentAgent), "Press Enter to open the per-chat agent picker. Switching agents writes through to chat.json immediately."},
 		{"Local endpoint", endpointLabel(m.ws.Settings.Ollama), "Route this chat through an OpenAI-compatible local endpoint (Ollama, GPUStack, vLLM, …) instead of the agent's vendor API."},
 		{"Online skills", fmt.Sprintf("%d", len(m.skills)), "Git URLs fetched into the sandbox's .claude/skills/ on launch."},
+		{"Bundles", bundlesValue(m), "Toggle shared _common/<bundle> imports for this workpath. Each enabled bundle's wrappers + knowledge + playbook fragment merge into the sandbox at compile time. Press Enter to manage."},
 	}
 	for i, r := range rows {
 		isSel := i == m.cursor
@@ -605,3 +636,168 @@ func endpointLabel(s launcher.OllamaSettings) string {
 // rest of the file deals with marker-prefixed labels; centralising the
 // width call keeps adjustments to padding consistent.
 func renderListLabel(s string) int { return lipgloss.Width(s) }
+
+// --- bundles sub-editor ---------------------------------------------------
+
+// loadBundles reads the available _common/<bundle> directories AND the
+// workpath's currently-active imports, then probes installer.DetectTools
+// to mark whether each bundle's underlying tool is installed. Idempotent
+// — calling twice is safe; the second call refreshes from disk.
+func (m *settingsModel) loadBundles() {
+	m.bundles = nil
+	m.bundleActive = map[string]bool{}
+	m.bundleTools = map[string]bool{}
+	m.bundleCursor = 0
+	m.bundlesErr = ""
+	m.bundlesLoaded = true
+
+	bundles, err := launcher.DiscoverBundles(m.cfg.WorkspacesRoot)
+	if err != nil {
+		m.bundlesErr = err.Error()
+		return
+	}
+	m.bundles = bundles
+
+	// What's currently imported by this workpath?
+	wpJSON := filepath.Join(m.ws.WorkpathDir, "workpath.json")
+	current, err := workpath.ReadImports(wpJSON)
+	if err != nil {
+		m.bundlesErr = err.Error()
+		return
+	}
+	// Mark active by basename match. We can't compare verbatim because
+	// the stored path varies by depth (_common/foo vs ../_common/foo
+	// vs ../../templates/_common/foo); the basename is stable.
+	for _, ref := range current {
+		base := filepath.Base(filepath.FromSlash(ref))
+		m.bundleActive[base] = true
+	}
+
+	// Probe installed tools so each row shows availability. Short
+	// timeout — this runs synchronously when the user enters the sub-
+	// editor; can't block more than a second or two without bad UX.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	for _, t := range installer.DetectTools(ctx) {
+		m.bundleTools[string(t.ID)] = t.Available
+	}
+}
+
+func (m settingsModel) updateEditBundles(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.mode = settingsModeList
+		return m, nil
+	case "up", "k":
+		if m.bundleCursor > 0 {
+			m.bundleCursor--
+		}
+	case "down", "j":
+		if m.bundleCursor < len(m.bundles)-1 {
+			m.bundleCursor++
+		}
+	case " ", "enter":
+		if m.bundleCursor >= len(m.bundles) {
+			return m, nil
+		}
+		b := m.bundles[m.bundleCursor]
+		wpJSON := filepath.Join(m.ws.WorkpathDir, "workpath.json")
+		if m.bundleActive[b.Name] {
+			// Remove EVERY variant of this bundle's import path (we
+			// stored by basename match, so the user may have used
+			// _common/x or ../_common/x — strip them all).
+			current, _ := workpath.ReadImports(wpJSON)
+			for _, ref := range current {
+				if filepath.Base(filepath.FromSlash(ref)) == b.Name {
+					if err := workpath.RemoveImport(wpJSON, ref); err != nil {
+						m.bundlesErr = err.Error()
+						return m, nil
+					}
+				}
+			}
+			m.bundleActive[b.Name] = false
+		} else {
+			ref, err := launcher.RelativeImportPath(m.ws.WorkpathDir, m.cfg.WorkspacesRoot, b.Name)
+			if err != nil {
+				m.bundlesErr = err.Error()
+				return m, nil
+			}
+			if err := workpath.AddImport(wpJSON, ref); err != nil {
+				m.bundlesErr = err.Error()
+				return m, nil
+			}
+			m.bundleActive[b.Name] = true
+		}
+		m.bundlesErr = ""
+	}
+	return m, nil
+}
+
+func (m settingsModel) renderBundlesEditor() string {
+	var b strings.Builder
+	if !m.bundlesLoaded {
+		b.WriteString(hintStyle.Render("Scanning templates/_common/..."))
+		return b.String()
+	}
+	if len(m.bundles) == 0 {
+		b.WriteString(hintStyle.Render(
+			"No bundles registered. Drop a directory under " +
+				"templates/_common/<name>/ with a playbook-fragment.md to ship one."))
+		if m.bundlesErr != "" {
+			b.WriteString("\n\n" + errorStyle.Render("✗ "+m.bundlesErr))
+		}
+		return b.String()
+	}
+	b.WriteString(hintStyle.Render(
+		"Toggle shared capability bundles for this workpath. Enabled bundles' " +
+			"tools, knowledge, hooks, and playbook/rules fragments merge into the " +
+			"sandbox at compile time. Tool availability is shown — install missing " +
+			"ones from the Tools tab (Ctrl-4).") + "\n\n")
+
+	for i, bun := range m.bundles {
+		isSel := i == m.bundleCursor
+		marker := "  "
+		if isSel {
+			marker = "› "
+		}
+		check := "[ ]"
+		if m.bundleActive[bun.Name] {
+			check = availableStyle.Render("[x]")
+		}
+		// Tool installed status: only show when there's a matching
+		// known Tool of the same name.
+		status := ""
+		if installed, known := m.bundleTools[bun.Name]; known {
+			if installed {
+				status = "   " + availableStyle.Render("✓ tool installed")
+			} else {
+				status = "   " + errorStyle.Render("✗ tool missing")
+			}
+		}
+		line := marker + check + " " + bun.Title + status
+		b.WriteString(selectionRow(line, isSel) + "\n")
+		if isSel && bun.Description != "" {
+			b.WriteString(descStyle.Render("  "+bun.Description) + "\n")
+		}
+		if isSel && bun.Description == "" {
+			b.WriteString(descStyle.Render("  (no description — bundle has no playbook-fragment.md heading)") + "\n")
+		}
+	}
+	if m.bundlesErr != "" {
+		b.WriteString("\n" + errorStyle.Render("✗ "+m.bundlesErr))
+	}
+	return b.String()
+}
+
+// bundlesValue is the right-column text for the Bundles row in the
+// main list. Counts how many bundles this workpath imports, falling
+// back to "(none)" when zero. Reads from disk (cheap) so it stays
+// fresh after the sub-editor mutates the manifest.
+func bundlesValue(m settingsModel) string {
+	wpJSON := filepath.Join(m.ws.WorkpathDir, "workpath.json")
+	current, err := workpath.ReadImports(wpJSON)
+	if err != nil || len(current) == 0 {
+		return descStyle.Render("(none)")
+	}
+	return fmt.Sprintf("%d active", len(current))
+}
