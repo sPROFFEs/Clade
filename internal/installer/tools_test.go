@@ -35,6 +35,58 @@ func TestToolCatalog_GraphifyShape(t *testing.T) {
 	}
 }
 
+func TestToolCatalog_GstackShape(t *testing.T) {
+	got := allToolMethods(ToolGstack, ActionInstall, OSLinux)
+	if len(got) != 1 {
+		t.Fatalf("gstack got %d methods, want exactly 1", len(got))
+	}
+	m := got[0]
+	if m.ID != "bash" {
+		t.Errorf("gstack ID=%q, want bash", m.ID)
+	}
+	if m.ManagedPrefix != "gstack" {
+		t.Errorf("gstack ManagedPrefix=%q, want gstack", m.ManagedPrefix)
+	}
+	if !strings.Contains(m.ManagedPrefixPkg, "github.com/garrytan/gstack") {
+		t.Errorf("gstack ManagedPrefixPkg=%q, want upstream repo URL", m.ManagedPrefixPkg)
+	}
+	for _, want := range []string{"GSTACK_SKIP_FONTS=1", "GSTACK_SKIP_COREUTILS=1", "--host auto"} {
+		if !strings.Contains(m.Command, want) {
+			t.Errorf("gstack command missing %q: %s", want, m.Command)
+		}
+	}
+	for _, want := range []string{"git", "bun"} {
+		if !containsString(m.Prereqs, want) {
+			t.Errorf("gstack prereqs = %v, want %s", m.Prereqs, want)
+		}
+	}
+}
+
+func TestToolCatalog_ScrapeGraphShape(t *testing.T) {
+	got := allToolMethods(ToolScrapeGraph, ActionInstall, OSLinux)
+	if len(got) != 1 {
+		t.Fatalf("scrapegraph got %d methods, want exactly 1", len(got))
+	}
+	m := got[0]
+	if m.ID != "uv" {
+		t.Errorf("scrapegraph ID=%q, want uv", m.ID)
+	}
+	if m.ManagedPrefix != "scrapegraph" {
+		t.Errorf("scrapegraph ManagedPrefix=%q, want scrapegraph", m.ManagedPrefix)
+	}
+	for _, want := range []string{"scrapegraphai", "scrapegraph-py"} {
+		if !strings.Contains(m.ManagedPrefixPkg, want) {
+			t.Errorf("scrapegraph ManagedPrefixPkg=%q, want %s", m.ManagedPrefixPkg, want)
+		}
+	}
+	if !strings.Contains(m.Command, "--index-url=https://pypi.org/simple/") {
+		t.Errorf("scrapegraph command missing pinned index URL: %s", m.Command)
+	}
+	if !containsString(m.Prereqs, "uv") {
+		t.Errorf("scrapegraph prereqs = %v, want uv", m.Prereqs)
+	}
+}
+
 func TestManagedToolPrefix_PathShape(t *testing.T) {
 	prefix, err := ManagedToolPrefix("graphify")
 	if err != nil {
@@ -52,21 +104,36 @@ func TestManagedToolPrefix_PathShape(t *testing.T) {
 	}
 }
 
-func TestKnownTools_GraphifyPresent(t *testing.T) {
+func TestKnownTools_AllExpectedPresent(t *testing.T) {
 	got := KnownTools()
 	if len(got) == 0 {
 		t.Fatal("KnownTools returned empty catalog")
 	}
-	found := false
+	want := map[ToolID]string{
+		ToolGraphify:    "graphify",
+		ToolGstack:      "gstack",
+		ToolScrapeGraph: "scrapegraph-search",
+	}
 	for _, x := range got {
-		if x.ID == ToolGraphify {
-			found = true
-			if x.Binary != "graphify" {
-				t.Errorf("graphify Binary = %q, want \"graphify\"", x.Binary)
-			}
+		bin, ok := want[x.ID]
+		if !ok {
+			continue
+		}
+		if x.Binary != bin {
+			t.Errorf("%s Binary = %q, want %q", x.ID, x.Binary, bin)
+		}
+		delete(want, x.ID)
+	}
+	for id := range want {
+		t.Errorf("%s not in KnownTools catalog", id)
+	}
+}
+
+func containsString(xs []string, want string) bool {
+	for _, x := range xs {
+		if x == want {
+			return true
 		}
 	}
-	if !found {
-		t.Error("ToolGraphify not in KnownTools catalog")
-	}
+	return false
 }

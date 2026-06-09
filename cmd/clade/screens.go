@@ -36,8 +36,8 @@ type (
 	errMsg struct{ err error }
 )
 
-func wrap(m tea.Model) tea.Cmd        { return func() tea.Msg { return screenDoneMsg{next: m} } }
-func wrapErr(err error) tea.Cmd       { return func() tea.Msg { return errMsg{err: err} } }
+func wrap(m tea.Model) tea.Cmd  { return func() tea.Msg { return screenDoneMsg{next: m} } }
+func wrapErr(err error) tea.Cmd { return func() tea.Msg { return errMsg{err: err} } }
 func wrapLaunch(p launcher.LaunchPlan, c *launcher.Config) tea.Cmd {
 	return func() tea.Msg { return screenDoneMsg{launch: &p, updateCfg: c} }
 }
@@ -46,8 +46,8 @@ func wrapLaunch(p launcher.LaunchPlan, c *launcher.Config) tea.Cmd {
 
 // First-run wizard is two short steps:
 //
-//   0. text input for the workspaces-root path
-//   1. y/n: copy the bundled example templates? (default yes)
+//  0. text input for the workspaces-root path
+//  1. y/n: copy the bundled example templates? (default yes)
 //
 // The seeding step is only ever shown on first run — once config.json
 // exists the launcher jumps straight to the chat list. If the user
@@ -77,8 +77,8 @@ type firstRunModel struct {
 	input    textinput.Model // workspaces root on step 0
 	urlInput textinput.Model // clone URL on step 2
 	step     firstRunStep
-	method   firstRunMethod  // chosen on step 1
-	cursor   int             // 0..2 cursor on step 1
+	method   firstRunMethod // chosen on step 1
+	cursor   int            // 0..2 cursor on step 1
 	root     string
 	cloneURL string
 
@@ -148,7 +148,7 @@ func bundledTemplateNames() []string {
 		}
 		var names []string
 		for _, e := range entries {
-			if e.IsDir() {
+			if e.IsDir() && !strings.HasPrefix(e.Name(), ".") && !strings.HasPrefix(e.Name(), "_") {
 				names = append(names, e.Name())
 			}
 		}
@@ -476,7 +476,7 @@ func (m firstRunModel) View() string {
 		}
 		b.WriteString("\n")
 		if len(m.bundled) > 0 {
-			b.WriteString(descStyle.Render("Bundled templates available for option [2]: " +
+			b.WriteString(descStyle.Render("Bundled templates available for option [2]: "+
 				strings.Join(m.bundled, ", ")) + "\n")
 		}
 
@@ -494,8 +494,8 @@ func (m firstRunModel) View() string {
 		b.WriteString(descStyle.Render(
 			"  https://gitea.example/<user>/<repo>.git") + "\n\n")
 		b.WriteString(hintStyle.Render(
-			"⚠ The repo must be public OR your git credentials must be configured.\n"+
-				"  On clone failure we'll fall back to creating an empty folder; you can\n"+
+			"⚠ The repo must be public OR your git credentials must be configured.\n" +
+				"  On clone failure we'll fall back to creating an empty folder; you can\n" +
 				"  link the remote later from the Backup tab."))
 
 	case firstRunStepWorking:
@@ -716,8 +716,8 @@ func (m agentsModel) Help() string {
 	}
 	return "↑/↓ select · enter launch/install · i install · o ollama · esc back"
 }
-func (m agentsModel) NavSection() string    { return navSectionAgents }
-func (m agentsModel) CapturingInput() bool  { return false }
+func (m agentsModel) NavSection() string   { return navSectionAgents }
+func (m agentsModel) CapturingInput() bool { return false }
 
 func (m agentsModel) Body() string {
 	var b strings.Builder
@@ -769,7 +769,7 @@ func (m agentsModel) Body() string {
 	b.WriteString("\n")
 	if m.ws.Name == "" && m.override == nil {
 		b.WriteString(hintStyle.Render(
-			"Install management. Enter opens the installer for the selected agent (whether installed or not). "+
+			"Install management. Enter opens the installer for the selected agent (whether installed or not). " +
 				"Per-chat agent swap lives in chat settings (e key on the chat list).",
 		))
 	} else {

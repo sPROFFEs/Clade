@@ -19,8 +19,9 @@ import (
 //
 // The bundle → tool name mapping is by convention: a bundle named
 // `_common/<name>` wraps the tool whose installer.ToolID is also
-// `<name>`. Today the only registered tool is `graphify`; this code
-// works for any future tools that follow the same naming.
+// `<name>`. This keeps the settings Bundles toggle and Tools installer
+// loosely coupled: adding a known tool plus a matching _common bundle
+// is enough for launch-time missing-tool hints.
 //
 // Best-effort: probes are cheap (exec.LookPath + os.Stat), so this
 // adds at most a few ms per launch. Returns nil when every imported

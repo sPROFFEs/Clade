@@ -43,7 +43,7 @@ func main() {
 	yesFlag := flag.Bool("y", false, "auto-confirm the update prompt (use with -update for non-interactive installs)")
 	installTool := flag.String("install-tool", "",
 		"install a Clade-managed tool into <config>/clade/tools/<name>/ and exit. "+
-			"Currently supported: graphify. Use this when a workpath imports a "+
+			"Currently supported: graphify, gstack, scrapegraph. Use this when a workpath imports a "+
 			"_common/<bundle> whose wrapper scripts need a binary that's not yet "+
 			"on PATH.")
 	mergeMemory := flag.Bool("merge-memory", false,
@@ -80,7 +80,7 @@ func main() {
 	// when it exists on disk so agent detection finds tools installed in
 	// past sessions.
 	installer.ImportPnpmPathIfPresent()
-	// Same idea for Clade-managed tool prefixes (graphify, etc.): prepend
+	// Same idea for Clade-managed tool prefixes: prepend
 	// each <config>/clade/tools/<name>/bin to PATH so wpc-staged template
 	// scripts can call those binaries by name without knowing the prefix.
 	installer.ImportClademToolsToPath()
@@ -536,12 +536,12 @@ func runUpdate(autoYes bool) int {
 }
 
 // runInstallTool installs a single Clade-managed tool (e.g. graphify)
-// via the same installer.Run path the (future) TUI Tools tab will use.
+// via the same installer.Run path the TUI Tools tab uses.
 // Streams pnpm/uv progress to stdout so the user sees what's happening.
 // Returns 0 on success, non-zero on every failure path.
 //
-// Today's recognised names: "graphify". Anything else returns a helpful
-// "available tools: ..." error so the user can pick.
+// Anything else returns a helpful "available tools: ..." error so the
+// user can pick.
 func runInstallTool(name string) int {
 	id := installer.ToolID(name)
 	known := false
@@ -559,9 +559,9 @@ func runInstallTool(name string) int {
 	methods := installer.ToolMethods(id, installer.ActionInstall, installer.DetectOS())
 	if len(methods) == 0 {
 		fmt.Fprintf(os.Stderr, "clade: no install method available for %s on this OS\n", name)
-		fmt.Fprintf(os.Stderr, "       (prereq probe failed — install uv first if this is graphify:\n")
-		fmt.Fprintf(os.Stderr, "        curl -LsSf https://astral.sh/uv/install.sh | sh   on Linux/macOS\n")
-		fmt.Fprintf(os.Stderr, "        irm https://astral.sh/uv/install.ps1 | iex        on Windows)\n")
+		fmt.Fprintf(os.Stderr, "       (common missing prereqs: uv for graphify/scrapegraph; git+bun+bash for gstack)\n")
+		fmt.Fprintf(os.Stderr, "       uv: curl -LsSf https://astral.sh/uv/install.sh | sh   on Linux/macOS\n")
+		fmt.Fprintf(os.Stderr, "       uv: irm https://astral.sh/uv/install.ps1 | iex        on Windows\n")
 		return 1
 	}
 	m := methods[0]

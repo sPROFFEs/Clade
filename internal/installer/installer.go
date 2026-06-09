@@ -585,14 +585,20 @@ func RunWithOptions(ctx context.Context, m Method, opts RunOptions, stdout, stde
 	}
 	// Managed-prefix install: dispatch by installer kind. pnpm methods
 	// land under clade/agents/<name>/ with a project-local hoisted
-	// node-linker (openclaude). uv methods land under clade/tools/<name>/
-	// with UV_TOOL_DIR / UV_TOOL_BIN_DIR redirected to that prefix
-	// (graphify). Bypasses buildCmd entirely.
+	// node-linker (openclaude). Tool methods land under clade/tools/<name>/
+	// with installer-specific handling (uv tool, git+setup, uv venv).
+	// Bypasses buildCmd entirely.
 	if m.ManagedPrefix != "" {
-		if m.ID == "uv" {
+		switch m.ManagedPrefix {
+		case "graphify":
 			return installUvIntoManagedPrefix(ctx, m, extraEnv, stdout, stderr)
+		case "gstack":
+			return installGstackIntoManagedPrefix(ctx, m, extraEnv, stdout, stderr)
+		case "scrapegraph":
+			return installScrapeGraphIntoManagedVenv(ctx, m, extraEnv, stdout, stderr)
+		default:
+			return installIntoManagedPrefix(ctx, m, extraEnv, stdout, stderr)
 		}
-		return installIntoManagedPrefix(ctx, m, extraEnv, stdout, stderr)
 	}
 	cmd := buildCmd(ctx, m)
 	cmd.Stdout = stdout

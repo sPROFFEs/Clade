@@ -1,10 +1,10 @@
 package main
 
-// Tools tab — Clade-managed companion CLIs (graphify today). Browser
+// Tools tab — Clade-managed companion CLIs. Browser
 // shape mirrors the Agents picker, but each row is an installer.Tool
 // instead of an Agent: detection probes PATH + the Clade-managed
 // prefix, Enter / 'i' routes to the per-tool install screen, which
-// streams uv / pnpm output the same way the Agents install screen does.
+// streams uv / git output the same way the Agents install screen does.
 //
 // The Tools tab is intentionally separate from Agents because Tools
 // are NOT launchable as a primary chat agent — they're callable
@@ -104,8 +104,8 @@ func (m toolsModel) Help() string {
 	return "↑/↓ select · enter or i install/update · r reload · esc back"
 }
 
-func (m toolsModel) NavSection() string    { return navSectionTools }
-func (m toolsModel) CapturingInput() bool  { return false }
+func (m toolsModel) NavSection() string   { return navSectionTools }
+func (m toolsModel) CapturingInput() bool { return false }
 
 func (m toolsModel) Body() string {
 	var b strings.Builder
@@ -118,9 +118,9 @@ func (m toolsModel) Body() string {
 		return b.String()
 	}
 	b.WriteString(hintStyle.Render(
-		"Clade-managed companion CLIs. Tools are NOT launchable as a primary " +
-			"agent — they are helpers wpc-staged template scripts invoke. " +
-			"Install one here so workpaths that import its _common/ bundle " +
+		"Clade-managed companion CLIs. Tools are NOT launchable as a primary "+
+			"agent — they are helpers wpc-staged template scripts invoke. "+
+			"Install one here so workpaths that import its _common/ bundle "+
 			"can call it on PATH.") + "\n\n")
 
 	for i, t := range m.items {
@@ -217,10 +217,9 @@ func (m toolInstallModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			chosen := m.methods[m.cursor]
-			// For tools we don't surface the Node opt-in (no tool uses
-			// pnpm today; graphify uses uv). Missing prereqs (e.g. uv)
-			// bubble up from installer.Run as a clear error message,
-			// which the running view will display.
+			// For tools we don't surface the Node opt-in. Missing
+			// prereqs (uv for graphify/scrapegraph; git+bun for gstack)
+			// bubble up from installer.Run as a clear error message.
 			m.running = true
 			m.output = &runningOutput{}
 			out := m.output
@@ -271,15 +270,15 @@ func (m toolInstallModel) Body() string {
 
 	if len(m.methods) == 0 {
 		b.WriteString(errorStyle.Render("✗ No install method available on this OS for "+string(m.toolID)) + "\n")
-		b.WriteString(hintStyle.Render("Most common cause for tools: a missing prereq (e.g. uv for graphify).") + "\n")
-		b.WriteString(hintStyle.Render("Install uv first:") + "\n")
+		b.WriteString(hintStyle.Render("Most common cause for tools: a missing prereq.") + "\n")
+		b.WriteString(hintStyle.Render("Install uv for graphify/scrapegraph, or git + bun + bash for gstack.") + "\n")
 		b.WriteString(descStyle.Render("  curl -LsSf https://astral.sh/uv/install.sh | sh    Linux/macOS") + "\n")
 		b.WriteString(descStyle.Render("  irm https://astral.sh/uv/install.ps1 | iex         Windows") + "\n")
 		return b.String()
 	}
 
 	if !m.running {
-		b.WriteString(hintStyle.Render("Pick a method. Recommended is marked. " +
+		b.WriteString(hintStyle.Render("Pick a method. Recommended is marked. "+
 			"You'll see the exact command before it runs.") + "\n\n")
 		for i, mth := range m.methods {
 			isSel := i == m.cursor

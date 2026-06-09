@@ -52,6 +52,25 @@ func TestSeedSamples_SeedsIntoTemplatesDir(t *testing.T) {
 			t.Errorf("template %s has empty description", tpl.Name)
 		}
 	}
+
+	bundles, err := DiscoverBundles(root)
+	if err != nil {
+		t.Fatalf("DiscoverBundles: %v", err)
+	}
+	var bundleNames []string
+	for _, b := range bundles {
+		bundleNames = append(bundleNames, b.Name)
+	}
+	sort.Strings(bundleNames)
+	if want := []string{"gstack", "scrapegraph"}; !equalStrings(bundleNames, want) {
+		t.Errorf("bundles = %v, want %v", bundleNames, want)
+	}
+	if _, err := os.Stat(filepath.Join(root, TemplatesDir, "_common", "scrapegraph", "tools", "scrapegraph_search.sh")); err != nil {
+		t.Errorf("scrapegraph bundle tool missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, TemplatesDir, "_common", "workpath")); !os.IsNotExist(err) {
+		t.Errorf("_common should not be seeded as a template workpath, stat err=%v", err)
+	}
 }
 
 func TestSeedSamples_SkipsExisting(t *testing.T) {

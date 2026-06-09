@@ -398,6 +398,15 @@ func SeedSamples(workspacesRoot string, sampleSourceCandidates []string) ([]stri
 		if !e.IsDir() {
 			continue
 		}
+		if e.Name() == "_common" {
+			if err := seedCommonBundles(filepath.Join(src, e.Name()), filepath.Join(workspacesRoot, TemplatesDir, "_common")); err != nil {
+				return seeded, err
+			}
+			continue
+		}
+		if strings.HasPrefix(e.Name(), ".") || strings.HasPrefix(e.Name(), "_") {
+			continue
+		}
 		// New layout: seed samples as templates under <root>/templates/<name>/.
 		dst := filepath.Join(workspacesRoot, TemplatesDir, e.Name(), "workpath")
 		if _, err := os.Stat(dst); err == nil {
@@ -409,6 +418,26 @@ func SeedSamples(workspacesRoot string, sampleSourceCandidates []string) ([]stri
 		seeded = append(seeded, e.Name())
 	}
 	return seeded, nil
+}
+
+func seedCommonBundles(src, dstRoot string) error {
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if !e.IsDir() || strings.HasPrefix(e.Name(), ".") || strings.HasPrefix(e.Name(), "_") {
+			continue
+		}
+		dst := filepath.Join(dstRoot, e.Name())
+		if _, err := os.Stat(dst); err == nil {
+			continue
+		}
+		if err := copyTree(filepath.Join(src, e.Name()), dst); err != nil {
+			return fmt.Errorf("seed bundle %s: %w", e.Name(), err)
+		}
+	}
+	return nil
 }
 
 func copyTree(src, dst string) error {

@@ -49,7 +49,7 @@ const (
 	settingsItemAgent
 	settingsItemEndpoint // local OpenAI-compat / Ollama endpoint
 	settingsItemSkills
-	settingsItemBundles  // _common/<bundle> imports toggled on this workpath
+	settingsItemBundles // _common/<bundle> imports toggled on this workpath
 	settingsItemCount
 )
 
@@ -474,8 +474,10 @@ func (m settingsModel) Help() string {
 	return "esc back"
 }
 
-func (m settingsModel) NavSection() string   { return navSectionChats }
-func (m settingsModel) CapturingInput() bool { return m.mode == settingsModeEditLanguage || m.mode == settingsModeEditSkills }
+func (m settingsModel) NavSection() string { return navSectionChats }
+func (m settingsModel) CapturingInput() bool {
+	return m.mode == settingsModeEditLanguage || m.mode == settingsModeEditSkills
+}
 
 func (m settingsModel) Body() string {
 	switch m.mode {
@@ -749,9 +751,10 @@ func (m settingsModel) renderBundlesEditor() string {
 		return b.String()
 	}
 	b.WriteString(hintStyle.Render(
-		"Toggle shared capability bundles for this workpath. Enabled bundles' " +
-			"tools, knowledge, hooks, and playbook/rules fragments merge into the " +
-			"sandbox at compile time. Tool availability is shown — install missing " +
+		"Toggle shared capability bundles for this workpath. Enabled bundles' "+
+			"tools, knowledge, hooks, and playbook/rules fragments merge into the "+
+			"sandbox at compile time so the model is told the capability exists. "+
+			"Tool availability is shown — install missing "+
 			"ones from the Tools tab (Ctrl-4).") + "\n\n")
 
 	for i, bun := range m.bundles {
