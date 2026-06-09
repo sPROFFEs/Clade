@@ -89,7 +89,11 @@ func sliceSubdir(agent AgentID) string {
 // is the chat's per-launch <ts>-<agent>/ directory. The agent argument
 // is the launched agent.
 func MirrorOutSlice(agent Agent, sandboxDir, sessionDir string) MirrorResult {
-	paths := AgentHome(agent.ID, sandboxDir)
+	return MirrorOutSliceWithHome(agent, sandboxDir, sessionDir, "")
+}
+
+func MirrorOutSliceWithHome(agent Agent, sandboxDir, sessionDir, homeOverride string) MirrorResult {
+	paths := agentHome(agent.ID, sandboxDir, homeOverride)
 	if paths.SessionDir == "" {
 		return MirrorResult{Note: "skipped: " + string(agent.ID) + " has no native store wired"}
 	}
@@ -128,7 +132,11 @@ func MirrorOutSlice(agent Agent, sandboxDir, sessionDir string) MirrorResult {
 // recovery: agent ran, wrote new turns, clade got killed before mirror-
 // out completed → next launch should NOT clobber those turns).
 func MirrorInSlice(agent Agent, sandboxDir, sliceRoot string, preserveNewerHome bool) MirrorResult {
-	paths := AgentHome(agent.ID, sandboxDir)
+	return MirrorInSliceWithHome(agent, sandboxDir, sliceRoot, preserveNewerHome, "")
+}
+
+func MirrorInSliceWithHome(agent Agent, sandboxDir, sliceRoot string, preserveNewerHome bool, homeOverride string) MirrorResult {
+	paths := agentHome(agent.ID, sandboxDir, homeOverride)
 	if paths.SessionDir == "" {
 		return MirrorResult{Note: "skipped: " + string(agent.ID) + " has no native store wired"}
 	}
@@ -303,8 +311,10 @@ func mirrorInCodex(homeSessionsDir, sliceDir string, preserveNewerHome bool) Mir
 // --- OpenCode --------------------------------------------------------------
 
 // opencodeSliceLayout: under sliceSubdir we keep:
-//   slice/opencode-session/info/<id>.json
-//   slice/opencode-session/message/<id>/*.json
+//
+//	slice/opencode-session/info/<id>.json
+//	slice/opencode-session/message/<id>/*.json
+//
 // matching the source layout 1:1 so MirrorIn can blat it back.
 func mirrorOutOpenCode(infoDir, msgDir, sandboxDir, dstRoot string) MirrorResult {
 	wantCwd := normaliseCwd(sandboxDir)
@@ -600,6 +610,10 @@ var mirrorInFlight struct {
 // and the WaitForMirror() helper can drain them all before a sensitive
 // operation like mirror-in.
 func StartMirrorOutAsync(agent Agent, sandboxDir, sessionDir string) {
+	StartMirrorOutAsyncWithHome(agent, sandboxDir, sessionDir, "")
+}
+
+func StartMirrorOutAsyncWithHome(agent Agent, sandboxDir, sessionDir, homeOverride string) {
 	mirrorInFlight.mu.Lock()
 	if mirrorInFlight.count == 0 {
 		mirrorInFlight.done = make(chan struct{})
@@ -609,7 +623,7 @@ func StartMirrorOutAsync(agent Agent, sandboxDir, sessionDir string) {
 	mirrorInFlight.mu.Unlock()
 
 	go func() {
-		res := MirrorOutSlice(agent, sandboxDir, sessionDir)
+		res := MirrorOutSliceWithHome(agent, sandboxDir, sessionDir, homeOverride)
 		mirrorInFlight.mu.Lock()
 		LastMirrorResult = res
 		mirrorInFlight.count--

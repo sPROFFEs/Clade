@@ -91,13 +91,17 @@ type TranscriptEntry struct {
 // in capture.Note so the caller can render them but the launch flow
 // keeps moving. err is only non-nil on genuinely unexpected I/O.
 func CaptureTranscript(agent Agent, sandboxDir string, sessionStart time.Time, destDir string) (CapturedTranscript, error) {
+	return captureTranscript(agent, sandboxDir, sessionStart, destDir, "")
+}
+
+func captureTranscript(agent Agent, sandboxDir string, sessionStart time.Time, destDir, homeOverride string) (CapturedTranscript, error) {
 	out := CapturedTranscript{Agent: agent.ID}
 
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
 		return out, err
 	}
 
-	src, raw, parsed, note, err := locateTranscript(agent.ID, sandboxDir, sessionStart)
+	src, raw, parsed, note, err := locateTranscript(agent.ID, sandboxDir, sessionStart, homeOverride)
 	if err != nil {
 		// Locator hit an unexpected fs error. Don't fail the launch —
 		// record the note and move on.
@@ -137,12 +141,12 @@ func CaptureTranscript(agent Agent, sandboxDir string, sessionStart time.Time, d
 // returns (sourcePath, rawBytes, parsedEntries, note, err). A nil
 // rawBytes with nil err means "agent's store searched, nothing
 // matches this session" — a normal case, not a failure.
-func locateTranscript(id AgentID, sandboxDir string, sessionStart time.Time) (string, []byte, []TranscriptEntry, string, error) {
+func locateTranscript(id AgentID, sandboxDir string, sessionStart time.Time, homeOverride string) (string, []byte, []TranscriptEntry, string, error) {
 	switch id {
 	case AgentClaude:
 		return locateClaudeTranscript(sandboxDir, sessionStart)
 	case AgentOpenClaude:
-		return locateOpenClaudeTranscript(sandboxDir, sessionStart)
+		return locateOpenClaudeTranscript(sandboxDir, sessionStart, homeOverride)
 	case AgentCodex:
 		return locateCodexTranscript(sandboxDir, sessionStart)
 	case AgentOpenCode:
@@ -203,8 +207,11 @@ func openclaudeProjectSlug(cwd string) string {
 // locateOpenClaudeTranscript mirrors locateClaudeTranscript but against
 // ~/.openclaude/projects/<slug>/. The JSONL schema is inherited verbatim
 // from claude code so parseClaudeJSONL handles parsing.
-func locateOpenClaudeTranscript(sandboxDir string, sessionStart time.Time) (string, []byte, []TranscriptEntry, string, error) {
-	home := homeDir()
+func locateOpenClaudeTranscript(sandboxDir string, sessionStart time.Time, homeOverride string) (string, []byte, []TranscriptEntry, string, error) {
+	home := homeOverride
+	if home == "" {
+		home = homeDir()
+	}
 	if home == "" {
 		return "", nil, nil, "no home dir resolved — openclaude store skipped", nil
 	}

@@ -56,6 +56,43 @@ func TestCaptureTranscript_EmptyStoreReturnsNote(t *testing.T) {
 	}
 }
 
+func TestCaptureTranscript_OpenClaudeManagedHomeOverride(t *testing.T) {
+	tmp := t.TempDir()
+	sandbox := filepath.Join(tmp, "sandbox")
+	if err := os.MkdirAll(sandbox, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	managedHome := filepath.Join(tmp, ".openclaude-home")
+	store := filepath.Join(managedHome, ".openclaude", "projects", openclaudeProjectSlug(sandbox))
+	if err := os.MkdirAll(store, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	raw := []byte(`{"type":"user","timestamp":"2026-06-09T10:00:00Z","message":{"content":[{"type":"text","text":"hi"}]}}` + "\n")
+	src := filepath.Join(store, "11111111-1111-1111-1111-111111111111.jsonl")
+	if err := os.WriteFile(src, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if err := os.Chtimes(src, now, now); err != nil {
+		t.Fatal(err)
+	}
+
+	dest := filepath.Join(tmp, "session")
+	cap, err := captureTranscript(Agent{ID: AgentOpenClaude}, sandbox, now.Add(-time.Minute), dest, managedHome)
+	if err != nil {
+		t.Fatalf("captureTranscript err: %v", err)
+	}
+	if cap.SourcePath != src {
+		t.Fatalf("SourcePath = %q, want %q (managed home must be searched)", cap.SourcePath, src)
+	}
+	if cap.DestPath != filepath.Join(dest, "transcript.jsonl") {
+		t.Errorf("DestPath = %q", cap.DestPath)
+	}
+	if len(cap.Entries) == 0 || cap.Entries[0].Text != "hi" {
+		t.Errorf("parsed entries = %+v", cap.Entries)
+	}
+}
+
 func TestWriteSummary_WritesMarkdownAndJSON(t *testing.T) {
 	tmp := t.TempDir()
 	cap := CapturedTranscript{

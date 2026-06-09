@@ -244,6 +244,32 @@ func TestPlan_OpenClaudeUsesOpenAICompatibleEndpointAndLimits(t *testing.T) {
 	if plan.Env["OPENAI_MODEL"] != "qwen3" {
 		t.Errorf("OPENAI_MODEL = %q", plan.Env["OPENAI_MODEL"])
 	}
+	managedHome := filepath.Join(ws.Root, ".openclaude-home")
+	if plan.Env["HOME"] != managedHome {
+		t.Errorf("HOME = %q, want %q", plan.Env["HOME"], managedHome)
+	}
+	if plan.Env["USERPROFILE"] != managedHome {
+		t.Errorf("USERPROFILE = %q, want %q", plan.Env["USERPROFILE"], managedHome)
+	}
+	for _, rel := range []string{
+		filepath.Join(".openclaude", ".credentials.json"),
+		filepath.Join(".claude", ".credentials.json"),
+	} {
+		raw, err := os.ReadFile(filepath.Join(managedHome, rel))
+		if err != nil {
+			t.Fatalf("read managed OpenClaude credential shim %s: %v", rel, err)
+		}
+		if string(raw) != "{}" {
+			t.Errorf("%s = %q, want {}", rel, string(raw))
+		}
+	}
+	ignore, err := os.ReadFile(filepath.Join(managedHome, ".gitignore"))
+	if err != nil {
+		t.Fatalf("read managed OpenClaude home .gitignore: %v", err)
+	}
+	if string(ignore) != "*\n!.gitignore\n" {
+		t.Errorf("managed OpenClaude home .gitignore = %q", string(ignore))
+	}
 	for key, want := range map[string]string{
 		"CLAUDE_CODE_OPENAI_CONTEXT_WINDOWS":   `"qwen3":4096`,
 		"CLAUDE_CODE_OPENAI_MAX_OUTPUT_TOKENS": `"qwen3":1024`,
@@ -255,6 +281,22 @@ func TestPlan_OpenClaudeUsesOpenAICompatibleEndpointAndLimits(t *testing.T) {
 	}
 	if !equalStrings(plan.Args, []string{"--model", "qwen3"}) {
 		t.Errorf("Args = %v, want [--model qwen3]", plan.Args)
+	}
+}
+
+func TestPlan_OpenClaudeWithoutLocalLLMDoesNotIsolateHome(t *testing.T) {
+	chat := chatFromSeededReversing(t)
+	ws := chat.AsWorkspace()
+	agent := Agent{ID: AgentOpenClaude, Binary: "openclaude", WpcTarget: "claude", Available: true}
+	plan, err := Plan(ws, agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Env) != 0 {
+		t.Errorf("plain openclaude launch should not override env; got %v", plan.Env)
+	}
+	if _, err := os.Stat(filepath.Join(ws.Root, ".openclaude-home")); !os.IsNotExist(err) {
+		t.Errorf("plain openclaude launch should not create managed home; stat err = %v", err)
 	}
 }
 

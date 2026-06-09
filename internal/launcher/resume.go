@@ -198,7 +198,7 @@ func extractClaudeSessionID(raw []byte) string {
 // code, so the decision matrix is identical: ≥2 native → open picker,
 // ==1 → --continue, 0 → restore from captured transcript if any.
 func resumeOpenClaude(c Chat) ResumePlan {
-	home := homeDir()
+	home := openClaudeHomeForChat(c)
 	if home == "" {
 		return ResumePlan{Note: "openclaude resume: no home dir resolved"}
 	}

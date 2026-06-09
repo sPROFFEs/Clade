@@ -286,12 +286,18 @@ func Plan(ws Workspace, agent Agent) (LaunchPlan, error) {
 			// OpenAI-compatible base URL to include /v1, unlike Claude's
 			// ANTHROPIC_BASE_URL path above.
 			openAIBaseURL := openAICompatibleBaseURL(o.Endpoint)
+			openClaudeHome, err := ensureManagedOpenClaudeHome(ws)
+			if err != nil {
+				return LaunchPlan{}, fmt.Errorf("openclaude managed home: %w", err)
+			}
 			plan.Env = map[string]string{
 				"CLAUDE_CODE_USE_OPENAI": "1",
+				"HOME":                   openClaudeHome,
 				"OPENAI_API_KEY":         authToken,
 				"OPENAI_BASE_URL":        openAIBaseURL,
 				"OPENAI_API_BASE":        openAIBaseURL,
 				"OPENAI_MODEL":           o.Model,
+				"USERPROFILE":            openClaudeHome,
 			}
 			if raw := openClaudeLimitJSON(o.Model, openAIBaseURL, o.ContextTokens); raw != "" {
 				plan.Env["CLAUDE_CODE_OPENAI_CONTEXT_WINDOWS"] = raw

@@ -113,9 +113,16 @@ func TestOllamaFlow_FullWizardWritesPerChatClaudeSettings(t *testing.T) {
 	if !strings.Contains(string(raw), srv.URL) || !strings.Contains(string(raw), "qwen3") {
 		t.Errorf("chat.json doesn't contain Ollama settings:\n%s", raw)
 	}
-	for _, want := range []string{`"contextTokens": 4096`, `"outputTokens": 1024`} {
-		if !strings.Contains(string(raw), want) {
-			t.Errorf("chat.json missing %q:\n%s", want, raw)
+	// As of the "blank = CLI default" change, the wizard no longer
+	// bakes in 4096/1024 when the user accepts the empty inputs. The
+	// chat.json should therefore NOT contain a contextTokens /
+	// outputTokens field — omitempty + zero value means "no cap, let
+	// the CLI use its own default". A non-zero value would only land
+	// here if the test explicitly typed one in (see other token tests
+	// below that do exactly that).
+	for _, unwanted := range []string{`"contextTokens"`, `"outputTokens"`} {
+		if strings.Contains(string(raw), unwanted) {
+			t.Errorf("chat.json should NOT contain %q after a blank-default wizard run:\n%s", unwanted, raw)
 		}
 	}
 	// And ensure we did NOT pollute with a stray workspace.json.

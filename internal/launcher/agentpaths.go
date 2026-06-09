@@ -60,7 +60,14 @@ type AgentStorePaths struct {
 // returned paths may not exist on disk yet — callers must os.Stat to
 // know.
 func AgentHome(agent AgentID, sandboxDir string) AgentStorePaths {
-	home := homeDir()
+	return agentHome(agent, sandboxDir, "")
+}
+
+func agentHome(agent AgentID, sandboxDir, homeOverride string) AgentStorePaths {
+	home := homeOverride
+	if home == "" {
+		home = homeDir()
+	}
 	if home == "" {
 		return AgentStorePaths{}
 	}

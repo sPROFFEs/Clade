@@ -121,26 +121,35 @@ func newOllamaModel(cfg *launcher.Config, ws launcher.Workspace) ollamaModel {
 		mi.SetValue(ws.Settings.Ollama.Model)
 	}
 
+	// Token-cap inputs start BLANK by default ("no cap; CLI uses its own
+	// default"). Only pre-fill if THIS chat already had a cap saved or
+	// the user set a global per-account default; never reach for a hard-
+	// coded number. See screen_locallm.go's defaultLocalContextTokens
+	// comment for the full rationale.
 	ct := textinput.New()
-	ct.Placeholder = strconv.Itoa(defaultLocalContextTokens)
-	ct.Width = 12
+	ct.Placeholder = "blank = CLI default"
+	ct.Width = 24
 	ct.CharLimit = 8
 	contextDefault := localContextDefault(cfg)
 	if ws.Settings.Ollama.ContextTokens > 0 {
 		contextDefault = ws.Settings.Ollama.ContextTokens
 	}
-	ct.SetValue(strconv.Itoa(contextDefault))
+	if contextDefault > 0 {
+		ct.SetValue(strconv.Itoa(contextDefault))
+	}
 	ct.Blur()
 
 	ot := textinput.New()
-	ot.Placeholder = strconv.Itoa(defaultLocalOutputTokens)
-	ot.Width = 12
+	ot.Placeholder = "blank = CLI default"
+	ot.Width = 24
 	ot.CharLimit = 8
 	outputDefault := localOutputDefault(cfg)
 	if ws.Settings.Ollama.OutputTokens > 0 {
 		outputDefault = ws.Settings.Ollama.OutputTokens
 	}
-	ot.SetValue(strconv.Itoa(outputDefault))
+	if outputDefault > 0 {
+		ot.SetValue(strconv.Itoa(outputDefault))
+	}
 
 	// Wire-API + start step. When the chat has no endpoint of its own
 	// but a global default IS configured, pre-fill the connection fields
@@ -646,9 +655,10 @@ func applyOllama(ws launcher.Workspace, s ollama.Settings, picks applyPicks) []s
 	if picks.openclaude {
 		// OpenClaude is purely chat-level too: Plan() injects
 		// CLAUDE_CODE_USE_OPENAI=1 + OPENAI_BASE_URL/KEY/MODEL +
-		// --model on next launch. No config file to write — the env
-		// switch is openclaude's only routing knob.
-		out = append(out, fmt.Sprintf("✓ openclaude: per-chat CLAUDE_CODE_USE_OPENAI=1 + OPENAI_* env on next launch (caps %d/%d)", s.ContextTokens, s.OutputTokens))
+		// --model on next launch, plus a Clade-managed HOME so
+		// ~/.claude / ~/.openclaude OAuth credentials cannot override
+		// the OpenAI-compatible env block.
+		out = append(out, fmt.Sprintf("✓ openclaude: isolated HOME + OPENAI_* env on next launch (caps %d/%d)", s.ContextTokens, s.OutputTokens))
 	}
 	if picks.codex {
 		// Probe BEFORE writing the profile. codex 0.130+ requires
@@ -850,7 +860,12 @@ func (m ollamaModel) Body() string {
 			b.WriteString(selectionRow(fmt.Sprintf("%s%-16s %s", marker, r.label+":", r.view), isSel) + "\n")
 		}
 		b.WriteString("\n" + descStyle.Render(
-			"Defaults: context 4096, output 1024. For vLLM, output must stay below the server's max model length."))
+			"Blank = let the CLI use its own default (no cap written). "+
+				"Only some agents honour these: codex writes model_context_window; "+
+				"opencode writes limit.context + limit.output; openclaude exports "+
+				"CLAUDE_CODE_OPENAI_CONTEXT_WINDOWS + ..._MAX_OUTPUT_TOKENS. Claude, "+
+				"deepseek-tui, and gemini have no documented cap surface — values "+
+				"set here are silently ignored for those agents."))
 		if m.limitErr != "" {
 			b.WriteString("\n\n" + errorStyle.Render("✗ "+m.limitErr))
 		}
@@ -864,7 +879,7 @@ func (m ollamaModel) Body() string {
 			picked      bool
 		}{
 			{"claude     (per-chat env injection)", "ANTHROPIC_BASE_URL + --model on next launch", m.pickClaude},
-			{"openclaude (per-chat env injection)", "CLAUDE_CODE_USE_OPENAI=1 + OPENAI_BASE_URL/MODEL/KEY on next launch", m.pickOpenClaude},
+			{"openclaude (per-chat env injection)", "isolated HOME + OPENAI_BASE_URL/MODEL/KEY on next launch", m.pickOpenClaude},
 			{"codex      (writes ~/.codex/config.toml)", "creates [profiles.ollama_remote] — launch via -p flag", m.pickCodex},
 			{"opencode   (writes ~/.config/opencode/opencode.json)", "registers ollama_remote provider, sets default model", m.pickOpenCode},
 			{"deepseek   (writes ~/.deepseek/config.toml)", "provider=ollama + [providers.ollama] block + default model", m.pickDeepSeek},

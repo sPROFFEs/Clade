@@ -43,9 +43,30 @@ const (
 	localRowCount
 )
 
+// Token-cap inputs intentionally default to BLANK (= unset = "let the
+// CLI use its own default; do not write a cap into the agent's config").
+// Earlier versions baked in 4096/1024 which silently truncated long-
+// context models (qwen 32k, llama 128k, …) when the user just wanted
+// "use whatever the model supports". Audit notes per agent:
+//
+//   - codex: writes `model_context_window` only when >0 (current
+//     0.40+ codex no longer exposes `model_max_output_tokens`).
+//   - opencode: writes `limit.context` + `limit.output` per-model
+//     only when >0.
+//   - openclaude: emits the `CLAUDE_CODE_OPENAI_CONTEXT_WINDOWS` /
+//     `CLAUDE_CODE_OPENAI_MAX_OUTPUT_TOKENS` env vars only when >0.
+//   - claude (Anthropic Claude Code), deepseek-tui, gemini: no
+//     documented config surface for caps today — caps entered here
+//     would be silently ignored even when the user fills them in.
+//     The Local-LLM tab footer notes that.
+//
+// Keeping the constants at 0 lets every "fallback" caller through
+// localContextDefault / localOutputDefault produce 0, which downstream
+// writers treat as "skip this field". Removing them entirely would
+// ripple too much; setting them to zero keeps the code shape stable.
 const (
-	defaultLocalContextTokens = 4096
-	defaultLocalOutputTokens  = 1024
+	defaultLocalContextTokens = 0
+	defaultLocalOutputTokens  = 0
 )
 
 // wireAPIChoices is the cycle order for the wire-API toggle. "" = auto
@@ -102,16 +123,20 @@ func newLocalLLMModel(cfg *launcher.Config) *localLLMModel {
 	ak.SetValue(cfg.DefaultLocalAPIKey)
 
 	ct := textinput.New()
-	ct.Placeholder = strconv.Itoa(defaultLocalContextTokens)
+	ct.Placeholder = "blank = let CLI decide"
 	ct.CharLimit = 8
-	ct.Width = 12
-	ct.SetValue(strconv.Itoa(localContextDefault(cfg)))
+	ct.Width = 24
+	if v := localContextDefault(cfg); v > 0 {
+		ct.SetValue(strconv.Itoa(v))
+	}
 
 	ot := textinput.New()
-	ot.Placeholder = strconv.Itoa(defaultLocalOutputTokens)
+	ot.Placeholder = "blank = let CLI decide"
 	ot.CharLimit = 8
-	ot.Width = 12
-	ot.SetValue(strconv.Itoa(localOutputDefault(cfg)))
+	ot.Width = 24
+	if v := localOutputDefault(cfg); v > 0 {
+		ot.SetValue(strconv.Itoa(v))
+	}
 
 	return &localLLMModel{
 		cfg:           cfg,
@@ -320,18 +345,20 @@ func (m *localLLMModel) clear() {
 	m.endpoint.SetValue("")
 	m.apiKey.SetValue("")
 	m.wireAPI = ""
-	m.contextTokens.SetValue(strconv.Itoa(defaultLocalContextTokens))
-	m.outputTokens.SetValue(strconv.Itoa(defaultLocalOutputTokens))
+	// Blank token fields → 0 in config → writers skip the field → CLI
+	// uses its own default. Don't bake 4096/1024 back in.
+	m.contextTokens.SetValue("")
+	m.outputTokens.SetValue("")
 	m.cfg.DefaultLocalEndpoint = ""
 	m.cfg.DefaultLocalAPIKey = ""
 	m.cfg.DefaultLocalWireAPI = ""
-	m.cfg.DefaultLocalContextTokens = defaultLocalContextTokens
-	m.cfg.DefaultLocalOutputTokens = defaultLocalOutputTokens
+	m.cfg.DefaultLocalContextTokens = 0
+	m.cfg.DefaultLocalOutputTokens = 0
 	if err := launcher.SaveConfig(m.cfg); err != nil {
 		m.status = errorStyle.Render("✗ clear failed: " + trimErrLine(err.Error()))
 		return
 	}
-	m.status = availableStyle.Render("✓ cleared — new chats start with a blank endpoint")
+	m.status = availableStyle.Render("✓ cleared — new chats start with a blank endpoint and no token caps")
 }
 
 // --- view -------------------------------------------------------------------
@@ -366,6 +393,21 @@ func (m *localLLMModel) Body() string {
 		line := fmt.Sprintf("%s%-18s %s", marker, r.label+":", r.value)
 		b.WriteString(selectionRow(line, sel) + "\n")
 	}
+
+	// Token-cap support per agent, surfaced inline so users don't fill
+	// in numbers expecting them to take effect on agents that ignore
+	// them. Kept terse — full audit lives in screen_locallm.go's
+	// defaultLocalContextTokens comment.
+	b.WriteString("\n" + descStyle.Render(
+		"Token caps are honoured by: codex (model_context_window only), "+
+			"opencode (limit.context + limit.output), openclaude "+
+			"(CLAUDE_CODE_OPENAI_CONTEXT_WINDOWS + ..._MAX_OUTPUT_TOKENS env). "+
+			"When routed locally, openclaude runs with a Clade-managed "+
+			"empty HOME so saved Claude/OpenClaude OAuth credentials do not override "+
+			"the endpoint; plugins/settings from your normal OpenClaude home won't apply. "+
+			"Claude, deepseek-tui, and gemini have no documented cap "+
+			"surface — values entered here are silently ignored for those. "+
+			"Blank fields = let the CLI use its own default (no cap written)."))
 
 	if m.busy {
 		b.WriteString("\n" + hintStyle.Render(m.status))
@@ -409,43 +451,61 @@ func tokenDisplay(view, value string, editing bool) string {
 	return value
 }
 
+// localContextDefault returns the user's saved per-account default
+// context-tokens cap, or 0 when none is set. The 0 case is treated as
+// "no cap; let the CLI decide" by every consumer; we deliberately
+// don't fall back to a hard-coded magic number anymore — that was the
+// 4096/1024 footgun.
 func localContextDefault(cfg *launcher.Config) int {
 	if cfg != nil && cfg.DefaultLocalContextTokens > 0 {
 		return cfg.DefaultLocalContextTokens
 	}
-	return defaultLocalContextTokens
+	return 0
 }
 
 func localOutputDefault(cfg *launcher.Config) int {
 	if cfg != nil && cfg.DefaultLocalOutputTokens > 0 {
 		return cfg.DefaultLocalOutputTokens
 	}
-	return defaultLocalOutputTokens
+	return 0
 }
 
+// parseTokenLimits returns (context, output) parsed from the two user
+// inputs. Blank = 0 = "no cap; let the CLI use its default". The
+// previous "blank falls back to 4096/1024" behaviour silently truncated
+// long-context models for users who didn't realise the inputs were
+// pre-filled; the new shape makes "no cap" the explicit default.
+//
+// The output ≤ context guard is only checked when BOTH are explicitly
+// set — if either is 0 (unset), the constraint doesn't apply because
+// "unset" means "the CLI's own default is in force" for that side.
 func parseTokenLimits(contextRaw, outputRaw string) (int, int, error) {
-	contextTokens, err := parseTokenLimit(contextRaw, defaultLocalContextTokens, "context tokens")
+	contextTokens, err := parseTokenLimit(contextRaw, "context tokens")
 	if err != nil {
 		return 0, 0, err
 	}
-	outputTokens, err := parseTokenLimit(outputRaw, defaultLocalOutputTokens, "output tokens")
+	outputTokens, err := parseTokenLimit(outputRaw, "output tokens")
 	if err != nil {
 		return 0, 0, err
 	}
-	if outputTokens > contextTokens {
+	if contextTokens > 0 && outputTokens > 0 && outputTokens > contextTokens {
 		return 0, 0, fmt.Errorf("output tokens (%d) cannot exceed context tokens (%d)", outputTokens, contextTokens)
 	}
 	return contextTokens, outputTokens, nil
 }
 
-func parseTokenLimit(raw string, fallback int, label string) (int, error) {
+// parseTokenLimit returns 0 for blank input (meaning "no cap; CLI
+// default") and the parsed positive integer otherwise. A non-blank
+// non-positive-integer is rejected so users see a clear error instead
+// of silently getting "unset" semantics from typos like "abc".
+func parseTokenLimit(raw string, label string) (int, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return fallback, nil
+		return 0, nil
 	}
 	n, err := strconv.Atoi(raw)
 	if err != nil || n <= 0 {
-		return 0, fmt.Errorf("%s must be a positive integer", label)
+		return 0, fmt.Errorf("%s must be a positive integer (or blank for the CLI's default)", label)
 	}
 	return n, nil
 }

@@ -42,7 +42,11 @@ func CapturePostExit(ws Workspace, agent Agent, sessionStart, sessionEnd time.Ti
 	if sessionEnd.IsZero() {
 		sessionEnd = time.Now().UTC()
 	}
-	cap, err := CaptureTranscript(agent, ws.SandboxDir, sessionStart, dir)
+	homeOverride := ""
+	if agent.ID == AgentOpenClaude && openClaudeLocalLLMEnabled(ws.Settings) {
+		homeOverride = managedOpenClaudeHome(ws)
+	}
+	cap, err := captureTranscript(agent, ws.SandboxDir, sessionStart, dir, homeOverride)
 	if err != nil {
 		return SessionSummary{}, err
 	}
@@ -52,7 +56,7 @@ func CapturePostExit(ws Workspace, agent Agent, sessionStart, sessionEnd time.Ti
 	// (claude project dirs, opencode message trees) can be tens of
 	// MB / hundreds of files on slow disks. Best-effort: failures
 	// land in LastMirrorResult.Note, never block the UI.
-	StartMirrorOutAsync(agent, ws.SandboxDir, dir)
+	StartMirrorOutAsyncWithHome(agent, ws.SandboxDir, dir, homeOverride)
 	return WriteSummary(cap, dir, sessionStart, sessionEnd)
 }
 
