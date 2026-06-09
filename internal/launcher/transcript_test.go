@@ -56,14 +56,14 @@ func TestCaptureTranscript_EmptyStoreReturnsNote(t *testing.T) {
 	}
 }
 
-func TestCaptureTranscript_OpenClaudeManagedHomeOverride(t *testing.T) {
+func TestCaptureTranscript_OpenClaudeHomeOverride(t *testing.T) {
 	tmp := t.TempDir()
 	sandbox := filepath.Join(tmp, "sandbox")
 	if err := os.MkdirAll(sandbox, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	managedHome := filepath.Join(tmp, ".openclaude-home")
-	store := filepath.Join(managedHome, ".openclaude", "projects", openclaudeProjectSlug(sandbox))
+	customHome := filepath.Join(tmp, "custom-openclaude-home")
+	store := filepath.Join(customHome, ".openclaude", "projects", openclaudeProjectSlug(sandbox))
 	if err := os.MkdirAll(store, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -78,12 +78,12 @@ func TestCaptureTranscript_OpenClaudeManagedHomeOverride(t *testing.T) {
 	}
 
 	dest := filepath.Join(tmp, "session")
-	cap, err := captureTranscript(Agent{ID: AgentOpenClaude}, sandbox, now.Add(-time.Minute), dest, managedHome)
+	cap, err := captureTranscript(Agent{ID: AgentOpenClaude}, sandbox, now.Add(-time.Minute), dest, customHome)
 	if err != nil {
 		t.Fatalf("captureTranscript err: %v", err)
 	}
 	if cap.SourcePath != src {
-		t.Fatalf("SourcePath = %q, want %q (managed home must be searched)", cap.SourcePath, src)
+		t.Fatalf("SourcePath = %q, want %q (home override must be searched)", cap.SourcePath, src)
 	}
 	if cap.DestPath != filepath.Join(dest, "transcript.jsonl") {
 		t.Errorf("DestPath = %q", cap.DestPath)

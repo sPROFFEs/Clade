@@ -1,16 +1,14 @@
 package launcher
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 )
 
-const managedOpenClaudeHomeName = ".openclaude-home"
-
-func managedOpenClaudeHome(ws Workspace) string {
-	return filepath.Join(ws.Root, managedOpenClaudeHomeName)
-}
+const openClaudeProfileFileName = ".openclaude-profile.json"
 
 func openClaudeLocalLLMEnabled(settings WorkspaceSettings) bool {
 	o := settings.Ollama
@@ -18,36 +16,81 @@ func openClaudeLocalLLMEnabled(settings WorkspaceSettings) bool {
 }
 
 func openClaudeHomeForChat(c Chat) string {
-	if openClaudeLocalLLMEnabled(c.Settings) {
-		return filepath.Join(c.Root, managedOpenClaudeHomeName)
-	}
 	return homeDir()
 }
 
 func openClaudeHomeForWorkspace(ws Workspace) string {
-	if openClaudeLocalLLMEnabled(ws.Settings) {
-		return managedOpenClaudeHome(ws)
-	}
 	return homeDir()
 }
 
-func ensureManagedOpenClaudeHome(ws Workspace) (string, error) {
-	home := managedOpenClaudeHome(ws)
-	if err := os.MkdirAll(home, 0o700); err != nil {
-		return "", fmt.Errorf("mkdir %s: %w", home, err)
+type openClaudeProfile struct {
+	Profile   string            `json:"profile"`
+	Env       map[string]string `json:"env"`
+	CreatedAt string            `json:"createdAt"`
+}
+
+func openClaudeProfilePath(home string) string {
+	return filepath.Join(home, ".openclaude", openClaudeProfileFileName)
+}
+
+func openClaudeProfileBackupPath(home string) string {
+	return openClaudeProfilePath(home) + ".bak"
+}
+
+func writeOpenClaudeLocalProfile(settings OllamaSettings, authToken string) error {
+	home := homeDir()
+	if home == "" {
+		return fmt.Errorf("no home dir resolved")
 	}
-	if err := writeFileAtomic(filepath.Join(home, ".gitignore"), []byte("*\n!.gitignore\n"), 0o644); err != nil {
-		return "", fmt.Errorf("write managed openclaude home .gitignore: %w", err)
+	path := openClaudeProfilePath(home)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("mkdir %s: %w", filepath.Dir(path), err)
 	}
-	for _, dir := range []string{".openclaude", ".claude"} {
-		path := filepath.Join(home, dir)
-		if err := os.MkdirAll(path, 0o700); err != nil {
-			return "", fmt.Errorf("mkdir %s: %w", path, err)
+	env := map[string]string{
+		"OPENAI_BASE_URL": openAICompatibleBaseURL(settings.Endpoint),
+		"OPENAI_MODEL":    settings.Model,
+		"OPENAI_API_KEY":  authToken,
+	}
+	if raw := openClaudeLimitJSON(settings.Model, openAICompatibleBaseURL(settings.Endpoint), settings.ContextTokens); raw != "" {
+		env["CLAUDE_CODE_OPENAI_CONTEXT_WINDOWS"] = raw
+	}
+	if raw := openClaudeLimitJSON(settings.Model, openAICompatibleBaseURL(settings.Endpoint), settings.OutputTokens); raw != "" {
+		env["CLAUDE_CODE_OPENAI_MAX_OUTPUT_TOKENS"] = raw
+	}
+	profile := openClaudeProfile{
+		Profile:   "openai",
+		Env:       env,
+		CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	raw, err := json.MarshalIndent(profile, "", "  ")
+	if err != nil {
+		return err
+	}
+	raw = append(raw, '\n')
+	if err := writeFileAtomic(path, raw, 0o600); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
+}
+
+func backupOpenClaudeLocalProfileIfPresent() error {
+	home := homeDir()
+	if home == "" {
+		return nil
+	}
+	path := openClaudeProfilePath(home)
+	if _, err := os.Stat(path); err != nil {
+		if os.IsNotExist(err) {
+			return nil
 		}
-		cred := filepath.Join(path, ".credentials.json")
-		if err := writeFileAtomic(cred, []byte("{}"), 0o600); err != nil {
-			return "", fmt.Errorf("write %s: %w", cred, err)
-		}
+		return fmt.Errorf("stat %s: %w", path, err)
 	}
-	return home, nil
+	bak := openClaudeProfileBackupPath(home)
+	if err := os.Remove(bak); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove stale %s: %w", bak, err)
+	}
+	if err := os.Rename(path, bak); err != nil {
+		return fmt.Errorf("rename %s to %s: %w", path, bak, err)
+	}
+	return nil
 }

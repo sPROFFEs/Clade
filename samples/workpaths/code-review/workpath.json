@@ -1,5 +1,8 @@
 {
   "description": "Review a pull request: read the diff, flag risks, suggest blocking vs nit-level comments",
+  "imports": [
+    "_common/scrapegraph"
+  ],
   "version": "1",
   "license": "MIT"
 }

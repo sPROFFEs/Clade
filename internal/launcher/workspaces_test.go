@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/sPROFFEs/Clade/pkg/workpath"
 )
 
 // samplesDir returns the absolute path to the repo's bundled samples,
@@ -51,6 +53,13 @@ func TestSeedSamples_SeedsIntoTemplatesDir(t *testing.T) {
 		if tpl.Description == "" {
 			t.Errorf("template %s has empty description", tpl.Name)
 		}
+	}
+	imports, err := readTemplateImports(root, "code-review")
+	if err != nil {
+		t.Fatalf("read code-review imports: %v", err)
+	}
+	if !containsString(imports, "_common/scrapegraph") {
+		t.Errorf("code-review imports = %v, want _common/scrapegraph example bundle active", imports)
 	}
 
 	bundles, err := DiscoverBundles(root)
@@ -193,6 +202,19 @@ func equalStrings(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func readTemplateImports(root, name string) ([]string, error) {
+	return workpath.ReadImports(filepath.Join(root, TemplatesDir, name, "workpath", "workpath.json"))
+}
+
+func containsString(xs []string, want string) bool {
+	for _, x := range xs {
+		if x == want {
+			return true
+		}
+	}
+	return false
 }
 
 func must(t *testing.T, err error) {

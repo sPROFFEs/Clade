@@ -34,6 +34,9 @@ func TestE2E_PlanForRealInstalledAgents(t *testing.T) {
 	ws := &wsLocal
 
 	agents := DetectAgents(context.Background())
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("USERPROFILE", tmpHome)
 	anyAvailable := false
 	for _, a := range agents {
 		if !a.Available {

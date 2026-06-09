@@ -43,9 +43,6 @@ func CapturePostExit(ws Workspace, agent Agent, sessionStart, sessionEnd time.Ti
 		sessionEnd = time.Now().UTC()
 	}
 	homeOverride := ""
-	if agent.ID == AgentOpenClaude && openClaudeLocalLLMEnabled(ws.Settings) {
-		homeOverride = managedOpenClaudeHome(ws)
-	}
 	cap, err := captureTranscript(agent, ws.SandboxDir, sessionStart, dir, homeOverride)
 	if err != nil {
 		return SessionSummary{}, err

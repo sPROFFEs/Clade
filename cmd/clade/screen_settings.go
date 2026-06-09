@@ -49,7 +49,7 @@ const (
 	settingsItemAgent
 	settingsItemEndpoint // local OpenAI-compat / Ollama endpoint
 	settingsItemSkills
-	settingsItemBundles // _common/<bundle> imports toggled on this workpath
+	settingsItemBundles // tool/capability _common/<bundle> imports toggled on this workpath
 	settingsItemCount
 )
 
@@ -527,7 +527,7 @@ func (m settingsModel) renderList() string {
 		{"Agent", agentLabel(m.currentAgent), "Press Enter to open the per-chat agent picker. Switching agents writes through to chat.json immediately."},
 		{"Local endpoint", endpointLabel(m.ws.Settings.Ollama), "Route this chat through an OpenAI-compatible local endpoint (Ollama, GPUStack, vLLM, …) instead of the agent's vendor API."},
 		{"Online skills", fmt.Sprintf("%d", len(m.skills)), "Git URLs fetched into the sandbox's .claude/skills/ on launch."},
-		{"Bundles", bundlesValue(m), "Toggle shared _common/<bundle> imports for this workpath. Each enabled bundle's wrappers + knowledge + playbook fragment merge into the sandbox at compile time. Press Enter to manage."},
+		{"Tool bundles", bundlesValue(m), "Select which installed tools/capability bundles are active for this chat or template. Enabled bundles inject wrappers, knowledge, and playbook/rules instructions so the model is told the tools exist and when to use them."},
 	}
 	for i, r := range rows {
 		isSel := i == m.cursor
@@ -743,19 +743,19 @@ func (m settingsModel) renderBundlesEditor() string {
 	}
 	if len(m.bundles) == 0 {
 		b.WriteString(hintStyle.Render(
-			"No bundles registered. Drop a directory under " +
-				"templates/_common/<name>/ with a playbook-fragment.md to ship one."))
+			"No tool bundles registered. Drop a directory under " +
+				"templates/_common/<name>/ with a playbook-fragment.md to activate one."))
 		if m.bundlesErr != "" {
 			b.WriteString("\n\n" + errorStyle.Render("✗ "+m.bundlesErr))
 		}
 		return b.String()
 	}
 	b.WriteString(hintStyle.Render(
-		"Toggle shared capability bundles for this workpath. Enabled bundles' "+
-			"tools, knowledge, hooks, and playbook/rules fragments merge into the "+
-			"sandbox at compile time so the model is told the capability exists. "+
-			"Tool availability is shown — install missing "+
-			"ones from the Tools tab (Ctrl-4).") + "\n\n")
+		"Select tool bundles to activate for this chat/template. Enabled bundles "+
+			"merge wrappers, knowledge, hooks, and playbook/rules fragments into the "+
+			"sandbox at compile time, explicitly telling the model the tool exists "+
+			"and when to use it. Missing tools can be installed from the Tools tab "+
+			"(Ctrl-4).") + "\n\n")
 
 	for i, bun := range m.bundles {
 		isSel := i == m.bundleCursor
@@ -792,7 +792,7 @@ func (m settingsModel) renderBundlesEditor() string {
 	return b.String()
 }
 
-// bundlesValue is the right-column text for the Bundles row in the
+// bundlesValue is the right-column text for the Tool bundles row in the
 // main list. Counts how many bundles this workpath imports, falling
 // back to "(none)" when zero. Reads from disk (cheap) so it stays
 // fresh after the sub-editor mutates the manifest.

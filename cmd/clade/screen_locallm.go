@@ -402,9 +402,9 @@ func (m *localLLMModel) Body() string {
 		"Token caps are honoured by: codex (model_context_window only), "+
 			"opencode (limit.context + limit.output), openclaude "+
 			"(CLAUDE_CODE_OPENAI_CONTEXT_WINDOWS + ..._MAX_OUTPUT_TOKENS env). "+
-			"When routed locally, openclaude runs with a Clade-managed "+
-			"empty HOME so saved Claude/OpenClaude OAuth credentials do not override "+
-			"the endpoint; plugins/settings from your normal OpenClaude home won't apply. "+
+			"When routed locally, openclaude gets a native "+
+			"~/.openclaude/.openclaude-profile.json openai profile. "+
+			"Normal OpenClaude launches rename that profile to .bak so cloud routing is restored. "+
 			"Claude, deepseek-tui, and gemini have no documented cap "+
 			"surface — values entered here are silently ignored for those. "+
 			"Blank fields = let the CLI use its own default (no cap written)."))

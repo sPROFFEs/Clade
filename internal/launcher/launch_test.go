@@ -1,6 +1,7 @@
 package launcher
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -214,6 +215,9 @@ func TestPlan_AppendsProfileArgForCodexWhenOllamaConfigured(t *testing.T) {
 }
 
 func TestPlan_OpenClaudeUsesOpenAICompatibleEndpointAndLimits(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("USERPROFILE", tmpHome)
 	chat := chatFromSeededReversing(t)
 	chat.Settings = WorkspaceSettings{
 		Ollama: OllamaSettings{
@@ -244,31 +248,31 @@ func TestPlan_OpenClaudeUsesOpenAICompatibleEndpointAndLimits(t *testing.T) {
 	if plan.Env["OPENAI_MODEL"] != "qwen3" {
 		t.Errorf("OPENAI_MODEL = %q", plan.Env["OPENAI_MODEL"])
 	}
-	managedHome := filepath.Join(ws.Root, ".openclaude-home")
-	if plan.Env["HOME"] != managedHome {
-		t.Errorf("HOME = %q, want %q", plan.Env["HOME"], managedHome)
+	if _, ok := plan.Env["HOME"]; ok {
+		t.Errorf("HOME override should not be set for openclaude local profile routing; Env=%v", plan.Env)
 	}
-	if plan.Env["USERPROFILE"] != managedHome {
-		t.Errorf("USERPROFILE = %q, want %q", plan.Env["USERPROFILE"], managedHome)
+	if _, ok := plan.Env["USERPROFILE"]; ok {
+		t.Errorf("USERPROFILE override should not be set for openclaude local profile routing; Env=%v", plan.Env)
 	}
-	for _, rel := range []string{
-		filepath.Join(".openclaude", ".credentials.json"),
-		filepath.Join(".claude", ".credentials.json"),
-	} {
-		raw, err := os.ReadFile(filepath.Join(managedHome, rel))
-		if err != nil {
-			t.Fatalf("read managed OpenClaude credential shim %s: %v", rel, err)
-		}
-		if string(raw) != "{}" {
-			t.Errorf("%s = %q, want {}", rel, string(raw))
-		}
-	}
-	ignore, err := os.ReadFile(filepath.Join(managedHome, ".gitignore"))
+	raw, err := os.ReadFile(openClaudeProfilePath(tmpHome))
 	if err != nil {
-		t.Fatalf("read managed OpenClaude home .gitignore: %v", err)
+		t.Fatalf("read OpenClaude local profile: %v", err)
 	}
-	if string(ignore) != "*\n!.gitignore\n" {
-		t.Errorf("managed OpenClaude home .gitignore = %q", string(ignore))
+	var profile openClaudeProfile
+	if err := json.Unmarshal(raw, &profile); err != nil {
+		t.Fatalf("parse OpenClaude profile: %v\n%s", err, raw)
+	}
+	if profile.Profile != "openai" {
+		t.Errorf("profile = %q, want openai", profile.Profile)
+	}
+	if profile.Env["OPENAI_BASE_URL"] != "http://10.0.0.1:8000/v1" {
+		t.Errorf("profile OPENAI_BASE_URL = %q", profile.Env["OPENAI_BASE_URL"])
+	}
+	if profile.Env["OPENAI_MODEL"] != "qwen3" {
+		t.Errorf("profile OPENAI_MODEL = %q", profile.Env["OPENAI_MODEL"])
+	}
+	if profile.Env["OPENAI_API_KEY"] != "ollama" {
+		t.Errorf("profile OPENAI_API_KEY = %q", profile.Env["OPENAI_API_KEY"])
 	}
 	for key, want := range map[string]string{
 		"CLAUDE_CODE_OPENAI_CONTEXT_WINDOWS":   `"qwen3":4096`,
@@ -278,6 +282,10 @@ func TestPlan_OpenClaudeUsesOpenAICompatibleEndpointAndLimits(t *testing.T) {
 			!strings.Contains(plan.Env[key], `"10.0.0.1:8000:qwen3"`) {
 			t.Errorf("%s = %q", key, plan.Env[key])
 		}
+		if !strings.Contains(profile.Env[key], want) ||
+			!strings.Contains(profile.Env[key], `"10.0.0.1:8000:qwen3"`) {
+			t.Errorf("profile %s = %q", key, profile.Env[key])
+		}
 	}
 	if !equalStrings(plan.Args, []string{"--model", "qwen3"}) {
 		t.Errorf("Args = %v, want [--model qwen3]", plan.Args)
@@ -285,6 +293,17 @@ func TestPlan_OpenClaudeUsesOpenAICompatibleEndpointAndLimits(t *testing.T) {
 }
 
 func TestPlan_OpenClaudeWithoutLocalLLMDoesNotIsolateHome(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("USERPROFILE", tmpHome)
+	profilePath := openClaudeProfilePath(tmpHome)
+	if err := os.MkdirAll(filepath.Dir(profilePath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	oldProfile := []byte(`{"profile":"openai"}` + "\n")
+	if err := os.WriteFile(profilePath, oldProfile, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	chat := chatFromSeededReversing(t)
 	ws := chat.AsWorkspace()
 	agent := Agent{ID: AgentOpenClaude, Binary: "openclaude", WpcTarget: "claude", Available: true}
@@ -297,6 +316,16 @@ func TestPlan_OpenClaudeWithoutLocalLLMDoesNotIsolateHome(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(ws.Root, ".openclaude-home")); !os.IsNotExist(err) {
 		t.Errorf("plain openclaude launch should not create managed home; stat err = %v", err)
+	}
+	if _, err := os.Stat(profilePath); !os.IsNotExist(err) {
+		t.Errorf("plain openclaude launch should rename local profile away; stat err = %v", err)
+	}
+	raw, err := os.ReadFile(openClaudeProfileBackupPath(tmpHome))
+	if err != nil {
+		t.Fatalf("read profile backup: %v", err)
+	}
+	if string(raw) != string(oldProfile) {
+		t.Errorf("backup profile = %q, want %q", string(raw), string(oldProfile))
 	}
 }
 

@@ -282,22 +282,20 @@ func Plan(ws Workspace, agent Agent) (LaunchPlan, error) {
 		if ollamaConfigured && o.HasAgent(AgentOpenClaude) {
 			// OpenClaude exposes the OpenAI-compatible code path via
 			// CLAUDE_CODE_USE_OPENAI=1. Endpoint + key + model travel
-			// through the OPENAI_* env block. OpenClaude expects the
-			// OpenAI-compatible base URL to include /v1, unlike Claude's
-			// ANTHROPIC_BASE_URL path above.
+			// through both ~/.openclaude/.openclaude-profile.json and the
+			// OPENAI_* env block. OpenClaude expects the OpenAI-compatible
+			// base URL to include /v1, unlike Claude's ANTHROPIC_BASE_URL
+			// path above.
 			openAIBaseURL := openAICompatibleBaseURL(o.Endpoint)
-			openClaudeHome, err := ensureManagedOpenClaudeHome(ws)
-			if err != nil {
-				return LaunchPlan{}, fmt.Errorf("openclaude managed home: %w", err)
+			if err := writeOpenClaudeLocalProfile(o, authToken); err != nil {
+				return LaunchPlan{}, fmt.Errorf("openclaude local profile: %w", err)
 			}
 			plan.Env = map[string]string{
 				"CLAUDE_CODE_USE_OPENAI": "1",
-				"HOME":                   openClaudeHome,
 				"OPENAI_API_KEY":         authToken,
 				"OPENAI_BASE_URL":        openAIBaseURL,
 				"OPENAI_API_BASE":        openAIBaseURL,
 				"OPENAI_MODEL":           o.Model,
-				"USERPROFILE":            openClaudeHome,
 			}
 			if raw := openClaudeLimitJSON(o.Model, openAIBaseURL, o.ContextTokens); raw != "" {
 				plan.Env["CLAUDE_CODE_OPENAI_CONTEXT_WINDOWS"] = raw
@@ -309,6 +307,10 @@ func Plan(ws Workspace, agent Agent) (LaunchPlan, error) {
 			// so we pass it for parity with claude in case env-only
 			// model selection loses to a default elsewhere in the chain.
 			plan.Args = []string{"--model", o.Model}
+		} else {
+			if err := backupOpenClaudeLocalProfileIfPresent(); err != nil {
+				return LaunchPlan{}, fmt.Errorf("openclaude local profile backup: %w", err)
+			}
 		}
 	case AgentCodex:
 		if ollamaConfigured && o.HasAgent(AgentCodex) {

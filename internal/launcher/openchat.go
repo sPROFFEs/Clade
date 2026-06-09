@@ -96,9 +96,6 @@ func OpenChatWithOptions(c Chat, opts OpenChatOptions) (LaunchPlan, Agent, error
 		// joins with the per-agent subdir internally).
 		if sliceRoot := LatestSliceDir(c.SessionsDir, picked.ID); sliceRoot != "" {
 			homeOverride := ""
-			if picked.ID == AgentOpenClaude && openClaudeLocalLLMEnabled(c.Settings) {
-				homeOverride = openClaudeHomeForChat(c)
-			}
 			LastMirrorInResult = MirrorInSliceWithHome(picked, c.SandboxDir, sliceRoot, true, homeOverride)
 		}
 	}
