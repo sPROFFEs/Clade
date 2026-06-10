@@ -46,14 +46,16 @@ const (
 // --- navigator sections --------------------------------------------------
 
 const (
-	navSectionChats     = "chats"
-	navSectionTemplates = "templates"
-	navSectionAgents    = "agents"
-	navSectionTools     = "tools"
-	navSectionBackup    = "backup"
-	navSectionLocalLLM  = "localllm"
-	navSectionRecipes   = "recipes"
-	navSectionHelp      = "help"
+	navSectionChats      = "chats"
+	navSectionTemplates  = "templates"
+	navSectionAgents     = "agents"
+	navSectionTools      = "tools"
+	navSectionBackup     = "backup"
+	navSectionLocalLLM   = "localllm"
+	navSectionRecipes    = "recipes"
+	navSectionMCP        = "mcp"
+	navSectionAutomation = "automation"
+	navSectionHelp       = "help"
 )
 
 type navEntry struct {
@@ -65,24 +67,24 @@ type navEntry struct {
 
 var navEntries = []navEntry{
 	{
-		id:    navSectionChats,
-		label: "Chats",
+		id:     navSectionChats,
+		label:  "Chats",
 		hotkey: "1",
 		makePane: func(cfg *launcher.Config) Pane {
 			return newChatListModel(cfg)
 		},
 	},
 	{
-		id:    navSectionTemplates,
-		label: "Templates",
+		id:     navSectionTemplates,
+		label:  "Templates",
 		hotkey: "2",
 		makePane: func(cfg *launcher.Config) Pane {
 			return newTemplateListModel(cfg)
 		},
 	},
 	{
-		id:    navSectionAgents,
-		label: "Agents",
+		id:     navSectionAgents,
+		label:  "Agents",
 		hotkey: "3",
 		makePane: func(cfg *launcher.Config) Pane {
 			// Agents pane here is the "browse + install" view —
@@ -136,9 +138,25 @@ var navEntries = []navEntry{
 		},
 	},
 	{
+		id:     navSectionMCP,
+		label:  "MCP",
+		hotkey: "7",
+		makePane: func(cfg *launcher.Config) Pane {
+			return newMCPModel(cfg)
+		},
+	},
+	{
+		id:     navSectionAutomation,
+		label:  "Automation",
+		hotkey: "9",
+		makePane: func(cfg *launcher.Config) Pane {
+			return newAutomationModel(cfg)
+		},
+	},
+	{
 		id:     navSectionHelp,
 		label:  "Help",
-		hotkey: "7",
+		hotkey: "8",
 		makePane: func(cfg *launcher.Config) Pane {
 			return newHelpPane(cfg)
 		},
@@ -248,7 +266,7 @@ func (m *layoutModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.toggleHelp()
 				return m, nil
 			}
-		case "ctrl+1", "ctrl+2", "ctrl+3", "ctrl+4", "ctrl+5", "ctrl+6", "ctrl+7":
+		case "ctrl+1", "ctrl+2", "ctrl+3", "ctrl+4", "ctrl+5", "ctrl+6", "ctrl+7", "ctrl+8":
 			// Direct nav-section jumps.
 			digit := int(msg.String()[len(msg.String())-1] - '0')
 			if digit >= 1 && digit <= len(navEntries) {
@@ -367,7 +385,7 @@ func (m *layoutModel) View() string {
 
 // renderTopBar is the persistent header: app name + workspaces root.
 func (m *layoutModel) renderTopBar(w int) string {
-	app := titleStyle.Render("λ clade")
+	app := titleStyle.Render("λ praimate")
 	sepStr := lipgloss.NewStyle().Foreground(t.Border).Render(" │ ")
 	root := lipglossDim(m.cfg.WorkspacesRoot)
 	hint := lipgloss.NewStyle().Foreground(t.Muted).Render("ctrl-p cmd  F1 help  ctrl-c quit")
@@ -618,7 +636,7 @@ func (m *layoutModel) renderHelpOverlay() string {
 		{":", "palette shortcut (on list-only screens — see note)"},
 		{"?", "help shortcut (on list-only screens — see note)"},
 		{"ctrl-w", "close the active chat tab"},
-		{"ctrl-c", "quit clade"},
+		{"ctrl-c", "quit praimate"},
 		{"", ""},
 		{"in nav:", ""},
 		{"↑ ↓ / j k", "move cursor"},
@@ -628,7 +646,7 @@ func (m *layoutModel) renderHelpOverlay() string {
 		{"↑ ↓ enter", "pane-specific (see help bar at bottom)"},
 	}
 	var b strings.Builder
-	b.WriteString(titleStyle.Render("clade · keybindings") + "\n\n")
+	b.WriteString(titleStyle.Render("praimate · keybindings") + "\n\n")
 	for _, r := range rows {
 		if r[0] == "" && r[1] == "" {
 			b.WriteString("\n")

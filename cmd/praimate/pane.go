@@ -71,5 +71,6 @@ var (
 	_ Pane = helpPaneModel{}
 	_ Pane = searchModel{}
 	_ Pane = recipesModel{}
+	_ Pane = mcpModel{}
+	_ Pane = automationModel{}
 )
-

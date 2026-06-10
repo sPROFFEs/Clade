@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Clade installer for Linux + macOS.
+# PrAImate installer for Linux + macOS.
 #
 # One-liner:
-#   curl -fsSL https://raw.githubusercontent.com/sPROFFEs/Clade/main/scripts/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/sPROFFEs/PrAImate/main/scripts/install.sh | bash
 #
 # Or with options (after `-s --` they go to the script, not bash):
 #   curl -fsSL https://… | bash -s -- --source      # build from source
@@ -27,8 +27,8 @@
 
 set -euo pipefail
 
-REPO="sPROFFEs/Clade"
-RAW_REPO_URL="https://github.com/sPROFFEs/Clade"
+REPO="sPROFFEs/PrAImate"
+RAW_REPO_URL="https://github.com/sPROFFEs/PrAImate"
 SOURCE_BRANCH="main"
 # Release tag to pull assets from. When unset we resolve "latest" via
 # the GitHub API at download time so the installer keeps working as
@@ -128,7 +128,7 @@ find_local_bins() {
   local cand
   for cand in "$PWD" "$HERE" "$HERE/.." "$HERE/../dist/$TRIPLET"; do
     [[ -n "$cand" ]] || continue
-    if [[ -x "$cand/clade" && -x "$cand/wpc" ]]; then
+    if [[ -x "$cand/praimate" && -x "$cand/wpc" ]]; then
       printf '%s' "$cand"
       return 0
     fi
@@ -146,7 +146,7 @@ if [[ -z "$MODE" ]]; then
     c_dim "(found local binaries in $LOCAL_BINS — skipping download/build prompt)"
   else
     cat <<EOF
-How do you want to install Clade?
+How do you want to install PrAImate?
 
   1. Download a prebuilt release  ${YES:+(default in --yes mode)}
   2. Build from source (needs Go; will offer to install Go if missing)
@@ -232,10 +232,10 @@ resolve_latest_tag() {
   # production. `.*` on both sides lets sed find "tag_name" anywhere on
   # the line; the non-greedy [^"]* keeps the capture tight.
   if [[ "$dl" == "curl" ]]; then
-    tag="$(curl -fsSL -H 'User-Agent: clade-installer' "$api" 2>/dev/null \
+    tag="$(curl -fsSL -H 'User-Agent: praimate-installer' "$api" 2>/dev/null \
       | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
   else
-    tag="$(wget -q -O - --header='User-Agent: clade-installer' "$api" 2>/dev/null \
+    tag="$(wget -q -O - --header='User-Agent: praimate-installer' "$api" 2>/dev/null \
       | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
   fi
   if [[ -z "$tag" ]]; then
@@ -251,7 +251,7 @@ install_from_release() {
   if [[ -z "$RELEASE_TAG" ]]; then
     RELEASE_TAG="$(resolve_latest_tag)"
   fi
-  local fname="clade-${TRIPLET}.tar.gz"
+  local fname="praimate-${TRIPLET}.tar.gz"
   local url="https://github.com/$REPO/releases/download/${RELEASE_TAG}/${fname}"
   c_dim "  tag:     $RELEASE_TAG"
   c_dim "  asset:   $fname"
@@ -273,16 +273,16 @@ install_from_release() {
   [[ -d "$extracted" ]] || { c_red "unexpected archive layout under $tmp"; exit 1; }
 
   step "Installing to $DEST"
-  $SUDO install -m 0755 "$extracted/clade" "$DEST/clade"
+  $SUDO install -m 0755 "$extracted/praimate" "$DEST/praimate"
   $SUDO install -m 0755 "$extracted/wpc"   "$DEST/wpc"
   # Ship the bundled samples next to the binary at the XDG-style path
   # the launcher already probes (see internal/launcher SampleCandidates:
-  # "<execDir>/../share/clade/samples/workpaths"). Without this, the
+  # "<execDir>/../share/praimate/samples/workpaths"). Without this, the
   # first-run "seed example templates" step finds nothing and the user
-  # ends up with no workspaces and no clade-workspaces dir created.
+  # ends up with no workspaces and no praimate-workspaces dir created.
   if [[ -d "$extracted/samples" ]]; then
     local samples_dest
-    samples_dest="$(dirname "$DEST")/share/clade/samples"
+    samples_dest="$(dirname "$DEST")/share/praimate/samples"
     $SUDO mkdir -p "$samples_dest"
     # cp -R preserves the workpaths/ subdir structure the launcher expects.
     # Use --no-preserve=ownership when running under sudo so the files end
@@ -290,7 +290,7 @@ install_from_release() {
     $SUDO cp -R "$extracted/samples/." "$samples_dest/"
     c_dim "  samples → $samples_dest"
   fi
-  c_grn "  ✓ clade + wpc installed"
+  c_grn "  ✓ praimate + wpc installed"
 }
 
 # ---------- source path: clone + go build ----------
@@ -347,16 +347,16 @@ install_from_source() {
   # See install_from_release for why this uses double quotes.
   trap "rm -rf '$tmp'" EXIT
   git clone --depth 1 --branch "$SOURCE_BRANCH" \
-    "${RAW_REPO_URL}.git" "$tmp/Clade" \
+    "${RAW_REPO_URL}.git" "$tmp/PrAImate" \
     || { c_red "git clone failed"; exit 1; }
 
   step "Building (this can take ~30s on first run while Go fetches deps)"
   (
-    cd "$tmp/Clade"
+    cd "$tmp/PrAImate"
     GOOS="$(uname -s | tr '[:upper:]' '[:lower:]')" \
     GOARCH="$(case $(uname -m) in x86_64|amd64) printf amd64;; aarch64|arm64) printf arm64;; esac)" \
     CGO_ENABLED=0 \
-    go build -trimpath -ldflags '-s -w' -o ./clade ./cmd/clade
+    go build -trimpath -ldflags '-s -w' -o ./praimate ./cmd/praimate
     GOOS="$(uname -s | tr '[:upper:]' '[:lower:]')" \
     GOARCH="$(case $(uname -m) in x86_64|amd64) printf amd64;; aarch64|arm64) printf arm64;; esac)" \
     CGO_ENABLED=0 \
@@ -364,17 +364,17 @@ install_from_source() {
   )
 
   step "Installing to $DEST"
-  $SUDO install -m 0755 "$tmp/Clade/clade" "$DEST/clade"
-  $SUDO install -m 0755 "$tmp/Clade/wpc"   "$DEST/wpc"
-  c_grn "  ✓ clade + wpc installed"
+  $SUDO install -m 0755 "$tmp/PrAImate/praimate" "$DEST/praimate"
+  $SUDO install -m 0755 "$tmp/PrAImate/wpc"   "$DEST/wpc"
+  c_grn "  ✓ praimate + wpc installed"
 }
 
 # ---------- local path: bins already next to us ----------
 install_local() {
   step "Installing to $DEST"
-  $SUDO install -m 0755 "$LOCAL_BINS/clade" "$DEST/clade"
+  $SUDO install -m 0755 "$LOCAL_BINS/praimate" "$DEST/praimate"
   $SUDO install -m 0755 "$LOCAL_BINS/wpc"   "$DEST/wpc"
-  c_grn "  ✓ clade + wpc installed"
+  c_grn "  ✓ praimate + wpc installed"
 }
 
 # ---------- dispatch ----------
@@ -406,5 +406,5 @@ EOF
 esac
 
 step "Done"
-printf 'Try it:    %s -version\n' "$DEST/clade"
-printf '(after PATH update, just `clade -version` from any new shell)\n'
+printf 'Try it:    %s -version\n' "$DEST/praimate"
+printf '(after PATH update, just `praimate -version` from any new shell)\n'

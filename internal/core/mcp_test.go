@@ -2,7 +2,10 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -156,5 +159,140 @@ func TestConnectMCP_RejectsInvalidCustomServer(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "Command required") {
 		t.Fatalf("expected Command required error, got %v", err)
+	}
+}
+
+func TestRunWorkflow_PreparesClaudeMCPConfigAndEnv(t *testing.T) {
+	mock := &mockAdapter{name: "claude", replies: []string{"ok"}}
+	withMockAdapter(t, mock)
+
+	s := openTempStore(t)
+	defer s.Close()
+	c, _ := New(Options{Store: s})
+	_, err := c.ConnectMCP(context.Background(), ConnectMCPRequest{
+		CatalogueKey: "github",
+		APIKey:       "ghp_test",
+	})
+	if err != nil {
+		t.Fatalf("ConnectMCP: %v", err)
+	}
+
+	cwd := t.TempDir()
+	a := &Agent{
+		ID: "a", Name: "A", Instructions: "x", Supports: []string{"claude"},
+		MCPServers: []string{"github"},
+		Workflows: []Workflow{{
+			Name:  "go",
+			Steps: []WorkflowStep{{Kind: StepUserMessage, Template: "hello"}},
+		}},
+	}
+	res := c.RunWorkflow(context.Background(), RunOptions{
+		Agent: a, WorkflowName: "go", CLI: "claude", Cwd: cwd,
+	})
+	if res.Outcome != OutcomeCompleted {
+		t.Fatalf("outcome=%s err=%v", res.Outcome, res.Err)
+	}
+	if got := mock.shots[0].Env["GITHUB_PERSONAL_ACCESS_TOKEN"]; got != "ghp_test" {
+		t.Fatalf("secret not injected into launch env: %q", got)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(cwd, ".mcp.json"))
+	if err != nil {
+		t.Fatalf("read .mcp.json: %v", err)
+	}
+	var body struct {
+		MCPServers map[string]struct {
+			Type    string            `json:"type"`
+			Command string            `json:"command"`
+			Args    []string          `json:"args"`
+			Env     map[string]string `json:"env"`
+		} `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatalf("decode .mcp.json: %v\n%s", err, raw)
+	}
+	gh := body.MCPServers["github"]
+	if gh.Type != "stdio" || gh.Command != "npx" {
+		t.Fatalf("bad github config: %+v", gh)
+	}
+	if gh.Env["GITHUB_PERSONAL_ACCESS_TOKEN"] != "${GITHUB_PERSONAL_ACCESS_TOKEN}" {
+		t.Fatalf("config should reference env, not inline secret: %+v", gh.Env)
+	}
+	if strings.Contains(string(raw), "ghp_test") {
+		t.Fatalf(".mcp.json leaked secret:\n%s", raw)
+	}
+}
+
+func TestPrepareMCPForRun_WritesCodexAndOpenCodeConfigs(t *testing.T) {
+	s := openTempStore(t)
+	defer s.Close()
+	c, _ := New(Options{Store: s})
+	ctx := context.Background()
+
+	_, err := c.ConnectMCP(ctx, ConnectMCPRequest{
+		ID:        "remote",
+		Name:      "Remote",
+		Transport: MCPTransportHTTP,
+		URL:       "https://mcp.example.test/mcp",
+		Auth:      map[string]string{"header": "Authorization", "token": "secret"},
+	})
+	if err != nil {
+		t.Fatalf("ConnectMCP: %v", err)
+	}
+	a := &Agent{ID: "a", Name: "A", Instructions: "x", Supports: []string{"codex", "opencode"}, MCPServers: []string{"remote"}}
+
+	codexDir := t.TempDir()
+	codexEnv, err := c.prepareMCPForRun(ctx, a, "codex", codexDir)
+	if err != nil {
+		t.Fatalf("prepare codex: %v", err)
+	}
+	if codexEnv["PRAIMATE_MCP_REMOTE_AUTHORIZATION"] != "Bearer secret" {
+		t.Fatalf("codex bearer env mismatch: %+v", codexEnv)
+	}
+	codexRaw, err := os.ReadFile(filepath.Join(codexDir, ".codex", "config.toml"))
+	if err != nil {
+		t.Fatalf("read codex config: %v", err)
+	}
+	codexText := string(codexRaw)
+	if !strings.Contains(codexText, "[mcp_servers.remote]") ||
+		!strings.Contains(codexText, `url = "https://mcp.example.test/mcp"`) ||
+		!strings.Contains(codexText, `env_http_headers = { Authorization = "PRAIMATE_MCP_REMOTE_AUTHORIZATION" }`) {
+		t.Fatalf("unexpected codex config:\n%s", codexText)
+	}
+	if strings.Contains(codexText, "Bearer secret") || strings.Contains(codexText, `"secret"`) {
+		t.Fatalf("codex config leaked secret:\n%s", codexText)
+	}
+
+	openCodeDir := t.TempDir()
+	openEnv, err := c.prepareMCPForRun(ctx, a, "opencode", openCodeDir)
+	if err != nil {
+		t.Fatalf("prepare opencode: %v", err)
+	}
+	if openEnv["PRAIMATE_MCP_REMOTE_AUTHORIZATION"] != "secret" {
+		t.Fatalf("opencode env mismatch: %+v", openEnv)
+	}
+	openRaw, err := os.ReadFile(filepath.Join(openCodeDir, "opencode.json"))
+	if err != nil {
+		t.Fatalf("read opencode config: %v", err)
+	}
+	openText := string(openRaw)
+	if !strings.Contains(openText, `"type": "remote"`) ||
+		!strings.Contains(openText, `"Authorization": "Bearer {env:PRAIMATE_MCP_REMOTE_AUTHORIZATION}"`) {
+		t.Fatalf("unexpected opencode config:\n%s", openText)
+	}
+	if strings.Contains(openText, "Bearer secret") || strings.Contains(openText, `"secret"`) {
+		t.Fatalf("opencode config leaked secret:\n%s", openText)
+	}
+}
+
+func TestPrepareMCPForRun_MissingDeclaredServerErrors(t *testing.T) {
+	s := openTempStore(t)
+	defer s.Close()
+	c, _ := New(Options{Store: s})
+
+	a := &Agent{ID: "a", Name: "A", Instructions: "x", Supports: []string{"claude"}, MCPServers: []string{"missing"}}
+	_, err := c.prepareMCPForRun(context.Background(), a, "claude", t.TempDir())
+	if !errors.Is(err, ErrMCPServerNotFound) {
+		t.Fatalf("expected ErrMCPServerNotFound, got %v", err)
 	}
 }

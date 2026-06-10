@@ -1,7 +1,7 @@
-# Clade installer for Windows.
+# PrAImate installer for Windows.
 #
 # One-liner:
-#   iwr -useb https://raw.githubusercontent.com/sPROFFEs/Clade/main/scripts/install.ps1 | iex
+#   iwr -useb https://raw.githubusercontent.com/sPROFFEs/PrAImate/main/scripts/install.ps1 | iex
 #
 # Or with options (you must download then run for arguments to bind):
 #   iwr -useb https://… -OutFile install.ps1
@@ -12,8 +12,8 @@
 #
 # Parameters:
 #   -Mode Binary | Source       what to install (prompts if omitted)
-#   -Prefix <dir>               install dir (default: %LOCALAPPDATA%\Programs\Clade)
-#   -AllUsers                   install to %ProgramFiles%\Clade (needs admin)
+#   -Prefix <dir>               install dir (default: %LOCALAPPDATA%\Programs\PrAImate)
+#   -AllUsers                   install to %ProgramFiles%\PrAImate (needs admin)
 #   -Yes                        auto-confirm prompts
 #
 # The binary path resolves the latest GitHub release via the API.
@@ -30,7 +30,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$Repo = "sPROFFEs/Clade"
+$Repo = "sPROFFEs/PrAImate"
 $SourceBranch = "main"
 # Release tag to pull assets from. When unset we resolve "latest" via
 # the GitHub API at download time so the installer keeps working as
@@ -90,9 +90,9 @@ function Find-LocalBins {
     }
     foreach ($c in $cands) {
         if ([string]::IsNullOrWhiteSpace($c)) { continue }
-        $clade = Join-Path $c "clade.exe"
+        $praimate = Join-Path $c "praimate.exe"
         $wpc   = Join-Path $c "wpc.exe"
-        if ((Test-Path $clade) -and (Test-Path $wpc)) {
+        if ((Test-Path $praimate) -and (Test-Path $wpc)) {
             return (Resolve-Path $c).Path
         }
     }
@@ -107,7 +107,7 @@ if (-not $Mode) {
         $Mode = "Local"
     } else {
         Write-Host ""
-        Write-Host "How do you want to install Clade?"
+        Write-Host "How do you want to install PrAImate?"
         Write-Host "  1. Download a prebuilt release"
         Write-Host "  2. Build from source (needs Go; will offer to install Go if missing)"
         Write-Host "  3. Cancel"
@@ -125,9 +125,9 @@ if (-not $Mode) {
 function Choose-Dest {
     if ($Prefix) { return $Prefix }
     if ($AllUsers) {
-        return (Join-Path $env:ProgramFiles "Clade")
+        return (Join-Path $env:ProgramFiles "PrAImate")
     }
-    return (Join-Path $env:LOCALAPPDATA "Programs\Clade")
+    return (Join-Path $env:LOCALAPPDATA "Programs\PrAImate")
 }
 $Dest = Choose-Dest
 if (-not (Test-Path $Dest)) {
@@ -148,7 +148,7 @@ if ($AllUsers -and -not (Test-IsAdmin)) {
 function Resolve-LatestTag {
     $api = "https://api.github.com/repos/$Repo/releases/latest"
     try {
-        $r = Invoke-RestMethod -Uri $api -UseBasicParsing -Headers @{ "User-Agent" = "clade-installer" } -ErrorAction Stop
+        $r = Invoke-RestMethod -Uri $api -UseBasicParsing -Headers @{ "User-Agent" = "praimate-installer" } -ErrorAction Stop
     } catch {
         Fail "couldn't query GitHub for the latest release ($($_.Exception.Message)). Set `$env:RELEASE_TAG to pin a version and re-run."
     }
@@ -163,14 +163,14 @@ function Install-Binary {
     if (-not $ReleaseTag) {
         $ReleaseTag = Resolve-LatestTag
     }
-    $fname = "clade-$Triplet.zip"
+    $fname = "praimate-$Triplet.zip"
     $url   = "https://github.com/$Repo/releases/download/$ReleaseTag/$fname"
     Info "tag:   $ReleaseTag"
     Info "asset: $fname"
     Info "url:   $url"
 
     Step "Downloading"
-    $tmp = New-Item -ItemType Directory -Force -Path (Join-Path $env:TEMP ("clade-install-" + [Guid]::NewGuid().ToString("N")))
+    $tmp = New-Item -ItemType Directory -Force -Path (Join-Path $env:TEMP ("praimate-install-" + [Guid]::NewGuid().ToString("N")))
     try {
         $zip = Join-Path $tmp.FullName $fname
         Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing -ErrorAction Stop
@@ -184,20 +184,20 @@ function Install-Binary {
         }
 
         Step "Installing to $Dest"
-        Copy-Item -Path (Join-Path $extracted "clade.exe") -Destination $Dest -Force
+        Copy-Item -Path (Join-Path $extracted "praimate.exe") -Destination $Dest -Force
         Copy-Item -Path (Join-Path $extracted "wpc.exe")   -Destination $Dest -Force
         # Ship the bundled samples next to the binary at the same path
         # the launcher probes in SampleCandidates:
-        # "<execDir>\..\share\clade\samples\workpaths". Without this,
+        # "<execDir>\..\share\praimate\samples\workpaths". Without this,
         # the first-run "seed example templates" finds nothing.
         $samplesSrc = Join-Path $extracted "samples"
         if (Test-Path $samplesSrc) {
-            $samplesDest = Join-Path (Split-Path $Dest -Parent) "share\clade\samples"
+            $samplesDest = Join-Path (Split-Path $Dest -Parent) "share\praimate\samples"
             New-Item -ItemType Directory -Force -Path $samplesDest | Out-Null
             Copy-Item -Path (Join-Path $samplesSrc "*") -Destination $samplesDest -Recurse -Force
             Info "samples -> $samplesDest"
         }
-        Write-Host "  v clade.exe + wpc.exe installed" -ForegroundColor Green
+        Write-Host "  v praimate.exe + wpc.exe installed" -ForegroundColor Green
     } finally {
         if (Test-Path $tmp) { Remove-Item -Recurse -Force $tmp }
     }
@@ -238,24 +238,24 @@ function Install-Source {
     }
 
     Step "Cloning repo"
-    $tmp = New-Item -ItemType Directory -Force -Path (Join-Path $env:TEMP ("clade-src-" + [Guid]::NewGuid().ToString("N")))
+    $tmp = New-Item -ItemType Directory -Force -Path (Join-Path $env:TEMP ("praimate-src-" + [Guid]::NewGuid().ToString("N")))
     try {
-        & git clone --depth 1 --branch $SourceBranch "https://github.com/$Repo.git" (Join-Path $tmp.FullName "Clade")
+        & git clone --depth 1 --branch $SourceBranch "https://github.com/$Repo.git" (Join-Path $tmp.FullName "PrAImate")
         if ($LASTEXITCODE -ne 0) { Fail "git clone failed" }
 
         Step "Building"
-        Push-Location (Join-Path $tmp.FullName "Clade")
+        Push-Location (Join-Path $tmp.FullName "PrAImate")
         try {
             $env:CGO_ENABLED = "0"
-            & go build -trimpath -ldflags '-s -w' -o clade.exe ./cmd/clade
-            if ($LASTEXITCODE -ne 0) { Fail "go build (clade) failed" }
+            & go build -trimpath -ldflags '-s -w' -o praimate.exe ./cmd/praimate
+            if ($LASTEXITCODE -ne 0) { Fail "go build (praimate) failed" }
             & go build -trimpath -ldflags '-s -w' -o wpc.exe   ./cmd/wpc
             if ($LASTEXITCODE -ne 0) { Fail "go build (wpc) failed" }
 
             Step "Installing to $Dest"
-            Copy-Item -Path ".\clade.exe" -Destination $Dest -Force
+            Copy-Item -Path ".\praimate.exe" -Destination $Dest -Force
             Copy-Item -Path ".\wpc.exe"   -Destination $Dest -Force
-            Write-Host "  v clade.exe + wpc.exe installed" -ForegroundColor Green
+            Write-Host "  v praimate.exe + wpc.exe installed" -ForegroundColor Green
         } finally {
             Pop-Location
         }
@@ -267,9 +267,9 @@ function Install-Source {
 # ---------- local path: bins already next to us ----------
 function Install-Local {
     Step "Installing to $Dest"
-    Copy-Item -Path (Join-Path $LocalBins "clade.exe") -Destination $Dest -Force
+    Copy-Item -Path (Join-Path $LocalBins "praimate.exe") -Destination $Dest -Force
     Copy-Item -Path (Join-Path $LocalBins "wpc.exe")   -Destination $Dest -Force
-    Write-Host "  v clade.exe + wpc.exe installed" -ForegroundColor Green
+    Write-Host "  v praimate.exe + wpc.exe installed" -ForegroundColor Green
 }
 
 # ---------- dispatch ----------
@@ -303,4 +303,4 @@ if ($parts -notcontains $Dest) {
 }
 
 Step "Done"
-Write-Host "Open a new terminal, then try:    clade -version"
+Write-Host "Open a new terminal, then try:    praimate -version"

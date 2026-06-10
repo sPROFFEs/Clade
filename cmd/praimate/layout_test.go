@@ -22,7 +22,7 @@ func TestLayoutRendersWithoutPanic(t *testing.T) {
 	if out == "" {
 		t.Fatal("layout View() returned empty string")
 	}
-	for _, want := range []string{"clade", "Navigator", "Chats", "Templates", "Agents", "Help"} {
+	for _, want := range []string{"praimate", "Navigator", "Chats", "Templates", "Agents", "Automation", "Help"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("layout missing %q in render:\n%s", want, out)
 		}
@@ -112,4 +112,3 @@ func (p *fakeCapturingPane) CapturingInput() bool { return true }
 // pinChatMsg the layout intercepted to add a tab strip entry. With
 // the feature gone, neither the message type nor the tab strip
 // exists.
-

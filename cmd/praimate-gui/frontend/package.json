@@ -1,0 +1,20 @@
+{
+  "name": "praimate-frontend",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "3.1.2",
+    "svelte": "4.2.19",
+    "vite": "5.4.19"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}

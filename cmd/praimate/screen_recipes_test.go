@@ -100,6 +100,46 @@ func TestRecipes_FillInputs_EscReturnsToPickAgent(t *testing.T) {
 	}
 }
 
+func TestRecipes_FillInputs_PrivacyReviewBeforeRun(t *testing.T) {
+	secret := "sk-abcdefghijklmnopqrstuvwxyzz"
+	a := core.Agent{
+		ID: "a", Name: "Solo", Supports: []string{"claude"},
+		Workflows: []core.Workflow{
+			{Name: "Only", Inputs: []core.WorkflowInput{{Name: "token", Required: true}},
+				Steps: []core.WorkflowStep{{Kind: core.StepUserMessage, Template: "{{ .token }}"}}},
+		},
+	}
+	m := loadedRecipes(a)
+	mdl, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := mdl.(recipesModel)
+	got.inputs[0].SetValue(secret)
+
+	mdl, cmd := got.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got = mdl.(recipesModel)
+	if cmd != nil {
+		t.Fatal("privacy review should not start the workflow command yet")
+	}
+	if got.step != stepPrivacyReview {
+		t.Fatalf("expected stepPrivacyReview, got %d", got.step)
+	}
+	body := got.Body()
+	if !strings.Contains(body, "OPENAI_KEY") {
+		t.Fatalf("review should show match category, got %q", body)
+	}
+	if strings.Contains(body, secret) {
+		t.Fatalf("review body should not echo the secret: %q", body)
+	}
+
+	mdl, cmd = got.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got = mdl.(recipesModel)
+	if got.step != stepRunning {
+		t.Fatalf("expected stepRunning after confirming review, got %d", got.step)
+	}
+	if cmd == nil {
+		t.Fatal("confirming privacy review should start workflow command")
+	}
+}
+
 func TestRecipes_ResultEnter_StartsOver(t *testing.T) {
 	m := loadedRecipes()
 	m.step = stepShowResult

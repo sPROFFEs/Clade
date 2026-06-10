@@ -500,7 +500,7 @@ func (m *backupModel) startSync() tea.Cmd {
 		}
 		// Set the machine-ID for commit trailers.
 		if machineID != "" {
-			t := setenvForCmd(ctx, "CLADE_BACKUP_MACHINE_ID", machineID)
+			t := setenvForCmd(ctx, "PRAIMATE_BACKUP_MACHINE_ID", machineID)
 			defer t()
 		}
 		action, st, err := backup.Sync(ctx, dir)
@@ -552,7 +552,7 @@ func (m *backupModel) runOp(label string, fn func(context.Context) error) tea.Cm
 		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 		defer cancel()
 		if machineID != "" {
-			t := setenvForCmd(ctx, "CLADE_BACKUP_MACHINE_ID", machineID)
+			t := setenvForCmd(ctx, "PRAIMATE_BACKUP_MACHINE_ID", machineID)
 			defer t()
 		}
 		if err := fn(ctx); err != nil {

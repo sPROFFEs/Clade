@@ -60,7 +60,7 @@ func FetchLatest() (*Release, error) {
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("User-Agent", "clade-updater/"+version.Current)
+	req.Header.Set("User-Agent", "praimate-updater/"+version.Current)
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
@@ -164,9 +164,9 @@ func Apply(asset *Asset, progress func(stage string)) error {
 	defer os.Remove(archivePath)
 
 	progress("extracting binary")
-	binName := "clade"
+	binName := "praimate"
 	if runtime.GOOS == "windows" {
-		binName = "clade.exe"
+		binName = "praimate.exe"
 	}
 	stagedBin, err := extractBinary(archivePath, binName)
 	if err != nil {
@@ -186,7 +186,7 @@ func downloadToTemp(asset *Asset) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", "clade-updater/"+version.Current)
+	req.Header.Set("User-Agent", "praimate-updater/"+version.Current)
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("download: %w", err)
@@ -196,7 +196,7 @@ func downloadToTemp(asset *Asset) (string, error) {
 		return "", fmt.Errorf("download: HTTP %d", resp.StatusCode)
 	}
 
-	f, err := os.CreateTemp("", "clade-update-*"+filepath.Ext(asset.Name))
+	f, err := os.CreateTemp("", "praimate-update-*"+filepath.Ext(asset.Name))
 	if err != nil {
 		return "", err
 	}
@@ -277,7 +277,7 @@ func extractFromTarGz(archivePath, binName string) (string, error) {
 }
 
 func writeStagedBinary(r io.Reader, binName string) (string, error) {
-	out, err := os.CreateTemp("", "clade-staged-*-"+binName)
+	out, err := os.CreateTemp("", "praimate-staged-*-"+binName)
 	if err != nil {
 		return "", err
 	}

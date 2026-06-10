@@ -26,9 +26,9 @@ type mockAdapter struct {
 	turnIdx    int
 }
 
-func (m *mockAdapter) Name() string                              { return m.name }
-func (m *mockAdapter) Available(_ context.Context) error         { return m.avail }
-func (m *mockAdapter) SupportsResume() bool                      { return m.resumable }
+func (m *mockAdapter) Name() string                      { return m.name }
+func (m *mockAdapter) Available(_ context.Context) error { return m.avail }
+func (m *mockAdapter) SupportsResume() bool              { return m.resumable }
 
 func (m *mockAdapter) SingleShot(_ context.Context, opts SingleShotOpts) (*Reply, error) {
 	m.shots = append(m.shots, opts)
@@ -70,9 +70,9 @@ func TestRunWorkflow_SingleStep_UsesSingleShot(t *testing.T) {
 	a := &Agent{
 		ID: "a", Name: "A", Instructions: "be terse", Supports: []string{"mockcli"},
 		Workflows: []Workflow{{
-			Name: "go",
+			Name:   "go",
 			Inputs: []WorkflowInput{{Name: "x", Required: true}},
-			Steps: []WorkflowStep{{Kind: StepUserMessage, Template: "x={{ .x }}"}},
+			Steps:  []WorkflowStep{{Kind: StepUserMessage, Template: "x={{ .x }}"}},
 		}},
 	}
 	res := c.RunWorkflow(context.Background(), RunOptions{
@@ -197,6 +197,129 @@ func TestRunWorkflow_OnTurnCallback(t *testing.T) {
 	})
 	if len(seen) != 2 || seen[0] != "r1" || seen[1] != "r2" {
 		t.Fatalf("OnTurn order/content wrong: %v", seen)
+	}
+}
+
+func TestRunWorkflow_PrivacyRedactsBeforeAdapterAndRevealsReply(t *testing.T) {
+	const secret = "sk-abcdefghijklmnopqrstuvwxyzz"
+	mock := &mockAdapter{name: "claude", replies: []string{"echo [OPENAI_KEY_1]"}}
+	withMockAdapter(t, mock)
+
+	c, _ := New(Options{Store: openTempStore(t)})
+	a := &Agent{
+		ID: "privacy", Name: "Privacy", Instructions: "x", Supports: []string{"claude"},
+		Workflows: []Workflow{{
+			Name:   "go",
+			Inputs: []WorkflowInput{{Name: "token", Required: true}},
+			Steps:  []WorkflowStep{{Kind: StepUserMessage, Template: "token={{ .token }}"}},
+		}},
+	}
+	if _, err := c.upsertAgent(context.Background(), a); err != nil {
+		t.Fatalf("upsertAgent: %v", err)
+	}
+	res := c.RunWorkflow(context.Background(), RunOptions{
+		Agent: a, WorkflowName: "go", Inputs: map[string]string{"token": secret},
+		CLI: "claude", Cwd: "/tmp", Persist: true,
+	})
+	if res.Outcome != OutcomeCompleted {
+		t.Fatalf("outcome=%s err=%v", res.Outcome, res.Err)
+	}
+	if len(mock.shots) != 1 {
+		t.Fatalf("expected 1 shot, got %d", len(mock.shots))
+	}
+	if strings.Contains(mock.shots[0].Message, secret) {
+		t.Fatalf("secret leaked to adapter: %q", mock.shots[0].Message)
+	}
+	if !strings.Contains(mock.shots[0].Message, "[OPENAI_KEY_1]") {
+		t.Fatalf("adapter did not receive placeholder: %q", mock.shots[0].Message)
+	}
+	if res.Turns[0].UserMsg != "token="+secret {
+		t.Fatalf("user-facing turn should keep original text: %q", res.Turns[0].UserMsg)
+	}
+	if res.Turns[0].Reply.Text != "echo "+secret {
+		t.Fatalf("reply placeholder was not revealed: %q", res.Turns[0].Reply.Text)
+	}
+	msgs, err := c.ListMessages(context.Background(), res.ChatID, 0)
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("expected 2 persisted messages, got %d", len(msgs))
+	}
+	if msgs[0].Content != "token="+secret || msgs[1].Content != "echo "+secret {
+		t.Fatalf("persisted messages should be original/revealed, got %+v", msgs)
+	}
+}
+
+func TestRunWorkflow_PrivacyPlaceholdersDoNotCollideAcrossTurns(t *testing.T) {
+	const first = "sk-aaaaaaaaaaaaaaaaaaaaaaaaa"
+	const second = "sk-bbbbbbbbbbbbbbbbbbbbbbbbb"
+	mock := &mockAdapter{
+		name:      "mockcli",
+		resumable: true,
+		replies:   []string{"first [OPENAI_KEY_1]", "second [OPENAI_KEY_2]"},
+	}
+	withMockAdapter(t, mock)
+
+	c, _ := New(Options{Store: openTempStore(t)})
+	a := &Agent{
+		ID: "privacy2", Name: "Privacy2", Instructions: "x", Supports: []string{"mockcli"},
+		Workflows: []Workflow{{
+			Name: "multi",
+			Inputs: []WorkflowInput{
+				{Name: "first", Required: true},
+				{Name: "second", Required: true},
+			},
+			Steps: []WorkflowStep{
+				{Kind: StepUserMessage, Template: "first={{ .first }}"},
+				{Kind: StepUserMessage, Template: "second={{ .second }}"},
+			},
+		}},
+	}
+	res := c.RunWorkflow(context.Background(), RunOptions{
+		Agent: a, WorkflowName: "multi",
+		Inputs: map[string]string{"first": first, "second": second},
+		CLI:    "mockcli", Cwd: "/tmp",
+	})
+	if res.Outcome != OutcomeCompleted {
+		t.Fatalf("outcome=%s err=%v", res.Outcome, res.Err)
+	}
+	if len(mock.shots) != 1 || len(mock.resumes) != 1 {
+		t.Fatalf("expected 1 shot / 1 resume, got %d/%d", len(mock.shots), len(mock.resumes))
+	}
+	if !strings.Contains(mock.shots[0].Message, "[OPENAI_KEY_1]") || strings.Contains(mock.shots[0].Message, first) {
+		t.Fatalf("first turn not redacted correctly: %q", mock.shots[0].Message)
+	}
+	if !strings.Contains(mock.resumes[0].Message, "[OPENAI_KEY_2]") || strings.Contains(mock.resumes[0].Message, second) {
+		t.Fatalf("second turn not redacted with unique placeholder: %q", mock.resumes[0].Message)
+	}
+	if res.Turns[0].Reply.Text != "first "+first {
+		t.Fatalf("first reply not revealed: %q", res.Turns[0].Reply.Text)
+	}
+	if res.Turns[1].Reply.Text != "second "+second {
+		t.Fatalf("second reply not revealed: %q", res.Turns[1].Reply.Text)
+	}
+}
+
+func TestRunWorkflow_PrivacyRedactsSystemPrompt(t *testing.T) {
+	const secret = "sk-ccccccccccccccccccccccccc"
+	mock := &mockAdapter{name: "mockcli", replies: []string{"ok"}}
+	withMockAdapter(t, mock)
+
+	c, _ := New(Options{Store: openTempStore(t)})
+	a := &Agent{ID: "sys", Name: "Sys", Instructions: "use " + secret, Supports: []string{"mockcli"},
+		Workflows: []Workflow{{Name: "w", Steps: []WorkflowStep{{Kind: StepUserMessage, Template: "x"}}}}}
+	res := c.RunWorkflow(context.Background(), RunOptions{
+		Agent: a, WorkflowName: "w", CLI: "mockcli", Cwd: "/tmp",
+	})
+	if res.Outcome != OutcomeCompleted {
+		t.Fatalf("outcome=%s err=%v", res.Outcome, res.Err)
+	}
+	if strings.Contains(mock.shots[0].SystemPrompt, secret) {
+		t.Fatalf("system prompt leaked to adapter: %q", mock.shots[0].SystemPrompt)
+	}
+	if !strings.Contains(mock.shots[0].SystemPrompt, "[OPENAI_KEY_1]") {
+		t.Fatalf("system prompt did not contain placeholder: %q", mock.shots[0].SystemPrompt)
 	}
 }
 

@@ -57,6 +57,39 @@ func TestAddSchedule_AtStoresAndDefaults(t *testing.T) {
 	}
 }
 
+func TestAddSchedule_CronStoresNextRunAt(t *testing.T) {
+	c := newMemCore(t)
+	ctx := context.Background()
+	seedAgent(t, c, "c")
+	id, err := c.AddSchedule(ctx, AddScheduleRequest{
+		AgentID: "c", Cron: "* * * * *", Workflow: "go",
+	})
+	if err != nil {
+		t.Fatalf("AddSchedule cron: %v", err)
+	}
+	rows, _ := c.ListSchedules(ctx, false)
+	if len(rows) != 1 || rows[0].ID != id {
+		t.Fatalf("expected 1 schedule, got %+v", rows)
+	}
+	if rows[0].Cron != "* * * * *" {
+		t.Fatalf("cron not stored: %+v", rows[0])
+	}
+	if rows[0].NextRunAt == nil {
+		t.Fatal("cron schedule should pre-populate next_run_at")
+	}
+}
+
+func TestAddSchedule_RejectsInvalidCron(t *testing.T) {
+	c := newMemCore(t)
+	ctx := context.Background()
+	seedAgent(t, c, "c")
+	if _, err := c.AddSchedule(ctx, AddScheduleRequest{
+		AgentID: "c", Cron: "not a cron", Workflow: "go",
+	}); err == nil {
+		t.Fatal("expected invalid cron error")
+	}
+}
+
 func TestTickSchedules_FiresDueAtRows(t *testing.T) {
 	c := newMemCore(t)
 	ctx := context.Background()
@@ -122,18 +155,50 @@ func TestTickSchedules_SkipsDisabled(t *testing.T) {
 	}
 }
 
-func TestTickSchedules_SkipsCronRowsIn1_0a(t *testing.T) {
+func TestTickSchedules_FiresDueCronRows(t *testing.T) {
 	c := newMemCore(t)
 	ctx := context.Background()
 	seedAgent(t, c, "c")
-	// Cron not yet implemented — row stores but ticks don't fire.
-	_, err := c.AddSchedule(ctx, AddScheduleRequest{AgentID: "c", Cron: "* * * * *", Workflow: "go"})
+	id, err := c.AddSchedule(ctx, AddScheduleRequest{AgentID: "c", Cron: "* * * * *", Workflow: "go"})
 	if err != nil {
 		t.Fatalf("AddSchedule cron: %v", err)
 	}
-	fires, _ := c.TickSchedules(ctx, time.Now())
-	if len(fires) != 0 {
-		t.Fatalf("cron rows should not fire in 1.0a, got %+v", fires)
+	now := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	_, err = c.store.DB().ExecContext(ctx, `UPDATE schedules SET next_run_at = ? WHERE id = ?`,
+		now.Add(-time.Minute).Format(time.RFC3339Nano), id)
+	if err != nil {
+		t.Fatalf("force next_run_at: %v", err)
+	}
+	fires, _ := c.TickSchedules(ctx, now)
+	if len(fires) != 1 {
+		t.Fatalf("expected due cron row to fire, got %+v", fires)
+	}
+	if fires[0].Schedule.ID != id {
+		t.Fatalf("wrong schedule fired: %+v", fires[0])
+	}
+}
+
+func TestMarkScheduleFired_AdvancesCronNextRunAt(t *testing.T) {
+	c := newMemCore(t)
+	ctx := context.Background()
+	seedAgent(t, c, "c")
+	id, err := c.AddSchedule(ctx, AddScheduleRequest{AgentID: "c", Cron: "* * * * *", Workflow: "go"})
+	if err != nil {
+		t.Fatalf("AddSchedule cron: %v", err)
+	}
+	firedAt := time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC)
+	if err := c.MarkScheduleFired(ctx, id, firedAt); err != nil {
+		t.Fatalf("MarkScheduleFired: %v", err)
+	}
+	s, err := c.GetSchedule(ctx, id)
+	if err != nil {
+		t.Fatalf("GetSchedule: %v", err)
+	}
+	if s.LastRunAt == nil || !s.LastRunAt.Equal(firedAt) {
+		t.Fatalf("last_run_at not stamped: %+v", s)
+	}
+	if s.NextRunAt == nil || !s.NextRunAt.After(firedAt) {
+		t.Fatalf("next_run_at not advanced beyond firedAt: %+v", s)
 	}
 }
 

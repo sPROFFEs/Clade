@@ -6,7 +6,7 @@ package main
 // column-by-column from left to right, the wordmark pulses, then we
 // hand off.
 //
-// Skip with --no-splash, or set CLADE_NO_SPLASH=1 in the env.
+// Skip with --no-splash, or set PRAIMATE_NO_SPLASH=1 in the env.
 // Skipped automatically when stdin/stdout isn't a TTY (CI, piped),
 // because there's nothing to look at.
 
@@ -53,7 +53,7 @@ func wordmarkCols() int {
 // Skip-splash detection. We honour:
 //
 //	--no-splash command-line flag (set by main.go's flag.Parse)
-//	CLADE_NO_SPLASH=1 env var
+//	PRAIMATE_NO_SPLASH=1 env var
 //	non-interactive stdout (piped, redirected, CI)
 //
 // The flag is parsed before main() builds the model, so we read it
@@ -64,7 +64,7 @@ func splashEnabled() bool {
 	if noSplashFlag {
 		return false
 	}
-	if os.Getenv("CLADE_NO_SPLASH") == "1" {
+	if os.Getenv("PRAIMATE_NO_SPLASH") == "1" {
 		return false
 	}
 	// If stdout isn't a terminal there's no point animating.

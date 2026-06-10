@@ -8,6 +8,7 @@ package main
 //	stepPickAgent     → user picks one of the seeded YAML agents
 //	stepPickWorkflow  → if the agent has multiple workflows
 //	stepFillInputs    → one textinput per WorkflowInput
+//	stepPrivacyReview → confirm regex privacy findings before sending
 //	stepRunning       → workflow is executing; spinner-ish status
 //	stepShowResult    → done (or errored); reply text on screen
 //
@@ -37,6 +38,7 @@ const (
 	stepPickAgent recipeStep = iota
 	stepPickWorkflow
 	stepFillInputs
+	stepPrivacyReview
 	stepRunning
 	stepShowResult
 )
@@ -52,21 +54,23 @@ type recipesModel struct {
 
 	agents []core.Agent
 
-	step           recipeStep
-	cursor         int
-	selectedAgent  *core.Agent
-	selectedWf     *core.Workflow
-	inputs         []textinput.Model
-	inputCursor    int
-	inputValues    map[string]string
+	step            recipeStep
+	cursor          int
+	selectedAgent   *core.Agent
+	selectedWf      *core.Workflow
+	inputs          []textinput.Model
+	inputCursor     int
+	inputValues     map[string]string
+	privacyMatches  []core.Match
+	privacyReviewed bool
 
 	// CLI to drive — defaults to "claude" since it's the only adapter
 	// registered today. Phase 2d adds Codex and OpenCode.
 	cli string
 
 	// Runtime state for stepRunning / stepShowResult.
-	runStart   time.Time
-	runResult  *core.RunResult
+	runStart  time.Time
+	runResult *core.RunResult
 }
 
 func newRecipesModel(cfg *launcher.Config) recipesModel {
@@ -213,6 +217,17 @@ func (m recipesModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.submit()
 		}
 
+	case stepPrivacyReview:
+		switch msg.String() {
+		case "esc":
+			m.step = stepFillInputs
+			m.privacyMatches = nil
+			m.privacyReviewed = false
+		case "enter":
+			m.privacyReviewed = true
+			return m.submit()
+		}
+
 	case stepRunning:
 		// No interactive input while running. Esc cancels (Phase 2d).
 
@@ -260,6 +275,14 @@ func (m recipesModel) submit() (tea.Model, tea.Cmd) {
 		values[in.Name] = m.inputs[i].Value()
 	}
 	m.inputValues = values
+	if !m.privacyReviewed {
+		matches := m.previewPrivacyMatches(values)
+		if len(matches) > 0 {
+			m.privacyMatches = matches
+			m.step = stepPrivacyReview
+			return m, nil
+		}
+	}
 	m.step = stepRunning
 	m.runStart = time.Now()
 
@@ -323,6 +346,28 @@ func joinInputValues(inputs map[string]string) string {
 	return out
 }
 
+func (m recipesModel) previewPrivacyMatches(values map[string]string) []core.Match {
+	if m.selectedAgent == nil || m.selectedWf == nil {
+		return nil
+	}
+	rendered, err := core.RenderWorkflow(m.selectedAgent, m.selectedWf, values)
+	if err != nil {
+		return nil
+	}
+	scanner := core.NewPrivacyScanner()
+	if c := getAppCore(); c != nil {
+		scanner = c.PrivacyScanner()
+	}
+	var out []core.Match
+	for _, step := range rendered.Steps {
+		if step.Kind != core.StepUserMessage {
+			continue
+		}
+		out = append(out, scanner.Match(step.Body)...)
+	}
+	return out
+}
+
 // --- Pane interface ----------------------------------------------------
 
 func (m recipesModel) View() string {
@@ -337,6 +382,8 @@ func (m recipesModel) Title() string {
 		return "Recipes · " + m.selectedAgent.Name + " · pick a workflow"
 	case stepFillInputs:
 		return "Recipes · " + m.selectedAgent.Name + " · " + m.selectedWf.Name
+	case stepPrivacyReview:
+		return "Recipes · privacy review"
 	case stepRunning:
 		return "Recipes · running…"
 	case stepShowResult:
@@ -355,6 +402,8 @@ func (m recipesModel) Help() string {
 		return "↑↓ select · enter open · esc back · ctrl-c quit"
 	case stepFillInputs:
 		return "tab/↑↓ next field · enter submit (on last field) · esc back"
+	case stepPrivacyReview:
+		return "enter continue with redaction · esc edit inputs"
 	case stepRunning:
 		return "running workflow against " + m.cli + "…"
 	case stepShowResult:
@@ -378,6 +427,8 @@ func (m recipesModel) Body() string {
 		return m.bodyPickWorkflow()
 	case stepFillInputs:
 		return m.bodyFillInputs()
+	case stepPrivacyReview:
+		return m.bodyPrivacyReview()
 	case stepRunning:
 		return m.bodyRunning()
 	case stepShowResult:
@@ -407,7 +458,7 @@ func (m recipesModel) bodyPickAgent() string {
 
 func (m recipesModel) bodyPickWorkflow() string {
 	var b strings.Builder
-	b.WriteString(subtitleStyle.Render("Workflows for " + m.selectedAgent.Name) + "\n")
+	b.WriteString(subtitleStyle.Render("Workflows for "+m.selectedAgent.Name) + "\n")
 	for i, wf := range m.selectedAgent.Workflows {
 		marker := "  "
 		if i == m.cursor {
@@ -421,7 +472,7 @@ func (m recipesModel) bodyPickWorkflow() string {
 
 func (m recipesModel) bodyFillInputs() string {
 	var b strings.Builder
-	b.WriteString(subtitleStyle.Render("Inputs · " + m.selectedWf.Name) + "\n")
+	b.WriteString(subtitleStyle.Render("Inputs · "+m.selectedWf.Name) + "\n")
 	if m.selectedWf.Description != "" {
 		b.WriteString(descStyle.Render(m.selectedWf.Description) + "\n\n")
 	}
@@ -441,6 +492,32 @@ func (m recipesModel) bodyFillInputs() string {
 	if len(m.selectedWf.Inputs) == 0 {
 		b.WriteString(descStyle.Render("(no inputs — press enter to run)") + "\n")
 	}
+	return b.String()
+}
+
+func (m recipesModel) bodyPrivacyReview() string {
+	var b strings.Builder
+	b.WriteString(subtitleStyle.Render("Privacy review") + "\n")
+	b.WriteString(descStyle.Render("Sensitive-looking values will be replaced before the CLI sees the prompt.") + "\n\n")
+	counts := map[core.PrivacyCategory]int{}
+	for _, match := range m.privacyMatches {
+		counts[match.Category]++
+	}
+	if len(counts) == 0 {
+		b.WriteString(descStyle.Render("(no matches)") + "\n")
+		return b.String()
+	}
+	seen := map[core.PrivacyCategory]bool{}
+	for _, match := range m.privacyMatches {
+		category := match.Category
+		if seen[category] {
+			continue
+		}
+		seen[category] = true
+		count := counts[category]
+		b.WriteString(okStyle.Render(string(category)) + descStyle.Render(fmt.Sprintf("  %d match(es)", count)) + "\n")
+	}
+	b.WriteString("\n" + descStyle.Render("The stored chat and result view keep your original values; only the outbound CLI prompt is scrubbed.") + "\n")
 	return b.String()
 }
 

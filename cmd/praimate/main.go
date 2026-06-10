@@ -42,7 +42,7 @@ func main() {
 	updateFlag := flag.Bool("update", false, "download and install the latest release, then exit")
 	yesFlag := flag.Bool("y", false, "auto-confirm the update prompt (use with -update for non-interactive installs)")
 	installTool := flag.String("install-tool", "",
-		"install a Clade-managed tool into <config>/clade/tools/<name>/ and exit. "+
+		"install a PrAImate-managed tool into <config>/praimate/tools/<name>/ and exit. "+
 			"Currently supported: graphify, gstack, scrapegraph. Use this when a workpath imports a "+
 			"_common/<bundle> whose wrapper scripts need a binary that's not yet "+
 			"on PATH.")
@@ -87,7 +87,7 @@ func main() {
 		os.Exit(runAgentWorkflow(*runAgent, *runCLI, *runWorkflow, *runInputs))
 	}
 	// screen_splash.go reads this to decide whether to show the
-	// reveal animation. Also disabled when CLADE_NO_SPLASH=1 or
+	// reveal animation. Also disabled when PRAIMATE_NO_SPLASH=1 or
 	// stdout isn't a terminal.
 	noSplashFlag = *noSplash
 
@@ -192,8 +192,8 @@ func runStartupAutoSync(cfg *launcher.Config) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if cfg.BackupMachineID != "" {
-		_ = os.Setenv("CLADE_BACKUP_MACHINE_ID", cfg.BackupMachineID)
-		defer os.Unsetenv("CLADE_BACKUP_MACHINE_ID")
+		_ = os.Setenv("PRAIMATE_BACKUP_MACHINE_ID", cfg.BackupMachineID)
+		defer os.Unsetenv("PRAIMATE_BACKUP_MACHINE_ID")
 	}
 	action, st, err := backup.Sync(ctx, dir)
 	if err != nil {
@@ -246,8 +246,8 @@ func runExitAutoSync(cfg *launcher.Config) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if cfg.BackupMachineID != "" {
-		_ = os.Setenv("CLADE_BACKUP_MACHINE_ID", cfg.BackupMachineID)
-		defer os.Unsetenv("CLADE_BACKUP_MACHINE_ID")
+		_ = os.Setenv("PRAIMATE_BACKUP_MACHINE_ID", cfg.BackupMachineID)
+		defer os.Unsetenv("PRAIMATE_BACKUP_MACHINE_ID")
 	}
 	action, _, err := backup.Sync(ctx, dir)
 	if err != nil {
@@ -459,7 +459,7 @@ func extractExitCode(err error) int {
 // non-zero exit, which makes git fall back to the default text merge.
 func runMergeMemory(args []string) int {
 	if len(args) < 3 {
-		fmt.Fprintln(os.Stderr, "clade --merge-memory needs 3 paths (ancestor, ours, theirs)")
+		fmt.Fprintln(os.Stderr, "praimate --merge-memory needs 3 paths (ancestor, ours, theirs)")
 		return 2
 	}
 	_ = args[0] // ancestor unused — we concatenate, not 3-way merge
@@ -492,7 +492,7 @@ func runMergeMemory(args []string) int {
 }
 
 func die(err error) {
-	fmt.Fprintf(os.Stderr, "clade: %v\n", err)
+	fmt.Fprintf(os.Stderr, "praimate: %v\n", err)
 	os.Exit(1)
 }
 
@@ -502,12 +502,12 @@ func die(err error) {
 func runCheckUpdate() int {
 	rel, err := updater.FetchLatest()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "clade: %v\n", err)
+		fmt.Fprintf(os.Stderr, "praimate: %v\n", err)
 		return 1
 	}
 	if updater.IsNewer(rel.TagName, version.Current) {
 		fmt.Printf("update available: %s (currently %s)\n  %s\n", rel.TagName, version.Current, rel.HTMLURL)
-		fmt.Println("\nRun `clade -update` to install it.")
+		fmt.Println("\nRun `praimate -update` to install it.")
 		return 0
 	}
 	fmt.Printf("up to date (%s is the latest release)\n", version.Current)
@@ -520,7 +520,7 @@ func runCheckUpdate() int {
 func runUpdate(autoYes bool) int {
 	rel, err := updater.FetchLatest()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "clade: %v\n", err)
+		fmt.Fprintf(os.Stderr, "praimate: %v\n", err)
 		return 1
 	}
 	if !updater.IsNewer(rel.TagName, version.Current) {
@@ -529,7 +529,7 @@ func runUpdate(autoYes bool) int {
 	}
 	asset, err := updater.AssetForHost(rel)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "clade: %v\n", err)
+		fmt.Fprintf(os.Stderr, "praimate: %v\n", err)
 		return 1
 	}
 
@@ -551,10 +551,10 @@ func runUpdate(autoYes bool) int {
 		fmt.Println("  …", stage)
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "clade: update failed: %v\n", err)
+		fmt.Fprintf(os.Stderr, "praimate: update failed: %v\n", err)
 		return 1
 	}
-	fmt.Printf("\n✓ installed %s. Re-run `clade` to start the new version.\n", rel.TagName)
+	fmt.Printf("\n✓ installed %s. Re-run `praimate` to start the new version.\n", rel.TagName)
 	return 0
 }
 
@@ -576,12 +576,12 @@ func runInstallTool(name string) int {
 		}
 	}
 	if !known {
-		fmt.Fprintf(os.Stderr, "clade: unknown tool %q. Available:%s\n", name, hint)
+		fmt.Fprintf(os.Stderr, "praimate: unknown tool %q. Available:%s\n", name, hint)
 		return 2
 	}
 	methods := installer.ToolMethods(id, installer.ActionInstall, installer.DetectOS())
 	if len(methods) == 0 {
-		fmt.Fprintf(os.Stderr, "clade: no install method available for %s on this OS\n", name)
+		fmt.Fprintf(os.Stderr, "praimate: no install method available for %s on this OS\n", name)
 		fmt.Fprintf(os.Stderr, "       (common missing prereqs: uv for graphify/scrapegraph; git+bun+bash for gstack)\n")
 		fmt.Fprintf(os.Stderr, "       uv: curl -LsSf https://astral.sh/uv/install.sh | sh   on Linux/macOS\n")
 		fmt.Fprintf(os.Stderr, "       uv: irm https://astral.sh/uv/install.ps1 | iex        on Windows\n")

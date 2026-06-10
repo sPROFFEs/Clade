@@ -1,4 +1,4 @@
-# Cross-compile wpc + clade for every supported OS/arch and stage them
+# Cross-compile wpc + praimate for every supported OS/arch and stage them
 # under dist\<os>-<arch>\ ready for distribution.
 #
 # Usage:
@@ -8,7 +8,7 @@
 #   .\scripts\build.ps1 -Version 0.2.0             # inject a specific version
 #
 # The version is stamped into the binary at link time via
-# `-X .../internal/version.Current=$Version`, so `clade -version` and
+# `-X .../internal/version.Current=$Version`, so `praimate -version` and
 # the self-updater both report it. Default lives in
 # internal\version\version.go.
 #
@@ -24,7 +24,7 @@ param(
         "darwin-amd64",
         "darwin-arm64"
     ),
-    [string] $Version = "0.1.18",
+    [string] $Version = "1.0.0",
     [string] $LdFlags = "-s -w",
     [switch] $NoArchive
 )
@@ -33,7 +33,7 @@ $ErrorActionPreference = "Stop"
 
 # Combine strip flags + version injection into one -ldflags string. The
 # Go linker accepts multiple -X entries inside it.
-$FullLdFlags = "$LdFlags -X github.com/sPROFFEs/Clade/internal/version.Current=$Version"
+$FullLdFlags = "$LdFlags -X github.com/sPROFFEs/PrAImate/internal/version.Current=$Version"
 Write-Host "Building version $Version"
 
 # Repo root is the parent of the scripts dir.
@@ -58,8 +58,11 @@ function Build-One($triplet) {
 
     & go build -trimpath -ldflags $FullLdFlags -o (Join-Path $out "wpc$ext") "./cmd/wpc"
     if ($LASTEXITCODE -ne 0) { throw "wpc build failed for $triplet" }
+    & go build -trimpath -ldflags $FullLdFlags -o (Join-Path $out "praimate$ext") "./cmd/praimate"
+    if ($LASTEXITCODE -ne 0) { throw "praimate build failed for $triplet" }
+    # Transitional shim through 1.0.x; removed in 1.1.
     & go build -trimpath -ldflags $FullLdFlags -o (Join-Path $out "clade$ext") "./cmd/clade"
-    if ($LASTEXITCODE -ne 0) { throw "clade build failed for $triplet" }
+    if ($LASTEXITCODE -ne 0) { throw "clade shim build failed for $triplet" }
 
     # Bundle samples + docs so the binary is self-sufficient at first run.
     Copy-Item -Recurse -Force "samples" (Join-Path $out "samples")
@@ -76,7 +79,7 @@ function Build-One($triplet) {
     Copy-Item "scripts/install.sh","scripts/install.ps1" $scriptsOut
 
     if (-not $NoArchive) {
-        $archiveBase = "clade-$triplet"
+        $archiveBase = "praimate-$triplet"
         if ($goos -eq "windows") {
             $zip = Join-Path "dist" "$archiveBase.zip"
             if (Test-Path $zip) { Remove-Item $zip }

@@ -492,6 +492,6 @@ func SampleCandidates(execDir string) []string {
 		filepath.Join(execDir, "samples", "workpaths"),
 		filepath.Join(execDir, "..", "samples", "workpaths"),
 		filepath.Join(execDir, "..", "..", "samples", "workpaths"),
-		filepath.Join(execDir, "..", "share", "clade", "samples", "workpaths"),
+		filepath.Join(execDir, "..", "share", "praimate", "samples", "workpaths"),
 	}
 }

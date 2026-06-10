@@ -70,7 +70,7 @@ func missingImportedToolNotes(wp *workpath.Workpath) []string {
 		}
 		notes = append(notes, fmt.Sprintf(
 			"Imported bundle %q needs the %s tool which isn't reachable. "+
-				"Install: `clade -install-tool %s`",
+				"Install: `praimate -install-tool %s`",
 			bundle, tool.ID, tool.ID))
 	}
 	return notes

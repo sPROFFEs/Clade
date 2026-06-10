@@ -20,10 +20,12 @@ import (
 )
 
 var (
-	appCoreMu   sync.RWMutex
-	appCore     *core.Core
-	appCoreErr  error
-	appCoreOnce sync.Once
+	appCoreMu    sync.RWMutex
+	appCore      *core.Core
+	appWatchers  *core.WatcherDaemon
+	appSchedules *core.ScheduleDaemon
+	appCoreErr   error
+	appCoreOnce  sync.Once
 )
 
 // initAppCore opens the default PrAImate DB, builds a Core, seeds the
@@ -56,9 +58,17 @@ func initAppCore() {
 			return
 		}
 		core.RegisterCLIAdapter(core.NewClaudeAdapter())
+		watchers, _ := c.StartWatcherDaemon(context.Background(), core.WatcherDaemonOptions{
+			WatcherDispatchOptions: core.WatcherDispatchOptions{CLI: "claude"},
+		})
+		schedules, _ := c.StartScheduleDaemon(context.Background(), core.ScheduleDaemonOptions{
+			ScheduleDispatchOptions: core.ScheduleDispatchOptions{CLI: "claude"},
+		})
 
 		appCoreMu.Lock()
 		appCore = c
+		appWatchers = watchers
+		appSchedules = schedules
 		appCoreMu.Unlock()
 	})
 }
@@ -79,4 +89,24 @@ func getAppCoreErr() error {
 	appCoreMu.RLock()
 	defer appCoreMu.RUnlock()
 	return appCoreErr
+}
+
+func restartAppWatchers() {
+	c := getAppCore()
+	if c == nil {
+		return
+	}
+	appCoreMu.Lock()
+	old := appWatchers
+	appWatchers = nil
+	appCoreMu.Unlock()
+	if old != nil {
+		old.Stop()
+	}
+	watchers, _ := c.StartWatcherDaemon(context.Background(), core.WatcherDaemonOptions{
+		WatcherDispatchOptions: core.WatcherDispatchOptions{CLI: "claude"},
+	})
+	appCoreMu.Lock()
+	appWatchers = watchers
+	appCoreMu.Unlock()
 }

@@ -523,7 +523,7 @@ func mustStatus(ctx context.Context, dir string) Status {
 // becomes the commit body (under the subject line).
 //
 // Returns nil when there's nothing to stage. Sets a machine-id
-// trailer when CLADE_BACKUP_MACHINE_ID is set in the env (the
+// trailer when PRAIMATE_BACKUP_MACHINE_ID is set in the env (the
 // auto-sync code sets it).
 func stageAndCommit(ctx context.Context, dir, extraSummary string) error {
 	// Always (re-)write the managed metadata first — picks up the
@@ -553,7 +553,7 @@ func stageAndCommit(ctx context.Context, dir, extraSummary string) error {
 	if extraSummary != "" {
 		msg += "\n\n" + extraSummary
 	}
-	if mid := strings.TrimSpace(os.Getenv("CLADE_BACKUP_MACHINE_ID")); mid != "" {
+	if mid := strings.TrimSpace(os.Getenv("PRAIMATE_BACKUP_MACHINE_ID")); mid != "" {
 		msg += "\n\nMachine-ID: " + mid
 	}
 	args := []string{"commit", "-m", msg,
@@ -573,7 +573,7 @@ func stageAndCommit(ctx context.Context, dir, extraSummary string) error {
 // just falls back to standard textual merge (which produces conflict
 // markers), and the conflict popup in the Backup screen takes over.
 func registerMemoryMergeDriver(ctx context.Context, dir string) error {
-	cladePath, err := exec.LookPath("clade")
+	cladePath, err := exec.LookPath("praimate")
 	if err != nil {
 		// Best-effort. Skip the merge driver but don't fail init.
 		return nil

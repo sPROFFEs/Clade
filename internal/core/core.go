@@ -26,6 +26,8 @@ import (
 type Core struct {
 	store *store.Store
 
+	privacy *PrivacyScanner
+
 	// workspacesRoot is the legacy <root>/chats/... layout used by
 	// internal/launcher today. Phase 1 keeps using this so the existing
 	// TUI keeps working unchanged; Phase 2+ will route writes through
@@ -52,10 +54,13 @@ func New(opts Options) (*Core, error) {
 	if opts.Store == nil && opts.WorkspacesRoot == "" {
 		return nil, errors.New("core.New: need Store or WorkspacesRoot")
 	}
-	return &Core{
+	c := &Core{
 		store:          opts.Store,
+		privacy:        NewPrivacyScanner(),
 		workspacesRoot: opts.WorkspacesRoot,
-	}, nil
+	}
+	c.loadPrivacyPatterns(context.Background())
+	return c, nil
 }
 
 // Close releases any resources Core owns. The store is NOT closed here
@@ -69,6 +74,15 @@ func (c *Core) Store() *store.Store { return c.store }
 // WorkspacesRoot returns the on-disk workspaces directory the legacy
 // launcher uses. Empty if Core was built without one.
 func (c *Core) WorkspacesRoot() string { return c.workspacesRoot }
+
+// PrivacyScanner exposes the process-wide scanner so settings screens
+// can add custom patterns before workflow runs.
+func (c *Core) PrivacyScanner() *PrivacyScanner {
+	if c.privacy == nil {
+		c.privacy = NewPrivacyScanner()
+	}
+	return c.privacy
+}
 
 // --- Legacy chat list ---------------------------------------------------
 

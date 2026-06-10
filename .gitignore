@@ -8,3 +8,6 @@ dist/
 /clade.exe
 *.test
 *.tmp
+/praimate
+/praimate.exe
+/praimate-gui

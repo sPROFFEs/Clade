@@ -5,12 +5,11 @@ package core
 //
 //   - At:    one-shot ISO timestamp. Fires once when now >= at AND
 //            last_run_at IS NULL.
-//   - Cron:  recurring cron expression. NOT IMPLEMENTED in 1.0a —
-//            schema accepts it but TickSchedules ignores cron rows.
-//            Add via a cron parser in Phase 4b.
+//   - Cron:  recurring standard five-field cron expression. On each
+//            successful dispatch MarkScheduleFired advances next_run_at.
 //
-// Like watchers, the actual daemon goroutine that calls TickSchedules
-// on a wall-clock interval lives in Phase 4b. This file is the
+// Like watchers, the daemon goroutine that calls TickSchedules on a
+// wall-clock interval lives in schedules_daemon.go. This file is the
 // storage + due-row selection layer.
 
 import (
@@ -20,6 +19,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/robfig/cron/v3"
 )
 
 // ErrScheduleNotFound is returned by Delete/Enable when no row matches.
@@ -30,7 +31,7 @@ type Schedule struct {
 	ID        int64
 	ChatID    string
 	AgentID   string
-	Cron      string     // standard cron expr; reserved for 1.0b
+	Cron      string     // standard five-field cron expr
 	At        *time.Time // one-shot trigger
 	Workflow  string
 	Inputs    map[string]string
@@ -43,8 +44,7 @@ type Schedule struct {
 
 // AddScheduleRequest groups the fields needed to create one row.
 //
-// Exactly one of Cron and At must be set. Cron rows are accepted but
-// TickSchedules will not fire them until Phase 4b adds a parser.
+// Exactly one of Cron and At must be set.
 type AddScheduleRequest struct {
 	AgentID  string
 	ChatID   string
@@ -75,11 +75,16 @@ func (c *Core) AddSchedule(ctx context.Context, req AddScheduleRequest) (int64, 
 	}
 	inputs, _ := json.Marshal(orEmptyStringMap(req.Inputs))
 
-	var cronStr sql.NullString
+	var cronStr, nextStr sql.NullString
 	if req.Cron != "" {
+		sched, err := cron.ParseStandard(req.Cron)
+		if err != nil {
+			return 0, fmt.Errorf("AddSchedule: invalid Cron: %w", err)
+		}
 		cronStr = sql.NullString{String: req.Cron, Valid: true}
+		nextStr = sql.NullString{String: sched.Next(time.Now().UTC()).Format(time.RFC3339Nano), Valid: true}
 	}
-	var atStr, nextStr sql.NullString
+	var atStr sql.NullString
 	if req.At != nil {
 		s := req.At.UTC().Format(time.RFC3339Nano)
 		atStr = sql.NullString{String: s, Valid: true}
@@ -174,13 +179,12 @@ type ScheduleFire struct {
 }
 
 // TickSchedules returns every enabled schedule whose next_run_at is at
-// or before now AND which has not yet fired (last_run_at IS NULL for
-// at-rows). Cron rows are silently skipped in 1.0a until Phase 4b
-// ships the parser.
+// or before now. At-style rows fire once (last_run_at IS NULL). Cron
+// rows fire whenever their next_run_at is due.
 //
 // This function does NOT mutate the DB — callers iterate the returned
-// fires, dispatch each workflow, and call MarkScheduleFired on
-// success. That lets the caller decide what to do on dispatch failure.
+// fires, dispatch each workflow, and call MarkScheduleFired according to
+// their retry policy.
 func (c *Core) TickSchedules(ctx context.Context, now time.Time) ([]ScheduleFire, error) {
 	rows, err := c.ListSchedules(ctx, true)
 	if err != nil {
@@ -188,27 +192,54 @@ func (c *Core) TickSchedules(ctx context.Context, now time.Time) ([]ScheduleFire
 	}
 	var out []ScheduleFire
 	for _, s := range rows {
-		// At-style rows fire once.
 		if s.At != nil && s.LastRunAt == nil && !s.At.After(now) {
 			out = append(out, ScheduleFire{Schedule: s, FiredAt: now})
 			continue
 		}
-		// Cron parsing — to be added in 4b.
+		if s.Cron != "" {
+			if s.NextRunAt == nil {
+				next, err := nextCronTime(s.Cron, now)
+				if err != nil {
+					return nil, err
+				}
+				_ = c.setScheduleNextRunAt(ctx, s.ID, next)
+				continue
+			}
+			if !s.NextRunAt.After(now) {
+				out = append(out, ScheduleFire{Schedule: s, FiredAt: now})
+			}
+		}
 	}
 	return out, nil
 }
 
 // MarkScheduleFired stamps last_run_at on a schedule, signaling the
 // daemon completed its dispatch. For at-style rows this prevents a
-// re-fire on the next tick (one-shot semantics).
+// re-fire on the next tick (one-shot semantics). For cron rows it also
+// advances next_run_at.
 func (c *Core) MarkScheduleFired(ctx context.Context, id int64, firedAt time.Time) error {
 	if c.store == nil {
 		return errors.New("MarkScheduleFired: no store configured")
 	}
 	stamp := firedAt.UTC().Format(time.RFC3339Nano)
-	res, err := c.store.DB().ExecContext(ctx, `
-		UPDATE schedules SET last_run_at = ? WHERE id = ?
-	`, stamp, id)
+	s, err := c.GetSchedule(ctx, id)
+	if err != nil {
+		return err
+	}
+	var res sql.Result
+	if s.Cron != "" {
+		next, err := nextCronTime(s.Cron, firedAt.UTC())
+		if err != nil {
+			return err
+		}
+		res, err = c.store.DB().ExecContext(ctx, `
+			UPDATE schedules SET last_run_at = ?, next_run_at = ? WHERE id = ?
+		`, stamp, next.Format(time.RFC3339Nano), id)
+	} else {
+		res, err = c.store.DB().ExecContext(ctx, `
+			UPDATE schedules SET last_run_at = ? WHERE id = ?
+		`, stamp, id)
+	}
 	if err != nil {
 		return err
 	}
@@ -219,13 +250,42 @@ func (c *Core) MarkScheduleFired(ctx context.Context, id int64, firedAt time.Tim
 	return nil
 }
 
+// GetSchedule fetches one schedule by id.
+func (c *Core) GetSchedule(ctx context.Context, id int64) (*Schedule, error) {
+	if c.store == nil {
+		return nil, errors.New("GetSchedule: no store configured")
+	}
+	row := c.store.DB().QueryRowContext(ctx, `SELECT id, chat_id, agent_id, cron, at, workflow,
+	             inputs_json, on_miss, priority, last_run_at, next_run_at, enabled
+	      FROM schedules WHERE id = ?`, id)
+	s, err := scanSchedule(row.Scan)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("%w: %d", ErrScheduleNotFound, id)
+	}
+	return s, err
+}
+
+func (c *Core) setScheduleNextRunAt(ctx context.Context, id int64, next time.Time) error {
+	_, err := c.store.DB().ExecContext(ctx, `UPDATE schedules SET next_run_at = ? WHERE id = ?`,
+		next.UTC().Format(time.RFC3339Nano), id)
+	return err
+}
+
+func nextCronTime(expr string, after time.Time) (time.Time, error) {
+	sched, err := cron.ParseStandard(expr)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("schedule cron %q: %w", expr, err)
+	}
+	return sched.Next(after.UTC()), nil
+}
+
 func scanSchedule(scan func(...any) error) (*Schedule, error) {
 	var (
-		s                                                       Schedule
-		chatID, agentID, cronStr                                sql.NullString
-		atStr, lastRunStr, nextRunStr                           sql.NullString
-		inputsJSON                                              string
-		enabledInt                                              int
+		s                             Schedule
+		chatID, agentID, cronStr      sql.NullString
+		atStr, lastRunStr, nextRunStr sql.NullString
+		inputsJSON                    string
+		enabledInt                    int
 	)
 	err := scan(&s.ID, &chatID, &agentID, &cronStr, &atStr, &s.Workflow,
 		&inputsJSON, &s.OnMiss, &s.Priority, &lastRunStr, &nextRunStr, &enabledInt)
@@ -242,15 +302,15 @@ func scanSchedule(scan func(...any) error) (*Schedule, error) {
 		s.Cron = cronStr.String
 	}
 	if atStr.Valid {
-		t, _ := time.Parse(time.RFC3339, atStr.String)
+		t, _ := parseScheduleTime(atStr.String)
 		s.At = &t
 	}
 	if lastRunStr.Valid {
-		t, _ := time.Parse(time.RFC3339, lastRunStr.String)
+		t, _ := parseScheduleTime(lastRunStr.String)
 		s.LastRunAt = &t
 	}
 	if nextRunStr.Valid {
-		t, _ := time.Parse(time.RFC3339, nextRunStr.String)
+		t, _ := parseScheduleTime(nextRunStr.String)
 		s.NextRunAt = &t
 	}
 	if err := json.Unmarshal([]byte(inputsJSON), &s.Inputs); err != nil {
@@ -258,4 +318,11 @@ func scanSchedule(scan func(...any) error) (*Schedule, error) {
 	}
 	s.Enabled = enabledInt != 0
 	return &s, nil
+}
+
+func parseScheduleTime(s string) (time.Time, error) {
+	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
+		return t, nil
+	}
+	return time.Parse(time.RFC3339, s)
 }

@@ -90,7 +90,7 @@ var (
 // so older screens still compile). New code passes a title string to
 // renderChrome and skips this.
 func header(subtitle string) string {
-	line := titleStyle.Render("clade") +
+	line := titleStyle.Render("praimate") +
 		headerSepStyle.Render(" — ") +
 		subtitleStyle.Render(subtitle)
 	return line + "\n"

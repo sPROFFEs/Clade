@@ -1,37 +1,47 @@
 #!/usr/bin/env bash
-# Cross-compile wpc + clade for every supported OS/arch and stage them
-# under dist/<os>-<arch>/ ready for distribution. Run from the repo root or
-# from anywhere — we cd to the script's parent automatically.
+# Cross-compile wpc + praimate (TUI) for every supported OS/arch and
+# stage them under dist/<os>-<arch>/ ready for distribution. Run from
+# the repo root or from anywhere — we cd to the script's parent
+# automatically.
 #
 # Usage:
 #   scripts/build.sh                       # all targets, default version
 #   scripts/build.sh linux-amd64           # one target
 #   scripts/build.sh --no-archive          # skip the zip/tar.gz step
-#   scripts/build.sh --version=0.2.0       # inject a specific version
-#   VERSION=0.2.0 scripts/build.sh         # same, via env var
+#   scripts/build.sh --version=1.0.1       # inject a specific version
+#   scripts/build.sh --with-gui            # also build praimate-gui (native target only)
+#   VERSION=1.0.1 scripts/build.sh         # same, via env var
 #
 # The version is stamped into the binary at link time via
-# `-X .../internal/version.Current=$VERSION`, so `clade -version` and
+# `-X .../internal/version.Current=$VERSION`, so `praimate -version` and
 # the self-updater both report it. Default lives in
 # internal/version/version.go.
 #
-# Requires: Go 1.21+, tar + zip (only when archiving).
+# The GUI (cmd/praimate-gui) is cgo + webkit and therefore CANNOT be
+# cross-compiled from one host. --with-gui builds it for the NATIVE
+# os/arch only and drops it into that target's bundle. Other platforms
+# build it from source via cmd/praimate-gui/build.sh.
+#
+# Requires: Go 1.21+, tar + zip (only when archiving); node+npm and
+# webkit2gtk-4.1 dev headers when --with-gui is used on Linux.
 
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-VERSION="${VERSION:-0.1.18}"
+VERSION="${VERSION:-1.0.0}"
 EXTRA_LDFLAGS="${LDFLAGS:--s -w}"  # strip symbols by default — tiny binaries
 ARCHIVE=1
+WITH_GUI=0
 TARGETS=()
 
 for arg in "$@"; do
   case "$arg" in
     --no-archive) ARCHIVE=0 ;;
+    --with-gui) WITH_GUI=1 ;;
     --version=*) VERSION="${arg#--version=}" ;;
     -h|--help)
-      sed -n '2,19p' "$0"
+      sed -n '2,26p' "$0"
       exit 0
       ;;
     *) TARGETS+=("$arg") ;;
@@ -40,7 +50,7 @@ done
 
 # Combined linker flags: strip + version injection. The Go linker accepts
 # multiple -X entries inside one -ldflags string.
-LDFLAGS="$EXTRA_LDFLAGS -X github.com/sPROFFEs/Clade/internal/version.Current=$VERSION"
+LDFLAGS="$EXTRA_LDFLAGS -X github.com/sPROFFEs/PrAImate/internal/version.Current=$VERSION"
 
 echo "Building version $VERSION"
 
@@ -53,6 +63,8 @@ if [ ${#TARGETS[@]} -eq 0 ]; then
     darwin-arm64
   )
 fi
+
+NATIVE_TRIPLET="$(go env GOOS)-$(go env GOARCH)"
 
 mkdir -p dist
 
@@ -70,7 +82,18 @@ build_one() {
   GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 \
     go build -trimpath -ldflags "$LDFLAGS" -o "$out/wpc$ext" ./cmd/wpc
   GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 \
+    go build -trimpath -ldflags "$LDFLAGS" -o "$out/praimate$ext" ./cmd/praimate
+  # Transitional shim: `clade` execs `praimate` with a deprecation
+  # note. Ships through the 1.0.x series, removed in 1.1.
+  GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 \
     go build -trimpath -ldflags "$LDFLAGS" -o "$out/clade$ext" ./cmd/clade
+
+  # GUI: native target only (cgo + webkit can't cross-compile).
+  if [ "$WITH_GUI" = "1" ] && [ "$triplet" = "$NATIVE_TRIPLET" ]; then
+    echo "  + praimate-gui (native)"
+    bash cmd/praimate-gui/build.sh
+    cp "cmd/praimate-gui/praimate-gui$ext" "$out/praimate-gui$ext"
+  fi
 
   # Ship samples + activation docs next to the binaries so the bundle is
   # self-contained — first-run can seed from the same directory.
@@ -91,9 +114,9 @@ build_one() {
     case "$goos" in
       windows)
         if command -v zip >/dev/null 2>&1; then
-          ( cd dist && zip -qr "clade-$triplet.zip" "$triplet" )
+          ( cd dist && zip -qr "praimate-$triplet.zip" "$triplet" )
         elif command -v tar >/dev/null 2>&1; then
-          ( cd dist && tar -czf "clade-$triplet.tar.gz" "$triplet" )
+          ( cd dist && tar -czf "praimate-$triplet.tar.gz" "$triplet" )
           echo "  (no zip on PATH; built tar.gz instead)" >&2
         else
           echo "  (no zip or tar on PATH; skipping archive)" >&2
@@ -101,7 +124,7 @@ build_one() {
         ;;
       *)
         if command -v tar >/dev/null 2>&1; then
-          ( cd dist && tar -czf "clade-$triplet.tar.gz" "$triplet" )
+          ( cd dist && tar -czf "praimate-$triplet.tar.gz" "$triplet" )
         else
           echo "  (no tar on PATH; skipping archive)" >&2
         fi

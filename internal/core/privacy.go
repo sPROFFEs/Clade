@@ -64,6 +64,7 @@ const (
 type privacyPattern struct {
 	Category PrivacyCategory
 	Regex    *regexp.Regexp
+	Pattern  string
 	Validate func(s string) bool // returns true if the match should be kept
 }
 
@@ -104,6 +105,15 @@ func NewPrivacyScanner() *PrivacyScanner {
 	return &PrivacyScanner{}
 }
 
+// NewRedactionSession returns per-run redaction state. Keeping counters
+// across turns prevents placeholder collisions in multi-step workflows.
+func (p *PrivacyScanner) NewRedactionSession() *PrivacyRedaction {
+	return &PrivacyRedaction{
+		scanner:  p,
+		counters: map[PrivacyCategory]int{},
+	}
+}
+
 // AddCustomPattern registers a user-defined regex under the CUSTOM
 // category. Returns an error if the pattern is invalid.
 func (p *PrivacyScanner) AddCustomPattern(pattern string) error {
@@ -111,8 +121,32 @@ func (p *PrivacyScanner) AddCustomPattern(pattern string) error {
 	if err != nil {
 		return fmt.Errorf("compile custom pattern: %w", err)
 	}
-	p.custom = append(p.custom, privacyPattern{Category: CatCustom, Regex: re})
+	p.custom = append(p.custom, privacyPattern{Category: CatCustom, Regex: re, Pattern: pattern})
 	return nil
+}
+
+// SetCustomPatterns replaces the custom pattern list atomically after
+// validating every regex.
+func (p *PrivacyScanner) SetCustomPatterns(patterns []string) error {
+	next := make([]privacyPattern, 0, len(patterns))
+	for _, pattern := range patterns {
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			return fmt.Errorf("compile custom pattern %q: %w", pattern, err)
+		}
+		next = append(next, privacyPattern{Category: CatCustom, Regex: re, Pattern: pattern})
+	}
+	p.custom = next
+	return nil
+}
+
+// CustomPatterns returns the currently configured custom regex strings.
+func (p *PrivacyScanner) CustomPatterns() []string {
+	out := make([]string, 0, len(p.custom))
+	for _, pat := range p.custom {
+		out = append(out, pat.Pattern)
+	}
+	return out
 }
 
 // Match scans text and returns every finding. Overlapping matches are
@@ -169,23 +203,39 @@ func dedupeOverlapping(hits []Match) []Match {
 // placeholder (e.g. "[OPENAI_KEY_1]"). Returns the scrubbed text and
 // the populated Match list (each carrying its assigned Placeholder).
 func (p *PrivacyScanner) Redact(text string) (string, []Match) {
-	matches := p.Match(text)
+	return p.NewRedactionSession().Redact(text)
+}
+
+// PrivacyRedaction carries placeholder state for one workflow run.
+type PrivacyRedaction struct {
+	scanner  *PrivacyScanner
+	counters map[PrivacyCategory]int
+	matches  []Match
+}
+
+// Redact replaces every match in text with a category-stamped
+// placeholder unique within this redaction session.
+func (r *PrivacyRedaction) Redact(text string) (string, []Match) {
+	if r == nil || r.scanner == nil {
+		return text, nil
+	}
+	matches := r.scanner.Match(text)
 	if len(matches) == 0 {
 		return text, nil
 	}
-	counters := map[PrivacyCategory]int{}
 	var b strings.Builder
 	b.Grow(len(text))
 	cursor := 0
 	for i := range matches {
 		m := &matches[i]
-		counters[m.Category]++
-		m.Placeholder = fmt.Sprintf("[%s_%d]", m.Category, counters[m.Category])
+		r.counters[m.Category]++
+		m.Placeholder = fmt.Sprintf("[%s_%d]", m.Category, r.counters[m.Category])
 		b.WriteString(text[cursor:m.Start])
 		b.WriteString(m.Placeholder)
 		cursor = m.End
 	}
 	b.WriteString(text[cursor:])
+	r.matches = append(r.matches, matches...)
 	return b.String(), matches
 }
 
@@ -202,6 +252,15 @@ func (p *PrivacyScanner) Reveal(text string, matches []Match) string {
 		text = strings.ReplaceAll(text, m.Placeholder, m.Value)
 	}
 	return text
+}
+
+// Reveal substitutes all placeholders from this redaction session back
+// to their original values.
+func (r *PrivacyRedaction) Reveal(text string) string {
+	if r == nil || r.scanner == nil {
+		return text
+	}
+	return r.scanner.Reveal(text, r.matches)
 }
 
 // ssnCheck rejects invalid SSN area numbers / groups / serials per

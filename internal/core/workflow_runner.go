@@ -129,12 +129,20 @@ func (c *Core) RunWorkflow(ctx context.Context, opts RunOptions) *RunResult {
 		res.Err = err
 		return res
 	}
+	if mcpEnv, err := c.prepareMCPForRun(ctx, opts.Agent, opts.CLI, opts.Cwd); err != nil {
+		res.Err = err
+		return res
+	} else if len(mcpEnv) > 0 {
+		opts.Env = mergeStringMaps(opts.Env, mcpEnv)
+	}
 
 	rendered, err := RenderWorkflow(opts.Agent, workflow, opts.Inputs)
 	if err != nil {
 		res.Err = err
 		return res
 	}
+	privacy := c.PrivacyScanner().NewRedactionSession()
+	systemPrompt, _ := privacy.Redact(opts.Agent.Instructions)
 
 	// Optional DB-backed chat persistence. Failures here are logged
 	// via res.Err only if no other path sets it later; they do NOT
@@ -145,7 +153,7 @@ func (c *Core) RunWorkflow(ctx context.Context, opts RunOptions) *RunResult {
 
 	turnIdx := 0
 	var lastReply *Reply
-	for stepIdx, step := range rendered.Steps {
+	for _, step := range rendered.Steps {
 		if step.Kind != StepUserMessage {
 			continue
 		}
@@ -163,8 +171,8 @@ func (c *Core) RunWorkflow(ctx context.Context, opts RunOptions) *RunResult {
 		if turnIdx == 0 && opts.MemoryInjection != "" {
 			body = opts.MemoryInjection + "\n\n" + body
 		}
-		_ = stepIdx
 
+		adapterBody, _ := privacy.Redact(body)
 		c.maybeAddMessage(ctx, chatID, "user", body)
 
 		start := time.Now()
@@ -173,12 +181,12 @@ func (c *Core) RunWorkflow(ctx context.Context, opts RunOptions) *RunResult {
 		if turnIdx == 0 || !adapter.SupportsResume() || lastReply == nil || lastReply.SessionID == "" {
 			reply, runErr = adapter.SingleShot(ctx, SingleShotOpts{
 				Cwd:          opts.Cwd,
-				Message:      body,
-				SystemPrompt: opts.Agent.Instructions,
+				Message:      adapterBody,
+				SystemPrompt: systemPrompt,
 				Env:          opts.Env,
 			})
 		} else {
-			reply, runErr = adapter.Resume(ctx, lastReply.SessionID, body)
+			reply, runErr = adapter.Resume(ctx, lastReply.SessionID, adapterBody)
 		}
 		if runErr != nil {
 			res.Outcome = OutcomeAdapterErr
@@ -186,6 +194,7 @@ func (c *Core) RunWorkflow(ctx context.Context, opts RunOptions) *RunResult {
 			c.maybeEndChat(ctx, chatID, res.Outcome)
 			return res
 		}
+		reply = revealReply(privacy, reply)
 		if reply.ExitCode != 0 {
 			res.Outcome = OutcomeAgentFailed
 			res.Err = fmt.Errorf("%s exited with code %d", adapter.Name(), reply.ExitCode)
@@ -221,6 +230,15 @@ func (c *Core) RunWorkflow(ctx context.Context, opts RunOptions) *RunResult {
 	res.Outcome = OutcomeCompleted
 	c.maybeEndChat(ctx, chatID, res.Outcome)
 	return res
+}
+
+func revealReply(redaction *PrivacyRedaction, reply *Reply) *Reply {
+	if reply == nil {
+		return nil
+	}
+	out := *reply
+	out.Text = redaction.Reveal(reply.Text)
+	return &out
 }
 
 // maybeCreateChat is a no-op when persistence is off, store is nil, or
@@ -279,4 +297,21 @@ func contains(haystack []string, needle string) bool {
 		}
 	}
 	return false
+}
+
+func mergeStringMaps(a, b map[string]string) map[string]string {
+	if len(a) == 0 {
+		return b
+	}
+	if len(b) == 0 {
+		return a
+	}
+	out := make(map[string]string, len(a)+len(b))
+	for k, v := range a {
+		out[k] = v
+	}
+	for k, v := range b {
+		out[k] = v
+	}
+	return out
 }

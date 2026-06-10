@@ -1,9 +1,9 @@
 package core
 
 // Folder watchers — DB-backed config rows for filesystem-triggered
-// workflow runs. The actual fsnotify goroutine that turns FS events
-// into MatchWatchers() calls lives in Phase 4b (main.go integration);
-// this file is the storage + matching layer the daemon will call.
+// workflow runs. The fsnotify goroutine in watchers_daemon.go turns OS
+// events into MatchWatchers() calls; this file is the storage + matching
+// layer the daemon calls.
 //
 // Per the v1 schema (watchers table):
 //
@@ -214,11 +214,9 @@ func ResetDebounceLog() {
 }
 
 func matchesWatcher(w Watcher, ev WatcherEvent) bool {
-	// Path filter: event must be inside (or equal to) the watched
-	// path. Normalise separators on both sides.
 	wpath := filepath.Clean(w.Path)
 	epath := filepath.Clean(ev.Path)
-	if !strings.HasPrefix(epath, wpath) {
+	if !pathInside(wpath, epath) {
 		return false
 	}
 	// Patterns: if none specified, fire on any file under path.
@@ -242,12 +240,23 @@ func matchesWatcher(w Watcher, ev WatcherEvent) bool {
 	return false
 }
 
+func pathInside(root, child string) bool {
+	if child == root {
+		return true
+	}
+	rel, err := filepath.Rel(root, child)
+	if err != nil {
+		return false
+	}
+	return rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
 func scanWatcher(scan func(...any) error) (*Watcher, error) {
 	var (
-		w                          Watcher
-		chatID, agentID            sql.NullString
-		patternsJSON, inputsJSON   string
-		enabledInt                 int
+		w                        Watcher
+		chatID, agentID          sql.NullString
+		patternsJSON, inputsJSON string
+		enabledInt               int
 	)
 	err := scan(&w.ID, &chatID, &agentID, &w.Path, &patternsJSON, &w.Workflow,
 		&inputsJSON, &w.DebounceMs, &enabledInt)

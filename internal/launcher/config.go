@@ -97,15 +97,15 @@ func (c *Config) HasLocalDefault() bool {
 }
 
 // ConfigPaths returns the directory and file used for persistent config.
-// On Linux this is $XDG_CONFIG_HOME/clade/config.json (or ~/.config/...);
-// on macOS, ~/Library/Application Support/clade/...; on Windows,
-// %AppData%/clade/... — courtesy of os.UserConfigDir().
+// On Linux this is $XDG_CONFIG_HOME/praimate/config.json (or ~/.config/...);
+// on macOS, ~/Library/Application Support/praimate/...; on Windows,
+// %AppData%/praimate/... — courtesy of os.UserConfigDir().
 func ConfigPaths() (dir, file string, err error) {
 	base, err := os.UserConfigDir()
 	if err != nil {
 		return "", "", fmt.Errorf("locate user config dir: %w", err)
 	}
-	dir = filepath.Join(base, "clade")
+	dir = filepath.Join(base, "praimate")
 	file = filepath.Join(dir, "config.json")
 	return dir, file, nil
 }

@@ -116,9 +116,9 @@ func newFirstRun() firstRunModel {
 func defaultWorkspacesRoot() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "clade-workspaces"
+		return "praimate-workspaces"
 	}
-	return filepath.Join(home, "clade-workspaces")
+	return filepath.Join(home, "praimate-workspaces")
 }
 
 func (m firstRunModel) Init() tea.Cmd { return textinput.Blink }
@@ -791,5 +791,5 @@ func newAgentsBrowser(cfg *launcher.Config) agentsModel {
 // --- shared helpers ------------------------------------------------------
 
 func wpcVersionString() string {
-	return fmt.Sprintf("clade / %s %s/%s", "v0.1", runtime.GOOS, runtime.GOARCH)
+	return fmt.Sprintf("praimate / %s %s/%s", "v1.0", runtime.GOOS, runtime.GOARCH)
 }

@@ -155,7 +155,7 @@ func ManagedToolPrefix(name string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("locate user config dir: %w", err)
 	}
-	return filepath.Join(base, "clade", "tools", name), nil
+	return filepath.Join(base, "praimate", "tools", name), nil
 }
 
 // ManagedToolBinDir returns <prefix>/bin — the dir uv writes the
@@ -304,7 +304,7 @@ func ImportClademToolsToPath() {
 	if err != nil {
 		return
 	}
-	toolsDir := filepath.Join(base, "clade", "tools")
+	toolsDir := filepath.Join(base, "praimate", "tools")
 	entries, err := os.ReadDir(toolsDir)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {

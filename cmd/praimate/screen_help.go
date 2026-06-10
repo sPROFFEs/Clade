@@ -52,7 +52,7 @@ func (m helpPaneModel) Body() string {
 		{":", "palette shortcut (only when no text input is focused)"},
 		{"?", "help shortcut (only when no text input is focused)"},
 		{"ctrl-w", "close the active chat tab"},
-		{"ctrl-c", "quit clade"},
+		{"ctrl-c", "quit praimate"},
 	} {
 		b.WriteString("  " + okStyle.Render(r[0]) + "  " + descStyle.Render(r[1]) + "\n")
 	}
@@ -66,7 +66,7 @@ func (m helpPaneModel) Body() string {
 		{"templates", "open the Templates list"},
 		{"agents", "open the Agents browser"},
 		{"new", "start a new chat (template picker)"},
-		{"quit", "exit clade"},
+		{"quit", "exit praimate"},
 	} {
 		b.WriteString("  " + okStyle.Render(c[0]) + "  " + descStyle.Render(c[1]) + "\n")
 	}

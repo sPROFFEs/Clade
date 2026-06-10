@@ -1,29 +1,60 @@
-# Clade
-<p align="center">
-  <img width="493" height="149" alt="{534C2F7D-0525-4B12-84B6-4F7D9C703413}" src="https://github.com/user-attachments/assets/29b7ab44-6390-43e6-8159-03fbf47d8252" />
-</p>
+# PrAImate
 
-A terminal launcher for agent CLIs — **Claude Code**, **Codex CLI**,
-**OpenCode**, **Gemini CLI**, **DeepSeek-TUI** — that pairs each
-session with a self-contained *template* (mission, playbook, rules,
-tools, subagents, persona) and clones it into a fresh isolated
-*chat* every time you start working on something new.
+**One harness, every agent.** PrAImate wraps the third-party coding
+CLIs you already use — **Claude Code**, **Codex CLI**, **OpenCode**,
+**Gemini CLI**, **DeepSeek-TUI** — behind one launcher with shared
+agents, memory, MCP, and automation. The models stay theirs; the
+layer around them is yours.
 
-Single static Go binary per OS. No runtime deps.
+> PrAImate 1.0 is the successor to **Clade**. It is a fresh app —
+> no data migration from `~/.config/clade/`. A transitional `clade`
+> shim binary execs `praimate` through the 1.0.x series.
+
+Two surfaces over one shared SQLite database (`~/.praimate/db.sqlite`):
+
+- **`praimate`** — the TUI. Single static Go binary, no runtime deps.
+- **`praimate-gui`** — the desktop app (Wails + Svelte). Same chats,
+  same agents, same memory; a run launched in one surface shows up in
+  the other.
+
+What the harness adds on top of your CLIs:
+
+- **Portable YAML agents** — instructions + workflows + input prompts
+  in one shareable file. Import/export from TUI or GUI; three
+  built-ins ship in the binary (`freeform`, `tdd-coder`,
+  `release-engineer`).
+- **Cross-chat memory** — identity facts, salience-scored pinned
+  facts, and per-session episode summaries distilled by a local
+  (Ollama) or CLI-billed model. Opt-in, ≤800 tokens injected, decays
+  and self-prunes. Off by default.
+- **MCP catalogue** — connect ~25 known providers (GitHub, Linear,
+  Notion, Sentry, …) once; PrAImate writes per-CLI MCP config at
+  launch for agents that declare them. Secrets go to the child
+  process environment, never into project files.
+- **Automation** — folder watchers (fsnotify) and cron schedules that
+  fire agent workflows while the app is open.
+- **Privacy redaction** — outbound prompts are scanned (API keys,
+  tokens, SSN, cards, custom regexes) and secrets are replaced with
+  placeholders before they reach any CLI; replies are un-scrubbed on
+  the way back. A review sheet shows match counts before launch.
+- **Templates & chats** (the original Clade workflow) — pair each
+  session with a self-contained *template* (mission, playbook, rules,
+  tools, subagents) cloned into an isolated *chat* with native
+  session resume per CLI.
 
 ## Install
 
 One command, picks the right archive for your platform, drops
-`clade` + `wpc` on `$PATH`:
+`praimate` + `wpc` on `$PATH`:
 
 ```sh
 # Linux / macOS
-curl -fsSL https://raw.githubusercontent.com/sPROFFEs/Clade/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/sPROFFEs/PrAImate/main/scripts/install.sh | bash
 ```
 
 ```powershell
 # Windows (PowerShell)
-iwr -useb https://raw.githubusercontent.com/sPROFFEs/Clade/main/scripts/install.ps1 | iex
+iwr -useb https://raw.githubusercontent.com/sPROFFEs/PrAImate/main/scripts/install.ps1 | iex
 ```
 
 The installer asks whether to grab a prebuilt release or build from
@@ -32,31 +63,42 @@ manager — `apt` / `dnf` / `pacman` / `brew` / `winget`). Run with
 `--user` (no sudo) or `--system` to skip the prompt about location.
 
 If you'd rather do it by hand: download the matching archive from
-[Releases](https://github.com/sPROFFEs/Clade/releases), extract it,
+[Releases](https://github.com/sPROFFEs/PrAImate/releases), extract it,
 run `./scripts/install.sh` (or `.\scripts\install.ps1`) from inside.
+
+### Desktop GUI
+
+`praimate-gui` is cgo + webkit, so release archives only include it
+for the platform the release was built on. Building from source takes
+one script (needs node+npm; on Linux also
+`libwebkit2gtk-4.1-dev libgtk-3-dev`):
+
+```sh
+cd cmd/praimate-gui && ./build.sh   # produces ./praimate-gui
+```
 
 ## Quick start
 
 ```sh
-clade                     # interactive — opens with a brief boot splash
-clade --no-splash         # skip the splash (also via CLADE_NO_SPLASH=1)
-clade -version            # print banner + version and exit
-clade -check-update       # ask GitHub if a newer release exists
-clade -update             # download + install the latest release (prompts y/N)
-clade -update -y          # same, non-interactive (for CI / scripts)
+praimate                     # interactive — opens with a brief boot splash
+praimate --no-splash         # skip the splash (also via PRAIMATE_NO_SPLASH=1)
+praimate -version            # print banner + version and exit
+praimate -check-update       # ask GitHub if a newer release exists
+praimate -update             # download + install the latest release (prompts y/N)
+praimate -update -y          # same, non-interactive (for CI / scripts)
 ```
 
-The updater queries `api.github.com/repos/sPROFFEs/Clade/releases/latest`,
+The updater queries `api.github.com/repos/sPROFFEs/PrAImate/releases/latest`,
 picks the archive whose name matches your OS+arch
-(`clade-<os>-<arch>.{tar.gz,zip}`), extracts just the `clade` binary,
+(`praimate-<os>-<arch>.{tar.gz,zip}`), extracts just the `praimate` binary,
 and swaps it in place of the running executable. On Windows the
-previous binary is preserved as `clade.exe.old` (a running `.exe`
+previous binary is preserved as `praimate.exe.old` (a running `.exe`
 can be renamed but not deleted); the next update cleans it up.
 
 First run is two questions:
 
 1. **Workspaces root** — where templates + chats live. Default
-   `~/clade-workspaces`.
+   `~/praimate-workspaces`.
 2. **Seed bundled samples?** — copies the `reversing`,
    `code-review`, and `workpath-author` example templates in so you
    have something to chat against immediately.
@@ -65,11 +107,11 @@ Then: home screen → `n` (new chat) → pick a template → name the chat
 → pick an agent. The chat is created, the workpath is compiled into
 its sandbox, the agent launches with `cwd` set to that sandbox.
 
-Clade **does not quit** when the agent runs. The TUI stays alive
+PrAImate **does not quit** when the agent runs. The TUI stays alive
 across the child's lifetime — when you exit the agent (`/exit`,
 `Ctrl-D`, etc.), control returns to the chat list with the
 just-ended session's diagnostics already visible. Launch another
-chat without leaving Clade.
+chat without leaving PrAImate.
 
 Next time you re-open a chat: the launcher inspects the agent's own
 session store, finds your previous session(s) for that chat's
@@ -342,9 +384,9 @@ just uses its native Google auth, which is the default.
 
 | Path                                                | Holds                                                   |
 |-----------------------------------------------------|---------------------------------------------------------|
-| `~/.config/clade/config.json` (Linux/XDG)           | `workspacesRoot`, `lastAgent`                           |
-| `~/Library/Application Support/clade/…` (macOS)     | same                                                    |
-| `%AppData%\clade\config.json` (Windows)             | same                                                    |
+| `~/.config/praimate/config.json` (Linux/XDG)           | `workspacesRoot`, `lastAgent`                           |
+| `~/Library/Application Support/praimate/…` (macOS)     | same                                                    |
+| `%AppData%\praimate\config.json` (Windows)             | same                                                    |
 | `<root>/templates/<name>/workpath/`                 | wpc source: `mission.md`, `playbook.md`, `rules.md`, `personality.md`, `tools/`, `agents/`, `knowledge/` |
 | `<root>/templates/<name>/template.json`             | defaults inherited by new chats (memory, language, skills) |
 | `<root>/chats/<chat-id>/workpath/`                  | cloned from template at chat creation                   |
@@ -355,7 +397,7 @@ just uses its native Google auth, which is the default.
 
 ## Session resume
 
-When you re-open a chat from the chat list, Clade inspects the
+When you re-open a chat from the chat list, PrAImate inspects the
 agent's own session store, picks the right resume flag, and stays
 out of the way:
 
@@ -390,7 +432,7 @@ restores the conversation state into the agent's home dir on the
 new machine.
 
 The slice **restore** at launch is opt-in per chat (`e` → Mirror
-agent state). SIGKILL-safe: if Clade was force-killed mid-session,
+agent state). SIGKILL-safe: if PrAImate was force-killed mid-session,
 mirror-in compares per-file mtimes and preserves the agent's
 home-dir copy when it's newer than the slice. You don't lose
 turns to a partial snapshot.
@@ -470,11 +512,11 @@ UX for graphify and any future managed tools.
 Workpath templates can pull in shared knowledge / tools / agents / hooks
 from sibling bundles under `templates/_common/`. The six shipped
 analysis templates (`code-review`, `reversing`, `reverse-ghidra`,
-`cve-analysis`, `cc-evidence-dossier`, `clade-dev`) already import
+`cve-analysis`, `cc-evidence-dossier`, `praimate-dev`) already import
 `_common/graphify` — no extra work to use them; just launch:
 
 ```
-clade                       # pick code-review (or any analysis template)
+praimate                       # pick code-review (or any analysis template)
 # the agent's sandbox now contains graphify_impact.sh, graphify_query.sh,
 # and a graphify-usage.md cheat-sheet — all merged from _common/graphify.
 ```
@@ -489,7 +531,7 @@ To add the import to a new template you author:
 ```
 
 For nested templates (e.g. the `templates/<name>/workpath/` shape that
-`clade-dev` uses), or for adding the import directly to an existing
+`praimate-dev` uses), or for adding the import directly to an existing
 chat's workpath, use the relative form that escapes the extra depth:
 
 ```json
@@ -505,10 +547,10 @@ favor. Missing imports are a hard compile error.
 See `docs/SCHEMA.md` for the full reference and
 `templates/_common/README.md` for the bundle inventory.
 
-### Clade-managed tools (the graphify case)
+### PrAImate-managed tools (the graphify case)
 
 Templates that import `_common/<bundle>` assume the wrapped binary is
-on PATH. Clade installs its known tools into an isolated managed prefix
+on PATH. PrAImate installs its known tools into an isolated managed prefix
 so they don't touch your global Python / pnpm state.
 
 The shipped tool today is **graphify** (a tree-sitter-AST + LLM
@@ -516,21 +558,21 @@ knowledge-graph builder for code). Two ways to install:
 
 ```
 # In the TUI (0.1.15+): Ctrl-4 → Tools tab → enter on graphify
-clade
+praimate
 
 # Or from the CLI (any 0.1.14+):
-clade -install-tool graphify
+praimate -install-tool graphify
 ```
 
 This calls `uv tool install graphifyy` with `UV_TOOL_DIR` and
-`UV_TOOL_BIN_DIR` pointed at `<config>/clade/tools/graphify/`, and the
+`UV_TOOL_BIN_DIR` pointed at `<config>/praimate/tools/graphify/`, and the
 PyPI index pinned to `https://pypi.org/simple/`. The bin dir is
-prepended to `PATH` on every Clade startup
+prepended to `PATH` on every PrAImate startup
 (`installer.ImportClademToolsToPath`), so the graphify-wrapper scripts
 in the imported bundle find the binary by name without you editing
 your shell rc.
 
-If `uv` isn't installed, Clade refuses to auto-install it (single-Go-
+If `uv` isn't installed, PrAImate refuses to auto-install it (single-Go-
 binary policy — you opt into the uv install yourself) and prints the
 official one-liner:
 
@@ -541,8 +583,8 @@ brew install uv                                    # macOS (Homebrew)
 winget install --id=astral-sh.uv -e                # Windows (winget)
 ```
 
-After uv lands, re-run `clade -install-tool graphify`. The bin ends up
-at `<config>/clade/tools/graphify/bin/graphify`.
+After uv lands, re-run `praimate -install-tool graphify`. The bin ends up
+at `<config>/praimate/tools/graphify/bin/graphify`.
 
 **Friction signal on launch.** If a chat's workpath imports a `_common/
 <bundle>` whose underlying tool isn't reachable yet, the launching
@@ -562,7 +604,7 @@ the hooks into its native format.
     {
       "event": "pre_tool",
       "matcher": "Bash",
-      "command": "echo \"[$(date -Iseconds)] bash invoked\" >> .clade-audit.log",
+      "command": "echo \"[$(date -Iseconds)] bash invoked\" >> .praimate-audit.log",
       "description": "Audit every bash call"
     },
     {
@@ -577,13 +619,13 @@ Today the `claude` target emits a real `.claude/settings.json` that
 Claude Code reads on every turn. Other targets (codex / opencode /
 gemini / mika) append a `## Hooks (declared, NOT wired for <target>)`
 section to the compiled instructions listing each declared hook, so
-the agent can see what was intended even though Clade can't fire them
+the agent can see what was intended even though PrAImate can't fire them
 automatically yet. Real emitters land per target when each upstream
 agent grows a stable hook spec.
 
-Portable events (Clade name → Claude Code name):
+Portable events (PrAImate name → Claude Code name):
 
-| Clade            | Claude Code         |
+| PrAImate            | Claude Code         |
 |------------------|---------------------|
 | `pre_tool`       | `PreToolUse`        |
 | `post_tool`      | `PostToolUse`       |
@@ -784,7 +826,7 @@ cheap.
 
 ### What gets tracked
 
-Clade's managed `.gitignore` excludes every file at the workspaces
+PrAImate's managed `.gitignore` excludes every file at the workspaces
 root **except** `chats/` and `templates/`. Inside those two
 directories, **everything is tracked** — sandbox, captured
 transcripts, native session slices, the full per-chat
@@ -792,7 +834,7 @@ transcripts, native session slices, the full per-chat
 the workpaths but the actual conversation state. Stray files at the
 root (scratch notes, environment overrides, etc.) never propagate.
 
-If you hand-edit `.gitignore`, the absence of the Clade-managed
+If you hand-edit `.gitignore`, the absence of the PrAImate-managed
 marker line tells the launcher to leave it alone on the next sync.
 
 ### Sync flow
@@ -808,10 +850,10 @@ Once enabled, the Backup tab exposes:
 - **Force push** — overwrites remote; one confirmation.
 - **Disconnect** — clears the remote URL and disables auto-sync;
   local files untouched.
-- **Auto-sync** — optional sync on every Clade startup and exit.
+- **Auto-sync** — optional sync on every PrAImate startup and exit.
 - **Force always local** — sub-option of auto-sync. Forces local
   state to win on divergence. Guarded by a per-commit Machine-ID
-  trailer and a 24-hour window: Clade refuses to overwrite when
+  trailer and a 24-hour window: PrAImate refuses to overwrite when
   another machine pushed recently.
 
 ### Divergence resolution
@@ -845,7 +887,7 @@ The launcher never prompts for credentials. Whatever auth your
 local `git` client uses (HTTPS credential helper, SSH agent,
 git-credentials file, …) is what backup uses. For a private repo:
 configure credentials on the command line first (`git clone <url>`
-in a terminal once is enough to confirm) before pointing Clade at
+in a terminal once is enough to confirm) before pointing PrAImate at
 it.
 
 ## Roadmap

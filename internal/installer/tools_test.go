@@ -92,15 +92,15 @@ func TestManagedToolPrefix_PathShape(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ManagedToolPrefix: %v", err)
 	}
-	if !strings.HasSuffix(filepath.ToSlash(prefix), "clade/tools/graphify") {
-		t.Errorf("prefix = %q, want it to end with clade/tools/graphify", prefix)
+	if !strings.HasSuffix(filepath.ToSlash(prefix), "praimate/tools/graphify") {
+		t.Errorf("prefix = %q, want it to end with praimate/tools/graphify", prefix)
 	}
 	binDir, err := ManagedToolBinDir("graphify")
 	if err != nil {
 		t.Fatalf("ManagedToolBinDir: %v", err)
 	}
-	if !strings.HasSuffix(filepath.ToSlash(binDir), "clade/tools/graphify/bin") {
-		t.Errorf("binDir = %q, want .../clade/tools/graphify/bin", binDir)
+	if !strings.HasSuffix(filepath.ToSlash(binDir), "praimate/tools/graphify/bin") {
+		t.Errorf("binDir = %q, want .../praimate/tools/graphify/bin", binDir)
 	}
 }
 

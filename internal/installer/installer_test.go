@@ -148,15 +148,15 @@ func TestManagedAgentPrefix_PathShape(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ManagedAgentPrefix: %v", err)
 	}
-	if !strings.HasSuffix(filepath.ToSlash(prefix), "clade/agents/openclaude") {
-		t.Errorf("prefix = %q, want it to end with clade/agents/openclaude", prefix)
+	if !strings.HasSuffix(filepath.ToSlash(prefix), "praimate/agents/openclaude") {
+		t.Errorf("prefix = %q, want it to end with praimate/agents/openclaude", prefix)
 	}
 	binDir, err := ManagedAgentBinDir("openclaude")
 	if err != nil {
 		t.Fatalf("ManagedAgentBinDir: %v", err)
 	}
-	if !strings.HasSuffix(filepath.ToSlash(binDir), "clade/agents/openclaude/node_modules/.bin") {
-		t.Errorf("binDir = %q, want .../clade/agents/openclaude/node_modules/.bin", binDir)
+	if !strings.HasSuffix(filepath.ToSlash(binDir), "praimate/agents/openclaude/node_modules/.bin") {
+		t.Errorf("binDir = %q, want .../praimate/agents/openclaude/node_modules/.bin", binDir)
 	}
 }
 

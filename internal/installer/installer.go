@@ -645,7 +645,7 @@ func ManagedAgentPrefix(name string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("locate user config dir: %w", err)
 	}
-	return filepath.Join(base, "clade", "agents", name), nil
+	return filepath.Join(base, "praimate", "agents", name), nil
 }
 
 // ManagedAgentBinDir returns <prefix>/node_modules/.bin for the named
