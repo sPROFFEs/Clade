@@ -79,9 +79,15 @@ run `./scripts/install.sh` (or `.\scripts\install.ps1`) from inside.
 
 ### Desktop GUI
 
-`praimate-gui` is cgo + webkit, so release archives only include it
-for the platform the release was built on. Building from source takes
-one script (needs node+npm; on Linux also
+Launch it with `praimate --gui` — the TUI binary finds the
+`praimate-gui` binary shipped next to it (or on PATH) and starts it.
+
+Release archives include the prebuilt GUI for **linux-amd64** and
+**windows-amd64** (Windows needs no extra runtime — WebView2 is
+system-provided on Windows 10+; Linux needs the `webkit2gtk-4.1`
+runtime package). linux-arm64 and macOS archives ship the TUI only
+because the GUI is cgo + webkit there and can't be cross-compiled;
+build it from source with one script (needs node+npm; on Linux also
 `libwebkit2gtk-4.1-dev libgtk-3-dev`):
 
 ```sh

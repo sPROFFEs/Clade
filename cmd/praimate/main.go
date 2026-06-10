@@ -37,6 +37,8 @@ import (
 
 func main() {
 	versionFlag := flag.Bool("version", false, "print version and exit")
+	guiFlag := flag.Bool("gui", false,
+		"launch the praimate-gui desktop app and exit (looks next to this binary, then PATH)")
 	noSplash := flag.Bool("no-splash", false, "skip the boot animation")
 	checkUpdateFlag := flag.Bool("check-update", false, "check GitHub for a newer release and exit")
 	updateFlag := flag.Bool("update", false, "download and install the latest release, then exit")
@@ -65,6 +67,9 @@ func main() {
 		fmt.Println(version.Banner)
 		fmt.Printf("\n%s %s %s/%s\n", version.Name, version.Current, runtime.GOOS, runtime.GOARCH)
 		return
+	}
+	if *guiFlag {
+		os.Exit(launchGUI())
 	}
 	if *mergeMemory {
 		// Args left in flag.Args() are: <ancestor> <ours> <theirs>.

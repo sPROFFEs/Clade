@@ -17,10 +17,17 @@
 # the self-updater both report it. Default lives in
 # internal/version/version.go.
 #
-# The GUI (cmd/praimate-gui) is cgo + webkit and therefore CANNOT be
-# cross-compiled from one host. --with-gui builds it for the NATIVE
-# os/arch only and drops it into that target's bundle. Other platforms
-# build it from source via cmd/praimate-gui/build.sh.
+# GUI coverage with --with-gui:
+#   - native os/arch       — full cgo build (Linux needs webkit2gtk-4.1
+#                            dev headers; macOS needs Xcode CLT)
+#   - windows-amd64        — ALWAYS cross-compilable: Wails v2's Windows
+#                            backend is pure Go syscalls (WebView2 loads
+#                            at runtime), so CGO_ENABLED=0 works
+#   - everything else      — skipped; those platforms build from source
+#                            via cmd/praimate-gui/build.sh
+#
+# `praimate --gui` dispatches to the praimate-gui binary shipped next
+# to it, so bundles that include the GUI get AIO behaviour for free.
 #
 # Requires: Go 1.21+, tar + zip (only when archiving); node+npm and
 # webkit2gtk-4.1 dev headers when --with-gui is used on Linux.
@@ -88,11 +95,25 @@ build_one() {
   GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 \
     go build -trimpath -ldflags "$LDFLAGS" -o "$out/clade$ext" ./cmd/clade
 
-  # GUI: native target only (cgo + webkit can't cross-compile).
-  if [ "$WITH_GUI" = "1" ] && [ "$triplet" = "$NATIVE_TRIPLET" ]; then
-    echo "  + praimate-gui (native)"
-    bash cmd/praimate-gui/build.sh
-    cp "cmd/praimate-gui/praimate-gui$ext" "$out/praimate-gui$ext"
+  # GUI: native target (full cgo) + windows-amd64 (pure-Go cross).
+  if [ "$WITH_GUI" = "1" ]; then
+    if [ "$triplet" = "$NATIVE_TRIPLET" ]; then
+      echo "  + praimate-gui (native)"
+      bash cmd/praimate-gui/build.sh
+      cp "cmd/praimate-gui/praimate-gui$ext" "$out/praimate-gui$ext"
+    elif [ "$triplet" = "windows-amd64" ]; then
+      echo "  + praimate-gui (windows cross)"
+      # Frontend must already be built (the native branch or a prior
+      # run does it); build it here if dist assets are missing.
+      if [ ! -f cmd/praimate-gui/frontend/dist/index.html ]; then
+        ( cd cmd/praimate-gui/frontend && npm install && npm run build )
+      fi
+      ( cd cmd/praimate-gui && \
+        GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
+        go build -trimpath -tags desktop,production \
+          -ldflags "-s -w -H windowsgui" -o praimate-gui.exe . )
+      cp cmd/praimate-gui/praimate-gui.exe "$out/praimate-gui.exe"
+    fi
   fi
 
   # Ship samples + activation docs next to the binaries so the bundle is
