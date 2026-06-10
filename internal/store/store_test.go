@@ -1,0 +1,109 @@
+package store
+
+import (
+	"context"
+	"path/filepath"
+	"testing"
+)
+
+// TestOpen_CreatesFileAndAppliesMigrations verifies that Open() bootstraps
+// a fresh database, runs every embedded migration, and records the
+// resulting schema version.
+func TestOpen_CreatesFileAndAppliesMigrations(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "db.sqlite")
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+
+	v, err := s.SchemaVersion(context.Background())
+	if err != nil {
+		t.Fatalf("SchemaVersion: %v", err)
+	}
+	if v < 1 {
+		t.Fatalf("schema version after Open = %d, want >= 1", v)
+	}
+}
+
+// TestOpen_Idempotent verifies that a second Open() on an already-
+// migrated database is a no-op and reports the same schema version.
+func TestOpen_Idempotent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "db.sqlite")
+	s1, err := Open(path)
+	if err != nil {
+		t.Fatalf("first Open: %v", err)
+	}
+	v1, _ := s1.SchemaVersion(context.Background())
+	if err := s1.Close(); err != nil {
+		t.Fatalf("close 1: %v", err)
+	}
+
+	s2, err := Open(path)
+	if err != nil {
+		t.Fatalf("second Open: %v", err)
+	}
+	defer s2.Close()
+	v2, _ := s2.SchemaVersion(context.Background())
+	if v1 != v2 {
+		t.Fatalf("schema version drift: first=%d second=%d", v1, v2)
+	}
+}
+
+// TestSchemaTables_Present spot-checks that every v1 table exists after
+// migration. If a table is renamed or dropped in a future migration,
+// this test must be updated to match.
+func TestSchemaTables_Present(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "db.sqlite"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+
+	want := []string{
+		"chats", "messages", "agents",
+		"memory_identity", "memory_pinned", "memory_episodes",
+		"mcp_servers", "schedules", "watchers",
+		"settings_cli", "settings_gui",
+		"schema_version",
+	}
+	for _, table := range want {
+		var name string
+		err := s.DB().QueryRowContext(context.Background(),
+			`SELECT name FROM sqlite_master WHERE type='table' AND name = ?`, table).
+			Scan(&name)
+		if err != nil {
+			t.Errorf("table %s missing: %v", table, err)
+		}
+	}
+}
+
+// TestParseMigrationVersion covers the filename-to-int parser used by
+// the migration runner.
+func TestParseMigrationVersion(t *testing.T) {
+	cases := []struct {
+		name string
+		want int
+		ok   bool
+	}{
+		{"0001_init.sql", 1, true},
+		{"0042_add_index.sql", 42, true},
+		{"5.sql", 5, true},
+		{"init.sql", 0, false},
+		{"abc.sql", 0, false},
+	}
+	for _, tc := range cases {
+		got, err := parseMigrationVersion(tc.name)
+		if tc.ok && err != nil {
+			t.Errorf("%s: unexpected error %v", tc.name, err)
+		}
+		if !tc.ok && err == nil {
+			t.Errorf("%s: expected error, got version %d", tc.name, got)
+		}
+		if tc.ok && got != tc.want {
+			t.Errorf("%s: got %d, want %d", tc.name, got, tc.want)
+		}
+	}
+}

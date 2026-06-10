@@ -18,8 +18,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sPROFFEs/Clade/pkg/targets"
-	"github.com/sPROFFEs/Clade/pkg/workpath"
+	"github.com/sPROFFEs/PrAImate/pkg/targets"
+	"github.com/sPROFFEs/PrAImate/pkg/workpath"
 )
 
 func main() {

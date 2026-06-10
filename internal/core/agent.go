@@ -1,0 +1,109 @@
+package core
+
+// Agent is the canonical in-memory representation of a PrAImate agent.
+// It is what the TUI/GUI receive from Core and what `praimate agent
+// import/export` round-trips against the YAML wire format defined in
+// agent_yaml.go.
+//
+// Field order mirrors the YAML order so a manual diff of the two side
+// by side is readable. Empty-but-non-nil slices intentionally encode as
+// `[]` in YAML so users see they can be edited.
+type Agent struct {
+	ID              string     `json:"id"`
+	Name            string     `json:"name"`
+	Description     string     `json:"description"`
+	Icon            string     `json:"icon,omitempty"`
+	Instructions    string     `json:"instructions"`
+	Supports        []string   `json:"supports"`
+	Tools           []string   `json:"tools"`
+	MCPServers      []string   `json:"mcp_servers"`
+	Workflows       []Workflow `json:"workflows"`
+	DefaultWorkflow string     `json:"default_workflow,omitempty"`
+
+	// SourcePath is the YAML file the agent was last imported from, if
+	// any. Empty for agents created in-place via the TUI/GUI.
+	SourcePath string `json:"source_path,omitempty"`
+}
+
+// Workflow is a named, scripted task template inside an agent. Each
+// workflow declares its inputs (asked at launch time) and a linear
+// sequence of steps to execute through the underlying CLI agent.
+//
+// Conditional / loop step kinds are explicitly out of scope for 1.0
+// (plan §4); only `user_message` and `wait_for_assistant` are valid.
+type Workflow struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Inputs      []WorkflowInput `json:"inputs"`
+	Steps       []WorkflowStep  `json:"steps"`
+}
+
+// WorkflowInput is one prompt the user fills in before launch. Type is
+// advisory today (the TUI always uses a text input); the GUI may grow
+// richer field renderers.
+type WorkflowInput struct {
+	Name        string `json:"name"`
+	Prompt      string `json:"prompt"`
+	Type        string `json:"type"`           // "string" | "text" | "int" | "bool"
+	Required    bool   `json:"required"`
+	Placeholder string `json:"placeholder,omitempty"`
+	Default     string `json:"default,omitempty"`
+}
+
+// WorkflowStep is one node in the linear script. Exactly one of the
+// kind-specific fields is meaningful per Kind value; the rest are
+// ignored by the executor.
+type WorkflowStep struct {
+	Kind StepKind `json:"kind"`
+
+	// Template is the body of a user_message step; rendered with
+	// text/template against the inputs map plus a small built-in
+	// context (`.agent`, `.workflow`).
+	Template string `json:"template,omitempty"`
+
+	// UntilTool optionally narrows a wait_for_assistant step to wait
+	// for a specific tool call (e.g. "complete", "clarify"). Empty
+	// means "wait for any assistant turn that ends a tool round."
+	UntilTool string `json:"until_tool,omitempty"`
+}
+
+// StepKind enumerates the step types supported in 1.0. Adding a new
+// kind requires updating Validate() and the workflow executor.
+type StepKind string
+
+const (
+	StepUserMessage       StepKind = "user_message"
+	StepWaitForAssistant  StepKind = "wait_for_assistant"
+)
+
+// AllStepKinds lists every kind the executor understands today. Used
+// by Validate() so unknown kinds in user YAML fail fast at import.
+var AllStepKinds = []StepKind{StepUserMessage, StepWaitForAssistant}
+
+// FindWorkflow returns the named workflow on the agent, or nil if none
+// matches. Names are compared case-sensitively to match YAML import
+// semantics.
+func (a *Agent) FindWorkflow(name string) *Workflow {
+	for i := range a.Workflows {
+		if a.Workflows[i].Name == name {
+			return &a.Workflows[i]
+		}
+	}
+	return nil
+}
+
+// ResolveDefaultWorkflow returns the workflow that should run when the
+// user launches an agent without picking one. Priority: DefaultWorkflow
+// if set and present; else the only workflow if there is exactly one;
+// else nil.
+func (a *Agent) ResolveDefaultWorkflow() *Workflow {
+	if a.DefaultWorkflow != "" {
+		if w := a.FindWorkflow(a.DefaultWorkflow); w != nil {
+			return w
+		}
+	}
+	if len(a.Workflows) == 1 {
+		return &a.Workflows[0]
+	}
+	return nil
+}

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sPROFFEs/Clade/pkg/workpath"
+	"github.com/sPROFFEs/PrAImate/pkg/workpath"
 )
 
 // samplesDir returns the absolute path to the repo's bundled samples,

@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sPROFFEs/Clade/pkg/targets"
-	"github.com/sPROFFEs/Clade/pkg/workpath"
+	"github.com/sPROFFEs/PrAImate/pkg/targets"
+	"github.com/sPROFFEs/PrAImate/pkg/workpath"
 )
 
 // PrepareSandbox loads the workpath, validates it, and compiles it into

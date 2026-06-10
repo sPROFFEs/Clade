@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sPROFFEs/Clade/internal/installer"
+	"github.com/sPROFFEs/PrAImate/internal/installer"
 )
 
 // ErrProbeTimeout is returned by probeVersion when the binary exists
