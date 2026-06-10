@@ -20,14 +20,15 @@ var Current = "1.0.0"
 // Repo is the GitHub slug the updater queries for releases.
 const Repo = "sPROFFEs/PrAImate"
 
-// Banner is the wordmark rendered on -version, on the boot splash, and
-// at the top of README.md. Placeholder for 1.0 — final ASCII art TBD
-// before the 1.0.0 release.
-const Banner = `        ██████╗ ██████╗  █████╗ ██╗███╗   ███╗ █████╗ ████████╗███████╗
-        ██╔══██╗██╔══██╗██╔══██╗██║████╗ ████║██╔══██╗╚══██╔══╝██╔════╝
-        ██████╔╝██████╔╝███████║██║██╔████╔██║███████║   ██║   █████╗
-        ██╔═══╝ ██╔══██╗██╔══██║██║██║╚██╔╝██║██╔══██║   ██║   ██╔══╝
-        ██║     ██║  ██║██║  ██║██║██║ ╚═╝ ██║██║  ██║   ██║   ███████╗
-        ╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝     ╚═╝╚═╝  ╚═╝   ╚═╝   ╚══════╝
+// Banner is the PRAIMATE wordmark with the monkey mascot on the left.
+// Rendered on -version and mirrored by the boot splash
+// (cmd/praimate/screen_splash.go keeps its own copy because it
+// animates per-row; update both together).
+const Banner = `   .-"-.     ██████╗ ██████╗  █████╗ ██╗███╗   ███╗ █████╗ ████████╗███████╗
+  /|6 6|\    ██╔══██╗██╔══██╗██╔══██╗██║████╗ ████║██╔══██╗╚══██╔══╝██╔════╝
+ {/(_0_)\}   ██████╔╝██████╔╝███████║██║██╔████╔██║███████║   ██║   █████╗
+  _/ ^ \_    ██╔═══╝ ██╔══██╗██╔══██║██║██║╚██╔╝██║██╔══██║   ██║   ██╔══╝
+ (/ /^\ \)   ██║     ██║  ██║██║  ██║██║██║ ╚═╝ ██║██║  ██║   ██║   ███████╗
+  ""' '""    ╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝     ╚═╝╚═╝  ╚═╝   ╚═╝   ╚══════╝
 
                   one harness, every agent — shared memory & MCP`

@@ -1,10 +1,10 @@
 package main
 
-// Boot splash: a brief animated logo that runs when `clade` starts,
-// then transitions to whatever the real first screen is (first-run
-// wizard or chat list). Codex-CLI-style draw-in: the logo reveals
-// column-by-column from left to right, the wordmark pulses, then we
-// hand off.
+// Boot splash: a brief animated logo that runs when `praimate`
+// starts, then transitions to whatever the real first screen is
+// (first-run wizard or chat list). Codex-CLI-style draw-in: the logo
+// reveals column-by-column from left to right, the wordmark pulses,
+// then we hand off.
 //
 // Skip with --no-splash, or set PRAIMATE_NO_SPLASH=1 in the env.
 // Skipped automatically when stdin/stdout isn't a TTY (CI, piped),
@@ -19,21 +19,21 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// The clade wordmark with a cladogram (the slash tree on the left)
-// inlined on each row. Six lines total: hand-drawn cladogram on the
-// left, figlet "ANSI Shadow" CLADE letters on the right. We reveal
-// characters column-by-column to produce the draw-in effect.
+// The praimate wordmark with the monkey mascot inlined on each row.
+// Six lines total: ASCII monkey on the left, figlet "ANSI Shadow"
+// PRAIMATE letters on the right. We reveal characters column-by-
+// column to produce the draw-in effect.
 //
 // If you regenerate, keep all rows the same rune-width or the
 // reveal will look uneven (the reveal pads each frame to totalCols
 // so the centred layout stays stable across frames).
 var logoWordmark = []string{
-	"            __         ██████╗██╗      █████╗ ██████╗ ███████╗",
-	"            / /        ██╔════╝██║     ██╔══██╗██╔══██╗██╔════╝",
-	"           / /         ██║     ██║     ███████║██║  ██║█████╗  ",
-	"          / / \\        ██║     ██║     ██╔══██║██║  ██║██╔══╝  ",
-	"         / / \\ \\       ╚██████╗███████╗██║  ██║██████╔╝███████╗",
-	"        /_/   \\_\\      ╚═════╝╚══════╝╚═╝  ╚═╝╚═════╝ ╚══════╝",
+	"   .-\"-.     ██████╗ ██████╗  █████╗ ██╗███╗   ███╗ █████╗ ████████╗███████╗",
+	"  /|6 6|\\    ██╔══██╗██╔══██╗██╔══██╗██║████╗ ████║██╔══██╗╚══██╔══╝██╔════╝",
+	" {/(_0_)\\}   ██████╔╝██████╔╝███████║██║██╔████╔██║███████║   ██║   █████╗  ",
+	"  _/ ^ \\_    ██╔═══╝ ██╔══██╗██╔══██║██║██║╚██╔╝██║██╔══██║   ██║   ██╔══╝  ",
+	" (/ /^\\ \\)   ██║     ██║  ██║██║  ██║██║██║ ╚═╝ ██║██║  ██║   ██║   ███████╗",
+	"  \"\"' '\"\"    ╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝     ╚═╝╚═╝  ╚═╝   ╚═╝   ╚══════╝",
 }
 
 // Pre-computed wordmark column count, used to drive the reveal.
@@ -81,14 +81,14 @@ type splashModel struct {
 	cols      int       // how many columns of the wordmark are revealed
 	totalCols int
 	phase     splashPhase
-	pulse     int // counter for the lambda colour cycle in the hold phase
+	pulse     int // counter for the wordmark colour cycle in the hold phase
 }
 
 type splashPhase int
 
 const (
 	splashRevealing splashPhase = iota // characters drawing in
-	splashHolding                      // fully drawn, lambda pulsing
+	splashHolding                      // fully drawn, wordmark pulsing
 	splashDone                         // ready to transition
 )
 
@@ -186,7 +186,7 @@ func (m splashModel) View() string {
 
 	b.WriteString("\n")
 	tagStyle := lipgloss.NewStyle().Foreground(t.Muted).Italic(true)
-	tagline := "fork agent chats from one common template"
+	tagline := "one harness, every agent — shared memory & MCP"
 	if m.phase == splashRevealing {
 		// Only show the tagline once the wordmark finishes drawing.
 		tagline = ""

@@ -385,7 +385,7 @@ func (m *layoutModel) View() string {
 
 // renderTopBar is the persistent header: app name + workspaces root.
 func (m *layoutModel) renderTopBar(w int) string {
-	app := titleStyle.Render("λ praimate")
+	app := titleStyle.Render("@('-')@ praimate")
 	sepStr := lipgloss.NewStyle().Foreground(t.Border).Render(" │ ")
 	root := lipglossDim(m.cfg.WorkspacesRoot)
 	hint := lipgloss.NewStyle().Foreground(t.Muted).Render("ctrl-p cmd  F1 help  ctrl-c quit")
