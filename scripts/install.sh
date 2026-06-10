@@ -275,6 +275,13 @@ install_from_release() {
   step "Installing to $DEST"
   $SUDO install -m 0755 "$extracted/praimate" "$DEST/praimate"
   $SUDO install -m 0755 "$extracted/wpc"   "$DEST/wpc"
+  # Desktop GUI ships prebuilt in linux-amd64 / windows-amd64 archives.
+  # Install it next to praimate so `praimate --gui` finds it. Absent in
+  # other archives — skip quietly there.
+  if [[ -f "$extracted/praimate-gui" ]]; then
+    $SUDO install -m 0755 "$extracted/praimate-gui" "$DEST/praimate-gui"
+    c_grn "  praimate-gui installed (launch with: praimate --gui)"
+  fi
   # Ship the bundled samples next to the binary at the XDG-style path
   # the launcher already probes (see internal/launcher SampleCandidates:
   # "<execDir>/../share/praimate/samples/workpaths"). Without this, the
@@ -374,7 +381,12 @@ install_local() {
   step "Installing to $DEST"
   $SUDO install -m 0755 "$LOCAL_BINS/praimate" "$DEST/praimate"
   $SUDO install -m 0755 "$LOCAL_BINS/wpc"   "$DEST/wpc"
-  c_grn "  ✓ praimate + wpc installed"
+  if [[ -f "$LOCAL_BINS/praimate-gui" ]]; then
+    $SUDO install -m 0755 "$LOCAL_BINS/praimate-gui" "$DEST/praimate-gui"
+    c_grn "  ✓ praimate + wpc + praimate-gui installed"
+  else
+    c_grn "  ✓ praimate + wpc installed"
+  fi
 }
 
 # ---------- dispatch ----------

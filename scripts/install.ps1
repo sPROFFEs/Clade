@@ -186,6 +186,13 @@ function Install-Binary {
         Step "Installing to $Dest"
         Copy-Item -Path (Join-Path $extracted "praimate.exe") -Destination $Dest -Force
         Copy-Item -Path (Join-Path $extracted "wpc.exe")   -Destination $Dest -Force
+        # Desktop GUI ships prebuilt in the windows-amd64 archive.
+        # Install it next to praimate.exe so `praimate --gui` finds it.
+        $guiSrc = Join-Path $extracted "praimate-gui.exe"
+        if (Test-Path $guiSrc) {
+            Copy-Item -Path $guiSrc -Destination $Dest -Force
+            Write-Host "  v praimate-gui.exe installed (launch with: praimate --gui)" -ForegroundColor Green
+        }
         # Ship the bundled samples next to the binary at the same path
         # the launcher probes in SampleCandidates:
         # "<execDir>\..\share\praimate\samples\workpaths". Without this,
