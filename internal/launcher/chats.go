@@ -279,3 +279,77 @@ func slugifyLabel(s string) string {
 	}
 	return s
 }
+
+// CreateChatFromInstructions creates a chat whose workpath is
+// synthesised from a PrAImate agent's instructions instead of cloned
+// from an on-disk template. Added for the 1.1 "agents replace
+// templates" flow: picking an agent and opening an interactive chat
+// writes a minimal-but-valid workpath (workpath.json + mission.md)
+// so the existing wpc compile + launch + resume machinery works
+// unchanged.
+//
+// templateName is recorded in chat.json as "agent:<id>" so the chat
+// list can show provenance without a Template existing on disk.
+func CreateChatFromInstructions(root, label string, agent AgentID, agentID, description, instructions string) (Chat, error) {
+	if strings.TrimSpace(label) == "" {
+		return Chat{}, fmt.Errorf("chat label cannot be empty")
+	}
+	slug := slugifyLabel(label)
+	if slug == "" {
+		return Chat{}, fmt.Errorf("chat label %q has no usable characters", label)
+	}
+	now := time.Now().UTC()
+	id := now.Format("20060102-150405") + "-" + slug
+	cRoot := filepath.Join(root, ChatsDir, id)
+	if _, err := os.Stat(cRoot); err == nil {
+		return Chat{}, fmt.Errorf("chat dir already exists: %s", cRoot)
+	}
+	wpDir := filepath.Join(cRoot, "workpath")
+	if err := os.MkdirAll(wpDir, 0o755); err != nil {
+		return Chat{}, err
+	}
+	cleanup := func() { _ = os.RemoveAll(cRoot) }
+
+	// Minimal valid workpath: manifest + mission. The agent's
+	// instructions become the mission so every wpc target compiles
+	// them into the CLI's native context file.
+	manifestJSON := fmt.Sprintf("{\n  \"description\": %q,\n  \"version\": \"1\"\n}\n", description)
+	if err := os.WriteFile(filepath.Join(wpDir, "workpath.json"), []byte(manifestJSON), 0o644); err != nil {
+		cleanup()
+		return Chat{}, err
+	}
+	if err := os.WriteFile(filepath.Join(wpDir, "mission.md"), []byte(instructions+"\n"), 0o644); err != nil {
+		cleanup()
+		return Chat{}, err
+	}
+
+	templateName := "agent:" + agentID
+	manifest := chatManifest{
+		Label:     label,
+		Template:  templateName,
+		Agent:     string(agent),
+		CreatedAt: now,
+		LastUsed:  now,
+	}
+	rawManifest, _ := json.MarshalIndent(manifest, "", "  ")
+	rawManifest = append(rawManifest, '\n')
+	if err := os.WriteFile(filepath.Join(cRoot, "chat.json"), rawManifest, 0o644); err != nil {
+		cleanup()
+		return Chat{}, err
+	}
+
+	return Chat{
+		ID:          id,
+		Label:       label,
+		Root:        cRoot,
+		WorkpathDir: wpDir,
+		SandboxDir:  filepath.Join(cRoot, "sandbox"),
+		SessionsDir: filepath.Join(cRoot, "sessions"),
+		ChatJSON:    filepath.Join(cRoot, "chat.json"),
+		Template:    templateName,
+		AgentID:     agent,
+		CreatedAt:   now,
+		LastUsed:    now,
+		Description: description,
+	}, nil
+}

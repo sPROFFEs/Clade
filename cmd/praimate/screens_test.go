@@ -262,7 +262,7 @@ func TestChatListModel_EmptyRoot_ShowsNewChatEntry(t *testing.T) {
 	}
 }
 
-func TestChatListModel_EnterOnNewOpensTemplatePicker(t *testing.T) {
+func TestChatListModel_EnterOnNewOpensAgentsPane(t *testing.T) {
 	tmp := seededRoot(t)
 	redirectConfig(t, t.TempDir())
 	cfg := &launcher.Config{WorkspacesRoot: tmp}
@@ -275,35 +275,11 @@ func TestChatListModel_EnterOnNewOpensTemplatePicker(t *testing.T) {
 		t.Fatal("Enter on '+ new chat' should produce a Cmd")
 	}
 	done := runCmd(t, cmd).(screenDoneMsg)
-	if _, ok := done.next.(pickTemplateModel); !ok {
-		t.Errorf("expected pickTemplateModel, got %T", done.next)
+	if _, ok := done.next.(recipesModel); !ok {
+		t.Errorf("expected recipesModel, got %T", done.next)
 	}
 }
 
-func TestChatListModel_ManageTemplatesRowIsVisibleAndOpensList(t *testing.T) {
-	// Empty root → cursor 0 = "+ new chat", cursor 1 = "Manage templates".
-	tmp := seededRoot(t)
-	redirectConfig(t, t.TempDir())
-	cfg := &launcher.Config{WorkspacesRoot: tmp}
-	m := newChatListModel(cfg)
-	next, _ := m.Update(runCmd(t, m.Init()))
-	m = next.(chatListModel)
-	if !strings.Contains(m.View(), "Manage templates") {
-		t.Errorf("home should always show 'Manage templates' row:\n%s", m.View())
-	}
-
-	// down → cursor on Manage templates → enter → templateListModel.
-	nx, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
-	m = nx.(chatListModel)
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if cmd == nil {
-		t.Fatal("Enter on Manage templates should produce a Cmd")
-	}
-	done := runCmd(t, cmd).(screenDoneMsg)
-	if _, ok := done.next.(templateListModel); !ok {
-		t.Errorf("expected templateListModel, got %T", done.next)
-	}
-}
 
 func TestChatListModel_HelpAdaptsToCursor(t *testing.T) {
 	tmp := seededRoot(t)
@@ -325,101 +301,21 @@ func TestChatListModel_HelpAdaptsToCursor(t *testing.T) {
 		}
 	}
 
-	// Move to "Manage templates" row → chat-only keys should disappear.
-	for i := 0; i < 2; i++ {
-		nx, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
-		m = nx.(chatListModel)
-	}
+	// Move to the "+ new chat" row → chat-only keys should disappear.
+	nx, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = nx.(chatListModel)
 	help = chatListHelp(m)
 	for _, key := range []string{"e settings", "d delete", "f files"} {
 		if strings.Contains(help, key) {
 			t.Errorf("on extra row the help should NOT mention %q; got:\n%s", key, help)
 		}
 	}
-	if !strings.Contains(help, "enter manage templates") {
-		t.Errorf("on Manage templates row, help should explain Enter's effect:\n%s", help)
+	if !strings.Contains(help, "enter new chat") {
+		t.Errorf("on the new-chat row, help should explain Enter's effect:\n%s", help)
 	}
 }
 
-func TestChatListModel_TKeyOpensTemplateList(t *testing.T) {
-	tmp := seededRoot(t)
-	redirectConfig(t, t.TempDir())
-	cfg := &launcher.Config{WorkspacesRoot: tmp}
-	m := newChatListModel(cfg)
-	next, _ := m.Update(runCmd(t, m.Init()))
-	m = next.(chatListModel)
 
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'t'}})
-	if cmd == nil {
-		t.Fatal("'t' should open template list")
-	}
-	done := runCmd(t, cmd).(screenDoneMsg)
-	if _, ok := done.next.(templateListModel); !ok {
-		t.Errorf("expected templateListModel, got %T", done.next)
-	}
-}
-
-func TestNewChatFromTemplate_LabelPlusAgentCreatesChat(t *testing.T) {
-	tmp := seededRoot(t)
-	redirectConfig(t, t.TempDir())
-	cfg := &launcher.Config{WorkspacesRoot: tmp}
-
-	tpl, err := launcher.LoadTemplate(tmp, "reversing")
-	if err != nil || tpl == nil {
-		t.Fatalf("LoadTemplate: %v %v", err, tpl)
-	}
-	m := newNewChatFromTemplateModel(cfg, *tpl)
-	m.label.SetValue("integration-chat")
-
-	// step 0 → 1 (Enter triggers agent detection)
-	nx, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m = nx.(newChatFromTemplateModel)
-	if cmd == nil {
-		t.Fatal("expected agent-detect Cmd")
-	}
-	// Skip the real detection: inject a known-available fake.
-	m.agents = []launcher.Agent{
-		{ID: launcher.AgentClaude, Label: "Claude", Binary: fakeCmd(), WpcTarget: "claude", Available: true},
-	}
-
-	// Step 1 (agent) → Enter advances to step 2 (Ollama y/n), it does
-	// NOT immediately spawn the create-chat Cmd anymore.
-	nx, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m = nx.(newChatFromTemplateModel)
-	if m.step != 2 {
-		t.Fatalf("after picking agent, step = %d, want 2 (ollama)", m.step)
-	}
-	// Pick "no" to launch immediately without going through the Ollama wizard.
-	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
-	if cmd == nil {
-		t.Fatal("'n' on Ollama step should produce a finalize Cmd")
-	}
-	msg := runCmd(t, cmd)
-	done, ok := msg.(screenDoneMsg)
-	if !ok {
-		t.Fatalf("expected screenDoneMsg, got %T %+v", msg, msg)
-	}
-	if done.launch == nil {
-		t.Fatalf("expected launch plan after new-chat (Ollama=no), got next=%T", done.next)
-	}
-	if done.launchedWS == nil {
-		t.Fatal("expected launchedWS to be set so main() can sync MEMORY.md back")
-	}
-
-	chats, err := launcher.ListChats(tmp)
-	if err != nil || len(chats) != 1 {
-		t.Fatalf("ListChats: chats=%+v err=%v", chats, err)
-	}
-	if chats[0].Label != "integration-chat" {
-		t.Errorf("label = %q", chats[0].Label)
-	}
-	if chats[0].Template != "reversing" {
-		t.Errorf("template = %q", chats[0].Template)
-	}
-	if chats[0].AgentID != launcher.AgentClaude {
-		t.Errorf("agent = %q", chats[0].AgentID)
-	}
-}
 
 func TestChatListModel_EnterOnExistingGoesToLaunchingScreen(t *testing.T) {
 	tmp := seededRoot(t)
@@ -524,44 +420,6 @@ func TestChatListModel_AKeyDoesNotOpenAgentsPicker(t *testing.T) {
 	}
 }
 
-func TestNewChatFromTemplate_OllamaYesRoutesToOllamaScreen(t *testing.T) {
-	tmp := seededRoot(t)
-	redirectConfig(t, t.TempDir())
-	cfg := &launcher.Config{WorkspacesRoot: tmp}
-	tpl, _ := launcher.LoadTemplate(tmp, "reversing")
-
-	m := newNewChatFromTemplateModel(cfg, *tpl)
-	m.label.SetValue("with-ollama")
-	// step 0 → 1
-	nx, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m = nx.(newChatFromTemplateModel)
-	m.agents = []launcher.Agent{
-		{ID: launcher.AgentClaude, Binary: fakeCmd(), WpcTarget: "claude", Available: true},
-	}
-	// step 1 → 2
-	nx, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	m = nx.(newChatFromTemplateModel)
-	if m.step != 2 {
-		t.Fatalf("step = %d, want 2", m.step)
-	}
-	// 'y' triggers finalize → returns screenDoneMsg with next=ollamaModel
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
-	if cmd == nil {
-		t.Fatal("'y' should produce a finalize Cmd")
-	}
-	done := runCmd(t, cmd).(screenDoneMsg)
-	if done.launch != nil {
-		t.Errorf("'y' should NOT launch directly — it should route to Ollama screen first; got launch=%+v", done.launch)
-	}
-	if _, ok := done.next.(ollamaModel); !ok {
-		t.Errorf("expected ollamaModel as the next screen, got %T", done.next)
-	}
-	// Chat was still created so the Ollama screen has a real ws to save into.
-	chats, _ := launcher.ListChats(tmp)
-	if len(chats) != 1 || chats[0].Label != "with-ollama" {
-		t.Errorf("expected the chat to be created before the Ollama screen; got %+v", chats)
-	}
-}
 
 func TestChatListModel_DeleteFlowConfirmsAndRemoves(t *testing.T) {
 	tmp := seededRoot(t)

@@ -151,7 +151,7 @@ func TestBuiltinAgents_AllParseAndValidate(t *testing.T) {
 	if len(agents) == 0 {
 		t.Fatal("no built-in agents found")
 	}
-	wantIDs := map[string]bool{"freeform": false, "tdd-coder": false, "release-engineer": false}
+	wantIDs := map[string]bool{"agent-builder": false, "security-review": false, "dev-team": false}
 	for _, a := range agents {
 		if err := a.Validate(); err != nil {
 			t.Errorf("builtin %s invalid: %v", a.ID, err)
@@ -164,6 +164,44 @@ func TestBuiltinAgents_AllParseAndValidate(t *testing.T) {
 		if !seen {
 			t.Errorf("expected builtin %q, not found", id)
 		}
+	}
+}
+
+func TestSeedBuiltins_EvictsStaleBuiltinsButKeepsImports(t *testing.T) {
+	s := openTempStore(t)
+	defer s.Close()
+	c, _ := New(Options{Store: s})
+	ctx := context.Background()
+
+	// Simulate a stale builtin from an earlier release + a user import.
+	if _, err := c.upsertAgent(ctx, &Agent{
+		ID: "freeform", Name: "Old Freeform", Instructions: "x",
+		Supports: []string{"claude"}, SourcePath: "builtin:freeform.yaml",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.upsertAgent(ctx, &Agent{
+		ID: "my-import", Name: "Mine", Instructions: "x",
+		Supports: []string{"claude"}, SourcePath: "/home/u/mine.yaml",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := c.SeedBuiltins(ctx); err != nil {
+		t.Fatalf("SeedBuiltins: %v", err)
+	}
+
+	// Stale builtin gone.
+	if _, err := c.GetAgent(ctx, "freeform"); !errors.Is(err, ErrAgentNotFound) {
+		t.Errorf("stale builtin should be evicted, got err=%v", err)
+	}
+	// User import survives.
+	if _, err := c.GetAgent(ctx, "my-import"); err != nil {
+		t.Errorf("user import should survive seeding, got %v", err)
+	}
+	// New builtins present.
+	if _, err := c.GetAgent(ctx, "dev-team"); err != nil {
+		t.Errorf("new builtin dev-team missing: %v", err)
 	}
 }
 

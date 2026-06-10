@@ -44,19 +44,18 @@ func TestInstall_AutoFixableOnly_DoesNotBlock(t *testing.T) {
 	}
 }
 
-// TestInstall_ReturnToFromNewChatGoesToPickTemplate: the new-chat flow
-// must not drag a stub workspace through to the post-install screen
-// (that's what caused the "empty sandbox path" defensive bail-out the
-// user hit when picking an unavailable agent during chat creation).
-// Pressing esc after install should land on the template picker, not
-// on an agents picker with bogus state.
-func TestInstall_ReturnToFromNewChatGoesToPickTemplate(t *testing.T) {
+// TestInstall_ReturnToHonoursFactory: the install screen must not drag
+// a stub workspace through to the post-install screen. Pressing esc
+// after install should land on whatever pane the returnTo factory
+// supplies (the agents pane in the post-template world), not on a
+// picker with bogus state.
+func TestInstall_ReturnToHonoursFactory(t *testing.T) {
 	cfg := &launcher.Config{WorkspacesRoot: t.TempDir()}
 
 	called := false
 	m := newInstallModelWithReturn(cfg, launcher.AgentOpenCode, func() tea.Model {
 		called = true
-		return newPickTemplateModel(cfg)
+		return newRecipesModel(cfg)
 	})
 
 	// esc on the picker step → exitTo
@@ -68,8 +67,8 @@ func TestInstall_ReturnToFromNewChatGoesToPickTemplate(t *testing.T) {
 	if !called {
 		t.Error("returnTo factory should have been invoked")
 	}
-	if _, ok := done.next.(pickTemplateModel); !ok {
-		t.Errorf("expected pickTemplateModel after install esc, got %T", done.next)
+	if _, ok := done.next.(recipesModel); !ok {
+		t.Errorf("expected recipesModel after install esc, got %T", done.next)
 	}
 }
 

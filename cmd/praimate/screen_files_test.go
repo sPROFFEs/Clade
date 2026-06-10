@@ -17,7 +17,7 @@ func TestFilesModel_EnterOnMissionInvokesEditor(t *testing.T) {
 	redirectConfig(t, t.TempDir())
 	cfg := &launcher.Config{WorkspacesRoot: tmp}
 	tpl, _ := launcher.LoadTemplate(tmp, "reversing")
-	parent := newTemplateListModel(cfg)
+	parent := newChatListModel(cfg)
 
 	// Force a deterministic editor that exits cleanly so tea.ExecProcess
 	// doesn't try to spawn vi/notepad in the test runner.
@@ -42,7 +42,7 @@ func TestFilesModel_EnterOnOpenDirReturnsToScreen(t *testing.T) {
 	redirectConfig(t, t.TempDir())
 	cfg := &launcher.Config{WorkspacesRoot: tmp}
 	tpl, _ := launcher.LoadTemplate(tmp, "reversing")
-	parent := newTemplateListModel(cfg)
+	parent := newChatListModel(cfg)
 
 	m := newFilesModel(cfg, tpl.WorkpathDir, "template reversing", parent)
 	// Move cursor to last entry (open dir).
@@ -59,7 +59,7 @@ func TestFilesModel_EnterOnOpenDirReturnsToScreen(t *testing.T) {
 func TestFilesModel_EscReturnsToParent(t *testing.T) {
 	tmp := seededRoot(t)
 	cfg := &launcher.Config{WorkspacesRoot: tmp}
-	parent := newTemplateListModel(cfg)
+	parent := newChatListModel(cfg)
 
 	m := newFilesModel(cfg, filepath.Join(tmp, "x"), "x", parent)
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
@@ -67,8 +67,8 @@ func TestFilesModel_EscReturnsToParent(t *testing.T) {
 		t.Fatal("esc should return a Cmd")
 	}
 	done := runCmd(t, cmd).(screenDoneMsg)
-	if _, ok := done.next.(templateListModel); !ok {
-		t.Errorf("esc should return to parent (templateListModel), got %T", done.next)
+	if _, ok := done.next.(chatListModel); !ok {
+		t.Errorf("esc should return to parent (chatListModel), got %T", done.next)
 	}
 }
 

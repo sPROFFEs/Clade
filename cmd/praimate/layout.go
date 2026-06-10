@@ -47,12 +47,11 @@ const (
 
 const (
 	navSectionChats      = "chats"
-	navSectionTemplates  = "templates"
-	navSectionAgents     = "agents"
+	navSectionAgents     = "agents" // CLI-installer browser, shown as "CLIs"
 	navSectionTools      = "tools"
 	navSectionBackup     = "backup"
 	navSectionLocalLLM   = "localllm"
-	navSectionRecipes    = "recipes"
+	navSectionRecipes    = "recipes" // YAML-agent launch flow, shown as "Agents"
 	navSectionMCP        = "mcp"
 	navSectionAutomation = "automation"
 	navSectionHelp       = "help"
@@ -75,20 +74,25 @@ var navEntries = []navEntry{
 		},
 	},
 	{
-		id:     navSectionTemplates,
-		label:  "Templates",
+		id:     navSectionRecipes,
+		label:  "Agents",
 		hotkey: "2",
 		makePane: func(cfg *launcher.Config) Pane {
-			return newTemplateListModel(cfg)
+			// The YAML-agent launch flow (internal/core agents +
+			// workflow runner). Templates retired in 1.1 — this is
+			// the primary "start new work" surface now.
+			return newRecipesModel(cfg)
 		},
 	},
 	{
 		id:     navSectionAgents,
-		label:  "Agents",
+		label:  "CLIs",
 		hotkey: "3",
 		makePane: func(cfg *launcher.Config) Pane {
-			// Agents pane here is the "browse + install" view —
-			// uses a sentinel workspace because no chat is bound.
+			// CLI-installer browser: detect/install/update the
+			// third-party coding CLIs (claude, codex, opencode, …).
+			// Formerly labelled "Agents"; renamed when the YAML-agent
+			// flow took that name.
 			return newAgentsBrowser(cfg)
 		},
 	},
@@ -97,11 +101,11 @@ var navEntries = []navEntry{
 		label:  "Tools",
 		hotkey: "4",
 		makePane: func(cfg *launcher.Config) Pane {
-			// Tools tab: Clade-managed companion CLIs (graphify, …).
-			// Installed via the same installer.Method flow as agents
+			// Tools tab: PrAImate-managed companion CLIs (graphify, …).
+			// Installed via the same installer.Method flow as CLIs
 			// but kept in a separate section because they aren't
 			// launchable as a primary chat target — they're called
-			// by wpc-staged template scripts.
+			// by wpc-staged scripts.
 			return newToolsBrowser(cfg)
 		},
 	},
@@ -122,22 +126,6 @@ var navEntries = []navEntry{
 		},
 	},
 	{
-		id:     navSectionRecipes,
-		label:  "Recipes",
-		hotkey: "0",
-		makePane: func(cfg *launcher.Config) Pane {
-			// Recipes is the Phase 2c-introduced flow that runs
-			// portable YAML agents (internal/core) through a
-			// third-party CLI via the workflow runner.
-			//
-			// Naming: kept distinct from the "Agents" nav entry above
-			// because that one points to the CLI-installer browser.
-			// Phase 6 (rebrand) will swap "Agents"→"CLIs" and rename
-			// this pane to "Agents".
-			return newRecipesModel(cfg)
-		},
-	},
-	{
 		id:     navSectionMCP,
 		label:  "MCP",
 		hotkey: "7",
@@ -148,7 +136,7 @@ var navEntries = []navEntry{
 	{
 		id:     navSectionAutomation,
 		label:  "Automation",
-		hotkey: "9",
+		hotkey: "8",
 		makePane: func(cfg *launcher.Config) Pane {
 			return newAutomationModel(cfg)
 		},
@@ -156,7 +144,7 @@ var navEntries = []navEntry{
 	{
 		id:     navSectionHelp,
 		label:  "Help",
-		hotkey: "8",
+		hotkey: "9",
 		makePane: func(cfg *launcher.Config) Pane {
 			return newHelpPane(cfg)
 		},
@@ -266,7 +254,7 @@ func (m *layoutModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.toggleHelp()
 				return m, nil
 			}
-		case "ctrl+1", "ctrl+2", "ctrl+3", "ctrl+4", "ctrl+5", "ctrl+6", "ctrl+7", "ctrl+8":
+		case "ctrl+1", "ctrl+2", "ctrl+3", "ctrl+4", "ctrl+5", "ctrl+6", "ctrl+7", "ctrl+8", "ctrl+9":
 			// Direct nav-section jumps.
 			digit := int(msg.String()[len(msg.String())-1] - '0')
 			if digit >= 1 && digit <= len(navEntries) {
@@ -571,8 +559,8 @@ func (m *layoutModel) updatePalette(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // runCommand dispatches the palette command. Supported:
 //
-//	chats / templates / agents / help    — jump to nav section
-//	new                                  — start a new chat (template picker)
+//	chats / agents / clis / help         — jump to nav section
+//	new                                  — start a new chat (agent picker)
 //	quit                                 — exit cleanly
 func (m *layoutModel) runCommand(c string) tea.Cmd {
 	c = strings.ToLower(strings.TrimSpace(c))
@@ -583,8 +571,9 @@ func (m *layoutModel) runCommand(c string) tea.Cmd {
 	case "quit", "q", "exit":
 		return tea.Quit
 	case "new", "new-chat", "n":
-		m.pane = newPickTemplateModel(m.cfg)
-		m.navCurrent = navSectionChats
+		// New work starts from an agent (templates retired in 1.1).
+		m.pane = newRecipesModel(m.cfg)
+		m.navCurrent = navSectionRecipes
 		return m.pane.Init()
 	case "search", "/", "find":
 		m.pane = newSearchModel(m.cfg)
@@ -607,7 +596,7 @@ func (m *layoutModel) renderPalette(w int) string {
 		Padding(0, 1).
 		Width(w - 4)
 	title := lipgloss.NewStyle().Foreground(t.Accent).Bold(true).Render(":")
-	hint := lipglossDim("enter run · esc cancel · try `chats`, `templates`, `agents`, `new`, `quit`")
+	hint := lipglossDim("enter run · esc cancel · try `chats`, `agents`, `clis`, `new`, `quit`")
 	content := title + " " + m.palette.input.View() + "\n" + hint
 	return box.Render(content)
 }
@@ -630,7 +619,7 @@ func (m *layoutModel) toggleHelp() {
 func (m *layoutModel) renderHelpOverlay() string {
 	rows := [][2]string{
 		{"tab", "cycle focus between pane and nav"},
-		{"ctrl-1 .. ctrl-4", "jump to nav section directly"},
+		{"ctrl-1 .. ctrl-9", "jump to nav section directly"},
 		{"ctrl-p", "open command palette"},
 		{"F1", "toggle this help overlay"},
 		{":", "palette shortcut (on list-only screens — see note)"},

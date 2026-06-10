@@ -48,10 +48,11 @@ What the harness adds on top of your CLIs:
   tokens, SSN, cards, custom regexes) and secrets are replaced with
   placeholders before they reach any CLI; replies are un-scrubbed on
   the way back. A review sheet shows match counts before launch.
-- **Templates & chats** (the original Clade workflow) — pair each
-  session with a self-contained *template* (mission, playbook, rules,
-  tools, subagents) cloned into an isolated *chat* with native
-  session resume per CLI.
+- **Chats** — launch an agent and it clones into an isolated *chat*
+  with its own sandbox, CLI binding, and memory, plus native session
+  resume per CLI. (Agents replaced the old standalone *templates*
+  concept in 1.1 — pick an agent and press `c` for an interactive
+  chat, or `enter` to run one of its scripted workflows.)
 
 ## Install
 

@@ -28,9 +28,11 @@ type chatListModel struct {
 // chatListExtra are the persistent rows at the bottom of the list that
 // aren't real chats but still take a cursor position. Order matters —
 // they line up with index offsets in Update/View.
+//
+// Templates were retired in 1.1 — new work starts from an Agent (the
+// Agents pane), so the only extra row left is "new chat".
 const (
-	chatListExtraNew = iota // "+ new chat…"
-	chatListExtraTpl        // "Manage templates →"
+	chatListExtraNew = iota // "+ new chat (pick an agent)…"
 	chatListExtraCount
 )
 
@@ -96,13 +98,12 @@ func (m chatListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cursor++
 			}
 		case "enter":
-			// Real chats live at indices [0..len-1]. The extra rows
-			// (+ new chat, manage templates) come after.
+			// Real chats live at indices [0..len-1]. The "+ new chat"
+			// extra row comes after; it routes to the Agents pane —
+			// new work starts from an agent since templates retired.
 			switch {
 			case m.cursor == len(m.items)+chatListExtraNew:
-				return m, wrap(newPickTemplateModel(m.cfg))
-			case m.cursor == len(m.items)+chatListExtraTpl:
-				return m, wrap(newTemplateListModel(m.cfg))
+				return m, wrap(newRecipesModel(m.cfg))
 			default:
 				c := m.items[m.cursor]
 				return m, wrap(newLaunchingModel(m.cfg, c))
@@ -118,7 +119,7 @@ func (m chatListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, wrap(newLaunchingModelFresh(m.cfg, m.items[m.cursor]))
 			}
 		case "n":
-			return m, wrap(newPickTemplateModel(m.cfg))
+			return m, wrap(newRecipesModel(m.cfg))
 		case "d":
 			if m.cursor < len(m.items) {
 				m.deleteAsk = true
@@ -148,8 +149,6 @@ func (m chatListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// (`e` key → "Local endpoint" row). The chat list `o` key no
 		// longer opens it directly — keeping all chat config under one
 		// roof matches the agent picker's move in 0.1.10.
-		case "t":
-			return m, wrap(newTemplateListModel(m.cfg))
 		case "r":
 			return m, m.Init()
 		case "/":
@@ -239,8 +238,7 @@ func (m chatListModel) Body() string {
 		b.WriteString(descStyle.Render(strings.Repeat("─", 40)) + "\n")
 	}
 	extras := []string{
-		"+ new chat…",
-		"Manage templates →",
+		"+ new chat (pick an agent)…",
 	}
 	for i, label := range extras {
 		isSel := m.cursor == len(m.items)+i
@@ -265,9 +263,9 @@ func chatListTitle(m chatListModel) string {
 }
 
 // chatListHelp builds the help line from only the keys that apply to
-// the current cursor position. When "+ new chat" or "Manage templates"
-// is highlighted, chat-action keys (e/f/o/a/d) are hidden so the user
-// isn't told about actions that would no-op.
+// the current cursor position. When "+ new chat" is highlighted,
+// chat-action keys (e/f/d) are hidden so the user isn't told about
+// actions that would no-op.
 func chatListHelp(m chatListModel) string {
 	parts := []string{"↑/↓ select"}
 	chatSelected := m.cursor < len(m.items)
@@ -279,16 +277,11 @@ func chatListHelp(m chatListModel) string {
 			"f files",
 			"d delete",
 		)
-	} else {
+	} else if m.cursor == len(m.items)+chatListExtraNew {
 		// Make Enter's effect explicit for the highlighted extra row.
-		switch m.cursor {
-		case len(m.items) + chatListExtraNew:
-			parts = append(parts, "enter new chat")
-		case len(m.items) + chatListExtraTpl:
-			parts = append(parts, "enter manage templates")
-		}
+		parts = append(parts, "enter new chat")
 	}
-	parts = append(parts, "n new", "/ search", "t templates", "r refresh")
+	parts = append(parts, "n new", "/ search", "r refresh")
 	return strings.Join(parts, " · ")
 }
 

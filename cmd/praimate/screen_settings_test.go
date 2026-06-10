@@ -100,28 +100,3 @@ func TestSettingsScreen_MenuRoundTripsOnTemplate(t *testing.T) {
 	}
 }
 
-func TestTemplateListScreen_EnterOpensSettings(t *testing.T) {
-	tmp := t.TempDir()
-	redirectConfig(t, filepath.Join(tmp, "cfg"))
-	t.Chdir(repoRoot(t))
-	_, _ = launcher.SeedSamples(tmp, []string{filepath.Join(repoRoot(t), "samples", "workpaths")})
-
-	cfg := &launcher.Config{WorkspacesRoot: tmp}
-	m := newTemplateListModel(cfg)
-	loaded := runCmd(t, m.Init())
-	next, _ := m.Update(loaded)
-	m = next.(templateListModel)
-	if len(m.items) < 1 {
-		t.Fatal("no template items")
-	}
-
-	// Cursor is at 0 (first template), Enter opens its settings screen.
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if cmd == nil {
-		t.Fatal("Enter on a template row should open settings")
-	}
-	done := runCmd(t, cmd).(screenDoneMsg)
-	if _, ok := done.next.(settingsModel); !ok {
-		t.Errorf("expected settingsModel, got %T", done.next)
-	}
-}

@@ -22,7 +22,7 @@ func TestLayoutRendersWithoutPanic(t *testing.T) {
 	if out == "" {
 		t.Fatal("layout View() returned empty string")
 	}
-	for _, want := range []string{"praimate", "Navigator", "Chats", "Templates", "Agents", "Automation", "Help"} {
+	for _, want := range []string{"praimate", "Navigator", "Chats", "Agents", "CLIs", "Automation", "Help"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("layout missing %q in render:\n%s", want, out)
 		}
@@ -36,13 +36,13 @@ func TestLayoutSelectNavSwitchesSection(t *testing.T) {
 	if l.navCurrent != navSectionChats {
 		t.Fatalf("initial nav = %q, want %q", l.navCurrent, navSectionChats)
 	}
-	// Selecting nav index 1 (Templates) should swap the pane and
+	// Selecting nav index 1 (Agents) should swap the pane and
 	// update navCurrent. We call selectNav directly because Bubble
 	// Tea's ctrl-digit key encoding varies between terminal drivers
 	// and isn't worth pinning down here.
 	_ = l.selectNav(1)
-	if l.navCurrent != navSectionTemplates {
-		t.Errorf("nav after selectNav(1) = %q, want %q", l.navCurrent, navSectionTemplates)
+	if l.navCurrent != navSectionRecipes {
+		t.Errorf("nav after selectNav(1) = %q, want %q", l.navCurrent, navSectionRecipes)
 	}
 }
 

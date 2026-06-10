@@ -58,10 +58,6 @@ type Pane interface {
 // layout's Update type-asserts back to Pane to swap.
 var (
 	_ Pane = chatListModel{}
-	_ Pane = templateListModel{}
-	_ Pane = newTemplateModel{}
-	_ Pane = pickTemplateModel{}
-	_ Pane = newChatFromTemplateModel{}
 	_ Pane = agentsModel{}
 	_ Pane = settingsModel{}
 	_ Pane = filesModel{}

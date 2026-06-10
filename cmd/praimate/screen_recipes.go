@@ -12,12 +12,13 @@ package main
 //	stepRunning       → workflow is executing; spinner-ish status
 //	stepShowResult    → done (or errored); reply text on screen
 //
-// Naming: the navigator section is called "Recipes" deliberately. The
-// existing "Agents" tab in the navigator points at the legacy CLI
-// installer (claude/codex/opencode binaries); they collide visually.
-// Phase 6 (rebrand) will rename "Agents" → "CLIs" and this pane to
-// "Agents". For now the placeholder keeps the rename out of feature
-// PRs.
+// This pane is shown in the navigator as "Agents" — it became the
+// primary "start new work" surface when templates retired in 1.1.
+// (The CLI-installer browser that used to own the "Agents" label is
+// now "CLIs".) Besides scripted workflow runs, `c` on the agent list
+// opens an INTERACTIVE chat: the agent's instructions become the
+// chat's mission via launcher.CreateChatFromInstructions and the
+// normal launch/resume machinery takes over.
 
 import (
 	"context"
@@ -148,6 +149,30 @@ func (m recipesModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.cursor < len(m.agents)-1 {
 				m.cursor++
 			}
+		case "c":
+			// Open an INTERACTIVE chat from this agent: synthesise a
+			// workpath from the agent's instructions and hand off to
+			// the normal launch flow (tea.ExecProcess, native resume,
+			// everything). This is the template-flow replacement.
+			if len(m.agents) == 0 {
+				return m, nil
+			}
+			agent := m.agents[m.cursor]
+			if len(agent.Supports) == 0 {
+				m.err = fmt.Sprintf("agent %q supports no CLI", agent.ID)
+				return m, nil
+			}
+			label := agent.Name + " " + time.Now().Format("Jan-2 15:04")
+			chat, err := launcher.CreateChatFromInstructions(
+				m.cfg.WorkspacesRoot, label,
+				launcher.AgentID(agent.Supports[0]),
+				agent.ID, firstLine(agent.Description), agent.Instructions,
+			)
+			if err != nil {
+				m.err = err.Error()
+				return m, nil
+			}
+			return m, wrap(newLaunchingModel(m.cfg, chat))
 		case "enter":
 			if len(m.agents) == 0 {
 				return m, nil
@@ -377,19 +402,19 @@ func (m recipesModel) View() string {
 func (m recipesModel) Title() string {
 	switch m.step {
 	case stepPickAgent:
-		return "Recipes · pick an agent"
+		return "Agents · pick an agent"
 	case stepPickWorkflow:
-		return "Recipes · " + m.selectedAgent.Name + " · pick a workflow"
+		return "Agents · " + m.selectedAgent.Name + " · pick a workflow"
 	case stepFillInputs:
-		return "Recipes · " + m.selectedAgent.Name + " · " + m.selectedWf.Name
+		return "Agents · " + m.selectedAgent.Name + " · " + m.selectedWf.Name
 	case stepPrivacyReview:
-		return "Recipes · privacy review"
+		return "Agents · privacy review"
 	case stepRunning:
-		return "Recipes · running…"
+		return "Agents · running…"
 	case stepShowResult:
-		return "Recipes · result"
+		return "Agents · result"
 	}
-	return "Recipes"
+	return "Agents"
 }
 
 func (m recipesModel) NavSection() string { return "recipes" }
@@ -398,7 +423,9 @@ func (m recipesModel) CapturingInput() bool { return m.step == stepFillInputs }
 
 func (m recipesModel) Help() string {
 	switch m.step {
-	case stepPickAgent, stepPickWorkflow:
+	case stepPickAgent:
+		return "↑↓ select · enter run workflow · c interactive chat · esc back · ctrl-c quit"
+	case stepPickWorkflow:
 		return "↑↓ select · enter open · esc back · ctrl-c quit"
 	case stepFillInputs:
 		return "tab/↑↓ next field · enter submit (on last field) · esc back"

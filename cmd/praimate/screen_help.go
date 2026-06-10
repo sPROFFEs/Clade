@@ -1,7 +1,7 @@
 package main
 
 // helpPane is the Help section in the navigator. Surfaces the keybind
-// reference plus a short cheat sheet on how chats / templates / agents
+// reference plus a short cheat sheet on how chats / agents / CLIs
 // fit together, so a new user has somewhere persistent to land.
 
 import (
@@ -38,15 +38,15 @@ func (m helpPaneModel) Body() string {
 	var b strings.Builder
 
 	b.WriteString(subtitleStyle.Render("Concepts") + "\n")
-	b.WriteString(descStyle.Render("Template — reusable workpath (mission/playbook/rules) that chats clone from.") + "\n")
-	b.WriteString(descStyle.Render("Chat     — one fork of a template; has its own sandbox, agent binding, memory.") + "\n")
-	b.WriteString(descStyle.Render("Agent    — the CLI that drives a chat (claude, codex, opencode, deepseek-tui).") + "\n")
+	b.WriteString(descStyle.Render("Agent — reusable role (instructions + workflows) you launch work from; shareable as YAML.") + "\n")
+	b.WriteString(descStyle.Render("Chat  — one running session; has its own sandbox, CLI binding, and memory.") + "\n")
+	b.WriteString(descStyle.Render("CLI   — the third-party tool that drives a chat (claude, codex, opencode, …).") + "\n")
 	b.WriteString("\n")
 
 	b.WriteString(subtitleStyle.Render("Global keys") + "\n")
 	for _, r := range [][2]string{
 		{"tab / shift-tab", "cycle focus between pane / nav / tabs"},
-		{"ctrl-1 .. ctrl-7", "jump to a nav section directly (chats/templates/agents/tools/backup/local-llm/help)"},
+		{"ctrl-1 .. ctrl-9", "jump to a nav section directly (chats/agents/clis/tools/backup/local-llm/mcp/automation/help)"},
 		{"ctrl-p", "open the command palette"},
 		{"F1", "toggle the help overlay"},
 		{":", "palette shortcut (only when no text input is focused)"},
@@ -63,9 +63,9 @@ func (m helpPaneModel) Body() string {
 	b.WriteString(subtitleStyle.Render("Command palette") + "\n")
 	for _, c := range [][2]string{
 		{"chats", "open the Chats list"},
-		{"templates", "open the Templates list"},
-		{"agents", "open the Agents browser"},
-		{"new", "start a new chat (template picker)"},
+		{"agents", "open the Agents pane (launch / build agents)"},
+		{"clis", "open the CLI-installer browser"},
+		{"new", "start a new chat (agent picker)"},
 		{"quit", "exit praimate"},
 	} {
 		b.WriteString("  " + okStyle.Render(c[0]) + "  " + descStyle.Render(c[1]) + "\n")

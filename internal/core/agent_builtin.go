@@ -47,9 +47,12 @@ func BuiltinAgents() ([]*Agent, error) {
 	return out, nil
 }
 
-// SeedBuiltins upserts every built-in agent into the user's DB. Safe
-// to run on every startup: existing ids are updated in place, so
-// editing a built-in YAML and rebuilding picks up the change.
+// SeedBuiltins upserts every built-in agent into the user's DB and
+// removes stale builtins (rows whose source_path is "builtin:..." but
+// which no longer ship in the binary). Safe to run on every startup:
+// existing ids are updated in place, so editing a built-in YAML and
+// rebuilding picks up the change; user-imported agents are never
+// touched because their source_path is not "builtin:...".
 //
 // Returns the number of agents seeded.
 func (c *Core) SeedBuiltins(ctx context.Context) (int, error) {
@@ -60,10 +63,40 @@ func (c *Core) SeedBuiltins(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	current := make(map[string]bool, len(agents))
 	for _, a := range agents {
+		current[a.ID] = true
 		if _, err := c.upsertAgent(ctx, a); err != nil {
 			return 0, fmt.Errorf("seed %s: %w", a.ID, err)
 		}
 	}
+
+	// Evict builtins that shipped in an earlier release but were
+	// dropped (e.g. the original freeform/tdd-coder/release-engineer
+	// set). Only rows tagged builtin:* are eligible — user imports are
+	// safe.
+	rows, err := c.store.DB().QueryContext(ctx,
+		`SELECT id FROM agents WHERE source_path LIKE 'builtin:%'`)
+	if err != nil {
+		return 0, fmt.Errorf("scan builtins for eviction: %w", err)
+	}
+	var stale []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		if !current[id] {
+			stale = append(stale, id)
+		}
+	}
+	rows.Close()
+	for _, id := range stale {
+		if _, err := c.store.DB().ExecContext(ctx, `DELETE FROM agents WHERE id = ?`, id); err != nil {
+			return 0, fmt.Errorf("evict stale builtin %s: %w", id, err)
+		}
+	}
+
 	return len(agents), nil
 }
