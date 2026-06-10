@@ -11,6 +11,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"sync"
 
@@ -142,6 +143,40 @@ func (a *App) ListChats() ([]core.Chat, error) {
 		return nil, err
 	}
 	return c.ListChats(a.ctx, 200)
+}
+
+// StartChat creates an interactive chat bound to an agent + CLI and
+// returns it. The frontend then drives it with SendChat.
+func (a *App) StartChat(agentID, cli, cwd string) (*core.Chat, error) {
+	c, err := a.requireCore()
+	if err != nil {
+		return nil, err
+	}
+	if cwd == "" {
+		cwd, _ = os.Getwd()
+	}
+	return c.StartInteractiveChat(a.ctx, agentID, cli, cwd)
+}
+
+// SendChat sends one message into an interactive chat and returns the
+// assistant's reply. The agent's instructions frame the first turn of a
+// fresh session automatically.
+func (a *App) SendChat(chatID, message string) (*core.ChatTurn, error) {
+	c, err := a.requireCore()
+	if err != nil {
+		return nil, err
+	}
+	chat, err := c.GetChat(a.ctx, chatID)
+	if err != nil {
+		return nil, err
+	}
+	systemPrompt := ""
+	if chat.AgentID != "" {
+		if agent, err := c.GetAgent(a.ctx, chat.AgentID); err == nil {
+			systemPrompt = agent.Instructions
+		}
+	}
+	return c.ContinueChat(a.ctx, chatID, message, chat.WorkspacePath, systemPrompt)
 }
 
 func (a *App) ChatMessages(chatID string) ([]core.Message, error) {

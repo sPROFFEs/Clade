@@ -1,9 +1,21 @@
 <script>
   import { onMount, onDestroy } from 'svelte'
   import { api, onTurn } from '../lib/api.js'
+  import { activePage, openChatId } from '../lib/stores.js'
 
   let agents = []
   let error = ''
+
+  // Start an interactive chat with this agent and jump to the Chats page.
+  async function chat(a) {
+    try {
+      const c = await api.startChat(a.id, (a.supports && a.supports[0]) || 'claude', '')
+      openChatId.set(c.ID)
+      activePage.set('chats')
+    } catch (e) {
+      error = String(e)
+    }
+  }
 
   let agent = null
   let workflow = null
@@ -110,7 +122,8 @@
           {#each a.supports || [] as s}<span class="pill">{s}</span>{/each}
         </div>
       </div>
-      <button class="btn primary" on:click={() => pickAgent(a)}>Select</button>
+      <button class="btn primary" on:click={() => chat(a)}>Chat</button>
+      <button class="btn" on:click={() => pickAgent(a)}>Run workflow</button>
     </div>
   {/each}
 {:else if running}

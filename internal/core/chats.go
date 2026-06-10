@@ -37,6 +37,7 @@ type Chat struct {
 	UpdatedAt     time.Time
 	EndedAt       *time.Time // nil while the chat is live
 	ExitKind      string     // populated by EndChat; mirrors RunOutcome
+	SessionID     string     // CLI adapter session id, for interactive resume
 	Settings      ChatSettings
 }
 
@@ -268,7 +269,7 @@ func (c *Core) ListMessages(ctx context.Context, chatID string, limit int) ([]Me
 
 const (
 	chatColumns = `id, title, agent_id, cli_agent, workspace_path,
-		created_at, updated_at, ended_at, exit_kind, settings_json`
+		created_at, updated_at, ended_at, exit_kind, settings_json, session_id`
 
 	chatSelectAll  = `SELECT ` + chatColumns + ` FROM chats ORDER BY updated_at DESC, id DESC`
 	chatSelectByID = `SELECT ` + chatColumns + ` FROM chats WHERE id = ?`
@@ -276,12 +277,12 @@ const (
 
 func scanChat(scan func(...any) error) (*Chat, error) {
 	var (
-		ch                                          Chat
-		agentID, workspacePath, exitKind, endedAtNS sql.NullString
-		createdAt, updatedAt, settingsJSON          string
+		ch                                                     Chat
+		agentID, workspacePath, exitKind, endedAtNS, sessionID sql.NullString
+		createdAt, updatedAt, settingsJSON                     string
 	)
 	err := scan(&ch.ID, &ch.Title, &agentID, &ch.CLIAgent, &workspacePath,
-		&createdAt, &updatedAt, &endedAtNS, &exitKind, &settingsJSON)
+		&createdAt, &updatedAt, &endedAtNS, &exitKind, &settingsJSON, &sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -293,6 +294,9 @@ func scanChat(scan func(...any) error) (*Chat, error) {
 	}
 	if exitKind.Valid {
 		ch.ExitKind = exitKind.String
+	}
+	if sessionID.Valid {
+		ch.SessionID = sessionID.String
 	}
 	ch.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
 	ch.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt)

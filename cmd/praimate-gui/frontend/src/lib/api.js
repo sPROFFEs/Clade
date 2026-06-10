@@ -24,6 +24,8 @@ export const api = {
   listChats: () => call('ListChats'),
   chatMessages: (id) => call('ChatMessages', id),
   deleteChat: (id) => call('DeleteChat', id),
+  startChat: (agentID, cli, cwd) => call('StartChat', agentID, cli, cwd),
+  sendChat: (chatID, message) => call('SendChat', chatID, message),
 
   listAgents: () => call('ListAgents'),
   importAgentDialog: () => call('ImportAgentDialog'),

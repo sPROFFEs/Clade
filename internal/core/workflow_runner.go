@@ -227,6 +227,11 @@ func (c *Core) RunWorkflow(ctx context.Context, opts RunOptions) *RunResult {
 	if lastReply != nil {
 		res.SessionID = lastReply.SessionID
 	}
+	// Stamp the session id so a workflow-started chat can be continued
+	// interactively (ContinueChat) afterwards.
+	if chatID != "" && res.SessionID != "" {
+		_ = c.SetChatSessionID(ctx, chatID, res.SessionID)
+	}
 	res.Outcome = OutcomeCompleted
 	c.maybeEndChat(ctx, chatID, res.Outcome)
 	return res

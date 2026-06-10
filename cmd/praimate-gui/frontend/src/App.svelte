@@ -1,6 +1,7 @@
 <script>
   import { onMount } from 'svelte'
   import { api } from './lib/api.js'
+  import { activePage } from './lib/stores.js'
   import Chats from './pages/Chats.svelte'
   import Run from './pages/Run.svelte'
   import Agents from './pages/Agents.svelte'
@@ -10,14 +11,13 @@
 
   const pages = [
     { id: 'chats', label: 'Chats', component: Chats },
-    { id: 'run', label: 'Run', component: Run },
-    { id: 'agents', label: 'Agents', component: Agents },
+    { id: 'run', label: 'Agents', component: Run },
+    { id: 'agents', label: 'CLIs & Workflows', component: Agents },
     { id: 'memory', label: 'Memory', component: Memory },
     { id: 'mcp', label: 'MCP', component: MCP },
     { id: 'settings', label: 'Settings', component: Settings },
   ]
 
-  let active = 'chats'
   let health = null
 
   onMount(async () => {
@@ -28,7 +28,9 @@
     }
   })
 
-  $: current = pages.find((p) => p.id === active)
+  // Re-key the page component on each activePage change so a page like
+  // Chats re-runs onMount (and picks up a freshly started chat).
+  $: current = pages.find((p) => p.id === $activePage) || pages[0]
 </script>
 
 <div class="shell">
@@ -37,8 +39,8 @@
     {#each pages as p}
       <button
         class="nav-item"
-        class:active={active === p.id}
-        on:click={() => (active = p.id)}>{p.label}</button>
+        class:active={$activePage === p.id}
+        on:click={() => activePage.set(p.id)}>{p.label}</button>
     {/each}
     <div style="flex:1"></div>
     {#if health}
@@ -56,6 +58,8 @@
     {#if health && !health.ok}
       <div class="banner">Backend failed to initialise: {health.error}</div>
     {/if}
-    <svelte:component this={current.component} />
+    {#key $activePage}
+      <svelte:component this={current.component} />
+    {/key}
   </main>
 </div>
