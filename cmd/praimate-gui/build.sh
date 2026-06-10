@@ -9,14 +9,15 @@ cd "$(dirname "$0")"
 
 (cd frontend && npm install && npm run build)
 
-TAGS="webkit2_41"
+# Wails REQUIRES the `desktop` + `production` build tags — without them
+# the binary compiles but panics at startup ("Wails applications will
+# not build without the correct build tags"). On Linux we also select
+# the modern webkit (webkit2gtk-4.1) via webkit2_41; macOS/Windows
+# ignore that tag.
+TAGS="desktop,production"
 case "$(uname -s)" in
-  Darwin|MINGW*|MSYS*) TAGS="" ;;
+  Linux) TAGS="$TAGS,webkit2_41" ;;
 esac
 
-if [ -n "$TAGS" ]; then
-  go build -trimpath -tags "$TAGS" -ldflags '-s -w' -o praimate-gui .
-else
-  go build -trimpath -ldflags '-s -w' -o praimate-gui .
-fi
+go build -trimpath -tags "$TAGS" -ldflags '-s -w' -o praimate-gui .
 echo "built ./praimate-gui"
