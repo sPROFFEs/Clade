@@ -4,6 +4,7 @@
   import { activePage } from './lib/stores.js'
   import Chats from './pages/Chats.svelte'
   import Run from './pages/Run.svelte'
+  import Code from './pages/Code.svelte'
   import Agents from './pages/Agents.svelte'
   import Memory from './pages/Memory.svelte'
   import MCP from './pages/MCP.svelte'
@@ -11,6 +12,7 @@
 
   const pages = [
     { id: 'chats', label: 'Chats', component: Chats },
+    { id: 'code', label: 'Code', component: Code },
     { id: 'run', label: 'Agents', component: Run },
     { id: 'agents', label: 'CLIs & Workflows', component: Agents },
     { id: 'memory', label: 'Memory', component: Memory },

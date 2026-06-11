@@ -10,6 +10,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"sort"
@@ -36,9 +37,11 @@ type App struct {
 	daemonMu  sync.Mutex
 	watchers  *core.WatcherDaemon
 	schedules *core.ScheduleDaemon
+
+	terms *termManager
 }
 
-func NewApp() *App { return &App{} }
+func NewApp() *App { return &App{terms: newTermManager()} }
 
 // startup opens the shared DB and seeds builtins. Mirrors the TUI's
 // initAppCore: failures are recorded, not fatal — the frontend shows
@@ -98,9 +101,66 @@ func (a *App) shutdown(ctx context.Context) {
 		a.schedules = nil
 	}
 	a.daemonMu.Unlock()
+	if a.terms != nil {
+		a.terms.closeAll()
+	}
 	if a.st != nil {
 		_ = a.st.Close()
 	}
+}
+
+// --- Terminal (live coding sessions) -------------------------------------
+
+// PickProjectFolder opens a directory picker for a terminal's working
+// folder.
+func (a *App) PickProjectFolder() (string, error) {
+	return wruntime.OpenDirectoryDialog(a.ctx, wruntime.OpenDialogOptions{
+		Title: "Choose project folder",
+	})
+}
+
+// StartTerminal launches a third-party CLI live in a PTY for an agent.
+// The agent's preferred CLI is used unless `cli` overrides it, run in
+// `cwd`. The agent's instructions are exported into the folder's native
+// context file (CLAUDE.md / AGENTS.md) so the CLI adopts the persona,
+// without us reimplementing its loop. Returns the terminal session id;
+// output streams over "term:data:<id>" events.
+func (a *App) StartTerminal(agentID, cli, cwd string) (string, error) {
+	c, err := a.requireCore()
+	if err != nil {
+		return "", err
+	}
+	if cwd == "" {
+		return "", fmt.Errorf("a project folder is required")
+	}
+	name, args, err := terminalCommand(cli)
+	if err != nil {
+		return "", err
+	}
+	if agentID != "" {
+		if agent, gerr := c.GetAgent(a.ctx, agentID); gerr == nil {
+			_ = exportAgentContext(cwd, cli, agent)
+		}
+	}
+	return a.terms.start(a.ctx, name, args, cwd, nil)
+}
+
+// WriteTerminal forwards a base64-encoded chunk of keystrokes to the
+// PTY. The frontend base64-encodes so arbitrary control bytes survive.
+func (a *App) WriteTerminal(id, b64 string) error {
+	data, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		return fmt.Errorf("decode terminal input: %w", err)
+	}
+	return a.terms.write(id, data)
+}
+
+func (a *App) ResizeTerminal(id string, cols, rows int) error {
+	return a.terms.resize(id, cols, rows)
+}
+
+func (a *App) CloseTerminal(id string) {
+	a.terms.close(id)
 }
 
 func (a *App) requireCore() (*core.Core, error) {
