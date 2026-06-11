@@ -1,0 +1,339 @@
+/* PrAImate GUI — OpenGUI-inspired visual system.
+   Neutral oklch palette, class-driven theming (dark-native `:root`,
+   `.light` override, "system" handled in lib/theme.js), soft radii,
+   low-chrome borders. System fonts only (app must work fully offline). */
+
+:root {
+  color-scheme: dark; /* native widgets (select, scrollbars) render dark */
+
+  /* OpenGUI dark palette (globals.css .dark), neutral oklch ramp */
+  --bg: oklch(0.145 0 0);
+  --bg-panel: oklch(0.185 0 0);
+  --bg-raised: oklch(0.269 0 0);
+  --bg-input: oklch(0.205 0 0);
+  --border: oklch(1 0 0 / 10%);
+  --border-bright: oklch(1 0 0 / 16%);
+  --text: oklch(0.985 0 0);
+  --text-dim: oklch(0.708 0 0);
+
+  /* Accent: neutral by default (OpenGUI's primary). lib/theme.js
+     overrides --accent/--accent-fg inline when a preset is picked. */
+  --accent: oklch(0.922 0 0);
+  --accent-fg: oklch(0.205 0 0);
+  --accent-soft: oklch(1 0 0 / 8%);
+
+  --ok: oklch(0.792 0.178 151.7);   /* ~#22c55e */
+  --warn: oklch(0.75 0.15 80);
+  --err: oklch(0.704 0.191 22.216); /* OpenGUI dark destructive */
+
+  --radius: 10px;
+  --radius-sm: 6px;
+  --mono: ui-monospace, 'JetBrains Mono', 'Cascadia Mono', 'Fira Code', Menlo, Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif;
+}
+
+:root.light {
+  color-scheme: light;
+  --bg: oklch(0.985 0 0);
+  --bg-panel: oklch(1 0 0);
+  --bg-raised: oklch(0.97 0 0);
+  --bg-input: oklch(1 0 0);
+  --border: oklch(0.922 0 0);
+  --border-bright: oklch(0.87 0 0);
+  --text: oklch(0.145 0 0);
+  --text-dim: oklch(0.556 0 0);
+  --accent: oklch(0.205 0 0);
+  --accent-fg: oklch(0.985 0 0);
+  --accent-soft: oklch(0 0 0 / 5%);
+  --err: oklch(0.577 0.245 27.325); /* OpenGUI light destructive */
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font: 13.5px/1.5 var(--sans);
+}
+
+#app { height: 100%; }
+
+.shell { display: flex; height: 100vh; }
+
+/* ── Sidebar (OpenGUI: flat panel, icon nav, rounded items) ─────────── */
+
+.sidebar {
+  width: 216px;
+  flex-shrink: 0;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  padding: 0 8px 10px;
+  gap: 1px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 8px;
+  margin: 0 -8px 8px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+  font-size: 13.5px;
+  letter-spacing: 0.3px;
+  user-select: none;
+  justify-content: center;
+}
+.brand img {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  display: block;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-family: var(--sans);
+  font-size: 13px;
+}
+.nav-item svg { width: 15px; height: 15px; flex-shrink: 0; }
+.nav-item:hover { background: var(--bg-raised); color: var(--text); }
+.nav-item.active {
+  background: var(--bg-raised);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.sidebar-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 8px 4px 0;
+  border-top: 1px solid var(--border);
+  margin-top: 8px;
+}
+
+/* Icon-only ghost button (theme toggle, small actions) */
+button.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+button.icon-btn:hover { background: var(--bg-raised); color: var(--text); }
+button.icon-btn svg { width: 15px; height: 15px; }
+
+.main {
+  flex: 1;
+  overflow-y: auto;
+  padding: 22px 26px;
+}
+
+h1 { font-size: 17px; margin: 0 0 4px; font-weight: 600; letter-spacing: -0.01em; }
+.subtitle { color: var(--text-dim); margin: 0 0 20px; font-size: 12.5px; }
+
+/* ── Cards ──────────────────────────────────────────────────────────── */
+
+.card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 13px 15px;
+  margin-bottom: 9px;
+}
+.card-title { font-weight: 600; margin-bottom: 2px; }
+.card-sub { color: var(--text-dim); font-size: 12px; }
+
+.row { display: flex; align-items: center; gap: 9px; }
+.row .grow { flex: 1; }
+
+/* ── Buttons (OpenGUI: outline ghost default, solid accent primary) ── */
+
+button.btn {
+  background: transparent;
+  border: 1px solid var(--border-bright);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  padding: 7px 13px;
+  cursor: pointer;
+  font-family: var(--sans);
+  font-size: 12.5px;
+  transition: background 120ms, border-color 120ms;
+}
+button.btn:hover { background: var(--bg-raised); }
+button.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
+}
+button.btn.primary:hover { filter: brightness(0.92); background: var(--accent); }
+button.btn.danger:hover { border-color: var(--err); color: var(--err); background: transparent; }
+button.btn:disabled { opacity: 0.4; cursor: default; }
+button.btn:disabled:hover { background: transparent; border-color: var(--border-bright); color: var(--text); }
+
+/* ── Form controls ──────────────────────────────────────────────────── */
+
+input.field, select.field, textarea.field {
+  background: var(--bg-input);
+  border: 1px solid var(--border-bright);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  font-size: 13px;
+  font-family: var(--sans);
+  width: 100%;
+}
+.field.mono { font-family: var(--mono); }
+input.field:focus, select.field:focus, textarea.field:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+input.field::placeholder, textarea.field::placeholder { color: var(--text-dim); opacity: 0.7; }
+select.field {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--text-dim) 50%),
+                    linear-gradient(135deg, var(--text-dim) 50%, transparent 50%);
+  background-position: calc(100% - 16px) center, calc(100% - 11px) center;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  padding-right: 28px;
+  cursor: pointer;
+}
+/* The open dropdown list — follow the theme on every option. */
+select.field option,
+select.field optgroup {
+  background: var(--bg-panel);
+  color: var(--text);
+}
+label.lbl { display: block; font-size: 12px; color: var(--text-dim); margin: 10px 0 4px; }
+
+/* ── Pills / status ─────────────────────────────────────────────────── */
+
+.pill {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  margin-right: 4px;
+}
+.pill.ok { color: var(--ok); border-color: color-mix(in oklch, var(--ok) 35%, transparent); }
+.pill.err { color: var(--err); border-color: color-mix(in oklch, var(--err) 35%, transparent); }
+.pill.warn { color: var(--warn); border-color: color-mix(in oklch, var(--warn) 35%, transparent); }
+
+/* ── Chat messages (OpenGUI: user = raised card, assistant = flat) ──── */
+
+.msg {
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  margin-bottom: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.msg.user { background: var(--bg-raised); border: 1px solid var(--border); }
+.msg.assistant { background: var(--bg-panel); border: 1px solid var(--border); }
+.msg .who {
+  font-size: 10.5px;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+}
+
+.mono { font-family: var(--mono); font-size: 12px; }
+
+.banner {
+  background: color-mix(in oklch, var(--err) 12%, transparent);
+  border: 1px solid var(--err);
+  color: var(--err);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  font-size: 12.5px;
+}
+
+.empty { color: var(--text-dim); padding: 30px 0; text-align: center; }
+
+table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.tbl th { text-align: left; color: var(--text-dim); font-weight: 500; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+table.tbl td { padding: 7px 8px; border-bottom: 1px solid var(--border); }
+
+.toggle { cursor: pointer; }
+
+/* ── Appearance settings (theme toggle group + accent swatches) ─────── */
+
+.toggle-group {
+  display: inline-flex;
+  border: 1px solid var(--border-bright);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.toggle-group button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  padding: 6px 11px;
+  font-size: 12px;
+  font-family: var(--sans);
+  cursor: pointer;
+}
+.toggle-group button + button { border-left: 1px solid var(--border-bright); }
+.toggle-group button.active { background: var(--bg-raised); color: var(--text); font-weight: 600; }
+.toggle-group button svg { width: 13px; height: 13px; }
+
+.swatch-row { display: flex; align-items: center; gap: 8px; }
+.swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: 1px solid var(--border-bright);
+  cursor: pointer;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+  background: transparent;
+}
+.swatch.active { outline: 2px solid var(--text); outline-offset: 2px; }
+.swatch svg { width: 12px; height: 12px; }
+
+/* ── Scrollbars ─────────────────────────────────────────────────────── */
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--bg-raised); border-radius: 6px; border: 2px solid var(--bg); }
+::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+
+pre { font-family: var(--mono); font-size: 12px; }

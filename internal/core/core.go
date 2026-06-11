@@ -1,6 +1,5 @@
-// Package core is the single API surface that the TUI (cmd/praimate)
-// and any future Go surfaces call into. (The desktop GUI is the
-// standalone Electron app under gui/ and talks to the CLIs directly.) No
+// Package core is the single API surface that both the TUI
+// (cmd/praimate) and the GUI (cmd/praimate-gui, future) call into. No
 // other package may import internal/launcher, internal/ollama, etc.
 // directly; everything flows through Core.
 //

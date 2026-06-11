@@ -1,8 +1,0 @@
-# vp staged must run from the gui/ project dir — git invokes hooks from
-# the repo root, and this repo is a Go monorepo with the vite-plus
-# project vendored under gui/. Re-anchor PATH after the cd: the hook
-# dispatcher prepends a repo-root-relative node_modules/.bin that stops
-# resolving once we change directory.
-cd "$(git rev-parse --show-toplevel)/gui" || exit 0
-export PATH="$PWD/node_modules/.bin:$PATH"
-vp staged

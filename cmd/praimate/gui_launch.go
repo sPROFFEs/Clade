@@ -1,20 +1,22 @@
 package main
 
-// `praimate --gui` dispatcher — launches PrAImate GUI, the Electron
-// desktop app that lives under gui/ in this repo and installs from the
-// per-OS packages on the GitHub release (NSIS .exe on Windows,
-// .deb/.AppImage on Linux, .dmg on macOS).
+// `praimate --gui` dispatcher — the AIO entry point. The GUI stays a
+// separate binary (praimate-gui) because a true single binary can't
+// work everywhere: on Linux, linking webkit into the TUI would make
+// it fail to start on headless boxes; on Windows, console-vs-GUI
+// subsystem flags force a choice that breaks one of the two modes.
+// Instead the TUI binary locates its sibling and launches it, so
+// users get one command for both surfaces.
 //
 // Resolution order:
 //
-//  1. The installed PrAImate GUI app in its platform's standard
-//     install location (NSIS per-user dir on Windows, /opt on Linux
-//     deb, /Applications on macOS)
-//  2. praimate-gui on PATH (Linux deb installs a /usr/bin symlink;
-//     also covers AppImage users who renamed it onto PATH)
+//  1. praimate-gui(.exe) in the same directory as this executable
+//     (the release archives ship them side by side)
+//  2. praimate-gui on PATH
 //
-// When neither exists we print the release-download pointer instead of
-// failing cryptically.
+// When neither exists (linux-arm64 / macOS archives, or a
+// build-from-source TUI), we print the build-from-source pointer
+// instead of failing cryptically.
 
 import (
 	"errors"
@@ -27,44 +29,18 @@ import (
 	"time"
 )
 
-// guiInstallCandidates returns the platform's standard install paths
-// for the PrAImate GUI Electron app, most-preferred first.
-func guiInstallCandidates() []string {
-	switch runtime.GOOS {
-	case "windows":
-		// electron-builder NSIS per-user install:
-		//   %LOCALAPPDATA%\Programs\<productName>\<productName>.exe
-		// Machine-wide installs land under Program Files.
-		var out []string
-		if local := os.Getenv("LOCALAPPDATA"); local != "" {
-			out = append(out, filepath.Join(local, "Programs", "PrAImate GUI", "PrAImate GUI.exe"))
-		}
-		for _, pf := range []string{os.Getenv("ProgramFiles"), os.Getenv("ProgramFiles(x86)")} {
-			if pf != "" {
-				out = append(out, filepath.Join(pf, "PrAImate GUI", "PrAImate GUI.exe"))
-			}
-		}
-		return out
-	case "darwin":
-		return []string{"/Applications/PrAImate GUI.app/Contents/MacOS/PrAImate GUI"}
-	default:
-		// electron-builder .deb installs to /opt/<productName>/ with the
-		// executable named after the package (praimate-gui).
-		return []string{"/opt/PrAImate GUI/praimate-gui"}
-	}
-}
-
-// resolveGUIBinary returns the path to the PrAImate GUI executable, or
-// "" if not found. Split from launchGUI for testability.
-func resolveGUIBinary() string {
-	for _, candidate := range guiInstallCandidates() {
-		if fi, err := os.Stat(candidate); err == nil && !fi.IsDir() {
-			return candidate
-		}
-	}
+// resolveGUIBinary returns the path to praimate-gui, or "" if not
+// found. Split from launchGUI for testability.
+func resolveGUIBinary(exePath string) string {
 	name := "praimate-gui"
 	if runtime.GOOS == "windows" {
 		name += ".exe"
+	}
+	if exePath != "" {
+		sibling := filepath.Join(filepath.Dir(exePath), name)
+		if fi, err := os.Stat(sibling); err == nil && !fi.IsDir() {
+			return sibling
+		}
 	}
 	if p, err := exec.LookPath(name); err == nil {
 		return p
@@ -72,34 +48,31 @@ func resolveGUIBinary() string {
 	return ""
 }
 
-// launchGUI starts PrAImate GUI detached and returns the process exit
+// launchGUI starts praimate-gui detached and returns the process exit
 // code for main() to pass through. The TUI process exits immediately
 // after a successful spawn — the GUI owns its own lifetime; holding a
 // parent terminal process open would just confuse `praimate --gui &`
 // users.
 func launchGUI() int {
-	bin := resolveGUIBinary()
+	exePath, _ := os.Executable()
+	exePath, _ = filepath.EvalSymlinks(exePath)
+
+	bin := resolveGUIBinary(exePath)
 	if bin == "" {
-		fmt.Fprintln(os.Stderr, "praimate: PrAImate GUI is not installed.")
+		fmt.Fprintln(os.Stderr, "praimate: praimate-gui not found next to this binary or on PATH.")
 		fmt.Fprintln(os.Stderr)
-		fmt.Fprintln(os.Stderr, "Download the installer for your OS from the latest release:")
+		fmt.Fprintln(os.Stderr, "The desktop GUI ships prebuilt for linux-amd64 and windows-amd64.")
+		fmt.Fprintln(os.Stderr, "On other platforms build it from source (needs node+npm; on Linux")
+		fmt.Fprintln(os.Stderr, "also libwebkit2gtk-4.1-dev libgtk-3-dev):")
 		fmt.Fprintln(os.Stderr)
-		fmt.Fprintln(os.Stderr, "  https://github.com/sPROFFEs/PrAImate/releases/latest")
-		fmt.Fprintln(os.Stderr)
-		switch runtime.GOOS {
-		case "windows":
-			fmt.Fprintln(os.Stderr, "  → PrAImate-GUI.Setup.<version>.exe")
-		case "darwin":
-			fmt.Fprintln(os.Stderr, "  → PrAImate GUI-<version>-<arch>-mac.dmg")
-		default:
-			fmt.Fprintln(os.Stderr, "  → PrAImate GUI-<version>-<arch>.deb or .AppImage")
-		}
+		fmt.Fprintln(os.Stderr, "  git clone https://github.com/sPROFFEs/PrAImate && cd PrAImate")
+		fmt.Fprintln(os.Stderr, "  cd cmd/praimate-gui && ./build.sh")
 		return 1
 	}
 
 	// Send the child's output to a log FILE, not a pipe: we exit right
 	// after the grace period, and a pipe dies with us — the GUI would
-	// then crash with EPIPE the next time it logs. A file handle stays
+	// then hit write errors the next time it logs. A file handle stays
 	// valid after we're gone, and doubles as the diagnostic source when
 	// the GUI exits immediately.
 	logPath := filepath.Join(os.TempDir(), "praimate-gui-launch.log")
@@ -127,11 +100,16 @@ func launchGUI() int {
 	go func() { exited <- cmd.Wait() }()
 	select {
 	case err := <-exited:
-		fmt.Fprintln(os.Stderr, "praimate: PrAImate GUI exited immediately without opening a window.")
+		fmt.Fprintln(os.Stderr, "praimate: praimate-gui exited immediately without opening a window.")
 		if b, rerr := os.ReadFile(logPath); rerr == nil {
 			if msg := strings.TrimSpace(string(b)); msg != "" {
 				fmt.Fprintln(os.Stderr)
 				fmt.Fprintln(os.Stderr, msg)
+				if strings.Contains(msg, "build tags") {
+					fmt.Fprintln(os.Stderr)
+					fmt.Fprintln(os.Stderr, "This looks like an older praimate-gui build. Reinstall PrAImate 1.1.1+")
+					fmt.Fprintln(os.Stderr, "or rebuild the GUI: cd cmd/praimate-gui && ./build.sh")
+				}
 			}
 		}
 		if err != nil {
@@ -143,7 +121,7 @@ func launchGUI() int {
 		return 1
 	case <-time.After(1500 * time.Millisecond):
 		_ = cmd.Process.Release()
-		fmt.Printf("launched PrAImate GUI (pid %d)\n", pid)
+		fmt.Printf("launched praimate-gui (pid %d)\n", pid)
 		return 0
 	}
 }

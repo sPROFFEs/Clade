@@ -275,10 +275,9 @@ install_from_release() {
   step "Installing to $DEST"
   $SUDO install -m 0755 "$extracted/praimate" "$DEST/praimate"
   $SUDO install -m 0755 "$extracted/wpc"   "$DEST/wpc"
-  # Legacy archives (≤1.1.3) shipped a praimate-gui binary inside the
-  # bundle. The desktop GUI is now the standalone PrAImate GUI Electron
-  # app — install it from the .deb/.AppImage/.dmg/.exe on the GitHub
-  # release. Keep the copy for old archives so re-installs still work.
+  # Desktop GUI ships prebuilt in linux-amd64 / windows-amd64 archives.
+  # Install it next to praimate so `praimate --gui` finds it. Absent in
+  # other archives — skip quietly there.
   if [[ -f "$extracted/praimate-gui" ]]; then
     $SUDO install -m 0755 "$extracted/praimate-gui" "$DEST/praimate-gui"
     c_grn "  praimate-gui installed (launch with: praimate --gui)"
