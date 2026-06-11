@@ -5,6 +5,8 @@
   import '@xterm/xterm/css/xterm.css'
   import { api } from '../lib/api.js'
   import { term, onTermData, onTermExit } from '../lib/terminal.js'
+  import { pendingTerm } from '../lib/stores.js'
+  import { get } from 'svelte/store'
 
   let agents = []
   let error = ''
@@ -133,7 +135,30 @@
     exited = false
   }
 
-  onMount(() => { load(); checkCode() })
+  // Attach to a PTY the Chats page already started (a reopened TUI
+  // workspace chat) instead of launching a fresh one.
+  async function attachPending(p) {
+    termId = p.termId
+    agent = { name: p.label }
+    cli = p.cli
+    cwd = p.cwd
+    started = true
+    await tick()
+    mountXterm()
+    if (p.note) {
+      xterm.write(`\x1b[2m[${p.note}]\x1b[0m\r\n`)
+    }
+  }
+
+  onMount(() => {
+    load()
+    checkCode()
+    const p = get(pendingTerm)
+    if (p) {
+      pendingTerm.set(null)
+      attachPending(p)
+    }
+  })
   onDestroy(teardown)
 </script>
 

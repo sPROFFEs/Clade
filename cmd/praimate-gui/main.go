@@ -22,11 +22,19 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
+// appIcon is the window/taskbar icon. On Linux Wails sets it at
+// runtime via linux.Options.Icon; on Windows the icon comes from the
+// exe's embedded resource (rsrc_windows_amd64.syso, generated with
+// go-winres from this same PNG — see build.sh).
+//
+//go:embed frontend/src/assets/praimate.png
+var appIcon []byte
+
 func main() {
 	app := NewApp()
 
 	err := wails.Run(&options.App{
-		Title:  "PrAImate",
+		Title:  "PrAImate GUI",
 		Width:  1280,
 		Height: 820,
 		AssetServer: &assetserver.Options{
@@ -40,6 +48,7 @@ func main() {
 		},
 		Linux: &linux.Options{
 			ProgramName: "praimate",
+			Icon:        appIcon,
 		},
 	})
 	if err != nil {

@@ -19,6 +19,13 @@ case "$(uname -s)" in
   Linux) TAGS="$TAGS,webkit2_41" ;;
 esac
 
+# Windows icon: go build embeds the checked-in rsrc_windows_*.syso
+# automatically (taskbar + titlebar icon). Regenerate after changing
+# frontend/src/assets/praimate.png with:
+#   go run github.com/tc-hib/go-winres@v0.3.3 simply \
+#     --icon frontend/src/assets/praimate.png \
+#     --product-name "PrAImate GUI" --product-version <version>
+
 # Name the output praimate-gui.exe on Windows (Go does NOT auto-append
 # .exe when -o is given) and hide the console via -H windowsgui.
 EXT=""

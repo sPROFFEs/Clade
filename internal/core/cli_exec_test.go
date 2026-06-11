@@ -112,7 +112,7 @@ func TestExecAdapter_StdinAdaptersKeepMessageOutOfArgv(t *testing.T) {
 		if !a.stdinMsg {
 			t.Errorf("%s: expected stdinMsg=true", a.name)
 		}
-		args, _ := a.build(msg, t.TempDir())
+		args, _ := a.build(msg, "", t.TempDir())
 		for _, arg := range args {
 			if strings.Contains(arg, "multi") {
 				t.Errorf("%s: message leaked into argv: %q", a.name, args)
@@ -122,9 +122,40 @@ func TestExecAdapter_StdinAdaptersKeepMessageOutOfArgv(t *testing.T) {
 }
 
 func TestCodexAdapter_UsesStdinSentinel(t *testing.T) {
-	args, _ := NewCodexAdapter().build("ignored", t.TempDir())
+	args, _ := NewCodexAdapter().build("ignored", "", t.TempDir())
 	if args[len(args)-1] != "-" {
 		t.Fatalf("codex argv must end with '-' (read prompt from stdin), got %v", args)
+	}
+}
+
+// Pins the per-CLI model flag shapes: each adapter that supports a
+// model override must put it in argv with its CLI's flag, and codex's
+// stdin sentinel must stay LAST.
+func TestExecAdapter_ModelFlagShapes(t *testing.T) {
+	cases := []struct {
+		adapter *execAdapter
+		want    []string
+	}{
+		{NewCodexAdapter(), []string{"-m", "gpt-5.1-codex", "-"}},
+		{NewOpenCodeAdapter(), []string{"run", "--model", "anthropic/claude-sonnet-4-5"}},
+		{NewPraimateCodeAdapter(), []string{"run", "--model", "anthropic/claude-sonnet-4-5"}},
+		{NewGeminiAdapter(), []string{"-m", "gemini-2.5-pro"}},
+	}
+	for _, tc := range cases {
+		model := tc.want[len(tc.want)-1]
+		if model == "-" {
+			model = tc.want[len(tc.want)-2]
+		}
+		args, _ := tc.adapter.build("msg", model, t.TempDir())
+		got := strings.Join(args, " ")
+		if !strings.Contains(got, strings.Join(tc.want, " ")) {
+			t.Errorf("%s: argv %q does not contain %q", tc.adapter.name, got, strings.Join(tc.want, " "))
+		}
+	}
+	// deepseek has no model flag — model must NOT leak into argv.
+	args, _ := NewDeepSeekAdapter().build("msg", "some-model", t.TempDir())
+	if strings.Contains(strings.Join(args, " "), "some-model") {
+		t.Errorf("deepseek: model leaked into argv: %v", args)
 	}
 }
 
@@ -139,6 +170,31 @@ func TestIsBatchShim(t *testing.T) {
 		if got := isBatchShim(path); got != want {
 			t.Errorf("isBatchShim(%q) = %v, want %v", path, got, want)
 		}
+	}
+}
+
+// Pins the managed-bin-dir fallback: praimate-code's standard install
+// is NOT on PATH, so resolveBin must find it via extraDirs.
+func TestExecAdapter_ResolvesFromExtraDirs(t *testing.T) {
+	dir := t.TempDir()
+	name := "praimate-code"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	bin := filepath.Join(dir, name)
+	if err := os.WriteFile(bin, []byte("x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", t.TempDir()) // PATH cannot resolve it
+
+	a := NewPraimateCodeAdapter()
+	a.extraDirs = []string{dir}
+	got, err := a.resolveBin()
+	if err != nil {
+		t.Fatalf("resolveBin: %v", err)
+	}
+	if got != bin {
+		t.Fatalf("resolveBin = %q, want %q", got, bin)
 	}
 }
 

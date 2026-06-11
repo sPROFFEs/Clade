@@ -1,9 +1,10 @@
 <script>
   import { onMount, tick } from 'svelte'
   import { api } from '../lib/api.js'
-  import { openChatId } from '../lib/stores.js'
+  import { activePage, openChatId, pendingTerm } from '../lib/stores.js'
 
   let chats = []
+  let workspaceChats = []
   let error = ''
   let selected = null
   let messages = []
@@ -11,10 +12,83 @@
   let sending = false
   let threadEl
 
+  // New clean chat (CLI + model, no agent)
+  let creating = false
+  let clis = []
+  let newCli = ''
+  let newModel = ''
+  let modelSuggestions = []
+  let starting = false
+
   async function load() {
     try {
       chats = (await api.listChats()) || []
       error = ''
+    } catch (e) {
+      error = String(e)
+    }
+    try {
+      workspaceChats = (await api.listWorkspaceChats()) || []
+    } catch {
+      workspaceChats = []
+    }
+  }
+
+  async function openNewChat() {
+    creating = true
+    newModel = ''
+    try {
+      clis = (await api.listCLIs()) || []
+      const firstAvailable = clis.find((c) => c.available)
+      newCli = firstAvailable ? firstAvailable.id : (clis[0]?.id ?? '')
+      await refreshModels()
+    } catch (e) {
+      error = String(e)
+    }
+  }
+
+  async function refreshModels() {
+    modelSuggestions = []
+    if (!newCli) return
+    try {
+      modelSuggestions = (await api.listCLIModels(newCli)) || []
+    } catch {
+      modelSuggestions = []
+    }
+  }
+
+  $: selectedCliInfo = clis.find((c) => c.id === newCli)
+  $: modelSupported = !!selectedCliInfo?.modelHint
+
+  async function startClean() {
+    if (!newCli || starting) return
+    starting = true
+    error = ''
+    try {
+      const chat = await api.startCleanChat(newCli, modelSupported ? newModel.trim() : '', '')
+      creating = false
+      await load()
+      const c = chats.find((x) => x.ID === chat.ID) || chat
+      await open(c)
+    } catch (e) {
+      error = String(e)
+    } finally {
+      starting = false
+    }
+  }
+
+  async function openWorkspace(wc) {
+    error = ''
+    try {
+      const res = await api.openWorkspaceChat(wc.id)
+      pendingTerm.set({
+        termId: res.termId,
+        cli: res.cli,
+        cwd: res.cwd,
+        label: wc.label,
+        note: res.note,
+      })
+      activePage.set('code')
     } catch (e) {
       error = String(e)
     }
@@ -138,20 +212,57 @@
     <button class="btn primary" on:click={send} disabled={sending || !draft.trim()}>Send</button>
   </div>
 {:else}
-  <h1>Chats</h1>
-  <p class="subtitle">Conversations persist to the shared database — the TUI sees the same list. Start a new one from the Agents page.</p>
+  <div class="row" style="margin-bottom: 4px">
+    <h1 class="grow" style="margin:0">Chats</h1>
+    <button class="btn primary" on:click={openNewChat}>+ New chat</button>
+  </div>
+  <p class="subtitle">Conversations persist to the shared database. Start a clean chat on any CLI/model, or use an agent persona from the Agents page.</p>
 
   {#if error}<div class="banner">{error}</div>{/if}
 
-  {#if chats.length === 0}
-    <div class="empty">No chats yet — open the Agents page and start one.</div>
+  {#if creating}
+    <div class="card">
+      <div class="card-title">New clean chat</div>
+      <div class="card-sub">A plain conversation with the CLI — no agent persona. Pick the CLI and (optionally) pin the model it should use.</div>
+      <label class="lbl">CLI</label>
+      <select class="field" style="max-width:320px" bind:value={newCli} on:change={refreshModels}>
+        {#each clis as c}
+          <option value={c.id} disabled={!c.available}>
+            {c.label}{c.available ? '' : ' — not installed'}
+          </option>
+        {/each}
+      </select>
+      <label class="lbl">Model {modelSupported ? `(${selectedCliInfo.modelHint})` : '(this CLI has no model flag — it uses its own config)'}</label>
+      <input
+        class="field mono"
+        style="max-width:420px"
+        list="model-suggestions"
+        placeholder={modelSupported ? 'blank = CLI default' : 'not supported'}
+        bind:value={newModel}
+        disabled={!modelSupported} />
+      <datalist id="model-suggestions">
+        {#each modelSuggestions as m}<option value={m}></option>{/each}
+      </datalist>
+      <div class="row" style="margin-top:12px">
+        <button class="btn primary" on:click={startClean} disabled={starting || !newCli}>
+          {starting ? 'Starting…' : 'Start chat'}
+        </button>
+        <button class="btn" on:click={() => (creating = false)}>Cancel</button>
+      </div>
+    </div>
+  {/if}
+
+  {#if chats.length === 0 && !creating}
+    <div class="empty">No chats yet — press “New chat”, or start one from an agent on the Agents page.</div>
   {/if}
   {#each chats as chat}
     <div class="card row">
       <div class="grow" style="cursor:pointer" on:click={() => open(chat)} on:keydown={(e) => e.key === 'Enter' && open(chat)} role="button" tabindex="0">
         <div class="card-title">{chat.Title}</div>
         <div class="card-sub">
-          {chat.CLIAgent} · {fmtDate(chat.UpdatedAt)}
+          {chat.CLIAgent}
+          {#if chat.Settings?.model} · model: {chat.Settings.model}{/if}
+          · {fmtDate(chat.UpdatedAt)}
           {#if chat.ExitKind} · {chat.ExitKind}{/if}
         </div>
       </div>
@@ -159,6 +270,22 @@
       <button class="btn danger" on:click={() => remove(chat)}>Delete</button>
     </div>
   {/each}
+
+  {#if workspaceChats.length > 0}
+    <h1 style="font-size:16px; margin-top:24px">Workspace chats (TUI)</h1>
+    <p class="subtitle">Chats created in the <span class="mono">praimate</span> TUI. Open one to resume its CLI session in the Code terminal — same sandbox, native resume where the CLI supports it.</p>
+    {#each workspaceChats as wc}
+      <div class="card row">
+        <div class="grow">
+          <div class="card-title">{wc.label}</div>
+          <div class="card-sub">
+            {wc.agent}{#if wc.template} · {wc.template}{/if} · {fmtDate(wc.lastUsed)}
+          </div>
+        </div>
+        <button class="btn" on:click={() => openWorkspace(wc)}>Open in Code</button>
+      </div>
+    {/each}
+  {/if}
 {/if}
 
 <style>

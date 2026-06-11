@@ -81,12 +81,13 @@ func (c *Core) ContinueChat(ctx context.Context, chatID, userMessage, cwd, syste
 	start := time.Now()
 	var reply *Reply
 	if chat.SessionID != "" && adapter.SupportsResume() {
-		reply, err = adapter.Resume(ctx, chat.SessionID, outbound)
+		reply, err = adapter.Resume(ctx, chat.SessionID, outbound, chat.Settings.Model)
 	} else {
 		reply, err = adapter.SingleShot(ctx, SingleShotOpts{
 			Cwd:          cwd,
 			Message:      outbound,
 			SystemPrompt: privacyRedactPlain(privacy, systemPrompt),
+			Model:        chat.Settings.Model,
 		})
 	}
 	if err != nil {
@@ -120,6 +121,34 @@ func privacyRedactPlain(p *PrivacyScanner, text string) string {
 	}
 	out, _ := p.Redact(text)
 	return out
+}
+
+// StartCleanChat creates a DB-backed chat bound to a CLI only — no
+// PrAImate agent, no system prompt. model, if non-empty, pins the CLI's
+// model for every turn (see ChatSettings.Model for per-CLI semantics).
+// Use this from the GUI "new chat" affordance when the user wants a
+// plain conversation with the CLI's model rather than an agent persona.
+func (c *Core) StartCleanChat(ctx context.Context, cli, model, cwd string) (*Chat, error) {
+	if c.store == nil {
+		return nil, errors.New("StartCleanChat: no store configured")
+	}
+	if cli == "" {
+		return nil, errors.New("StartCleanChat: cli required")
+	}
+	if _, err := GetCLIAdapter(cli); err != nil {
+		return nil, err
+	}
+	title := cli
+	if model != "" {
+		title += " · " + model
+	}
+	title += " · " + time.Now().Format("Jan 2 15:04")
+	return c.CreateChat(ctx, CreateChatRequest{
+		Title:         title,
+		CLIAgent:      cli,
+		WorkspacePath: cwd,
+		Settings:      ChatSettings{Model: model},
+	})
 }
 
 // StartInteractiveChat creates a DB-backed chat for an agent and returns

@@ -25,6 +25,12 @@ type SingleShotOpts struct {
 	// doc comment.
 	SystemPrompt string
 
+	// Model, if non-empty, selects the model for this turn (e.g.
+	// "sonnet" for claude, "gpt-5.1-codex" for codex,
+	// "anthropic/claude-sonnet-4-5" for opencode). Adapters whose CLI
+	// has no model flag ignore it.
+	Model string
+
 	// Env extends the parent process environment for the child run.
 	// Used for per-launch routing (e.g. local-LLM endpoint overrides).
 	Env map[string]string
@@ -72,8 +78,10 @@ type CLIAdapter interface {
 	SupportsResume() bool
 
 	// Resume continues a session started by a prior SingleShot/Resume
-	// call. Returns an error if SupportsResume() is false.
-	Resume(ctx context.Context, sessionID, message string) (*Reply, error)
+	// call. model, if non-empty, re-pins the model for this turn (same
+	// semantics as SingleShotOpts.Model). Returns an error if
+	// SupportsResume() is false.
+	Resume(ctx context.Context, sessionID, message, model string) (*Reply, error)
 }
 
 // adapterRegistry holds the live set of adapters keyed by Name(). Use

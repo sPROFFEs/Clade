@@ -186,7 +186,7 @@ func (c *Core) RunWorkflow(ctx context.Context, opts RunOptions) *RunResult {
 				Env:          opts.Env,
 			})
 		} else {
-			reply, runErr = adapter.Resume(ctx, lastReply.SessionID, adapterBody)
+			reply, runErr = adapter.Resume(ctx, lastReply.SessionID, adapterBody, "")
 		}
 		if runErr != nil {
 			res.Outcome = OutcomeAdapterErr

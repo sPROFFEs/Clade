@@ -19,11 +19,13 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"github.com/sPROFFEs/PrAImate/internal/core"
 	"github.com/sPROFFEs/PrAImate/internal/installer"
+	"github.com/sPROFFEs/PrAImate/internal/launcher"
 	"github.com/sPROFFEs/PrAImate/internal/store"
 	"github.com/sPROFFEs/PrAImate/internal/version"
 )
@@ -64,7 +66,15 @@ func (a *App) startup(ctx context.Context) {
 		a.initErr = err.Error()
 		return
 	}
-	c, err := core.New(core.Options{Store: st})
+	// Share the TUI's workspaces root (best-effort): with it, the GUI
+	// can list the TUI's on-disk chats and reopen them in the Code
+	// terminal. Without a config the GUI still works — the workspace
+	// chats section just stays empty.
+	workspacesRoot := ""
+	if cfg, cfgErr := launcher.LoadConfig(); cfgErr == nil && cfg != nil {
+		workspacesRoot = cfg.WorkspacesRoot
+	}
+	c, err := core.New(core.Options{Store: st, WorkspacesRoot: workspacesRoot})
 	if err != nil {
 		_ = st.Close()
 		a.initErr = err.Error()
@@ -288,6 +298,206 @@ func (a *App) DeleteChat(chatID string) error {
 		return err
 	}
 	return c.DeleteChat(a.ctx, chatID)
+}
+
+// --- Clean chats (CLI + model, no agent) ----------------------------------
+
+// CLIInfo describes one launchable CLI for the "new chat" picker.
+type CLIInfo struct {
+	ID        string   `json:"id"`
+	Label     string   `json:"label"`
+	Available bool     `json:"available"`
+	ModelHint string   `json:"modelHint"` // expected --model format, "" = no model flag
+	Models    []string `json:"models"`    // suggestions; free text always allowed
+}
+
+// modelHints documents each CLI's --model format. Empty string means
+// the CLI has no model flag (the model input is disabled in the UI).
+var modelHints = map[string]string{
+	"claude":        "alias (sonnet, opus, haiku) or full model id",
+	"openclaude":    "alias (sonnet, opus, haiku) or full model id",
+	"codex":         "model id, e.g. gpt-5.1-codex",
+	"opencode":      "provider/model, e.g. anthropic/claude-sonnet-4-5",
+	"praimate-code": "provider/model, e.g. anthropic/claude-sonnet-4-5",
+	"gemini":        "model id, e.g. gemini-2.5-pro",
+	"deepseek":      "", // config-file driven; no per-run flag
+}
+
+// staticModelSuggestions are fallback datalist entries for CLIs without
+// a list command. They are SUGGESTIONS — the input stays free text, so
+// new models work without a PrAImate release.
+var staticModelSuggestions = map[string][]string{
+	"claude":     {"sonnet", "opus", "haiku"},
+	"openclaude": {"sonnet", "opus", "haiku"},
+	"codex":      {"gpt-5.1-codex", "gpt-5.1-codex-mini"},
+	"gemini":     {"gemini-2.5-pro", "gemini-2.5-flash"},
+}
+
+// ListCLIs returns every launchable CLI with availability probed
+// concurrently (a --version run each, bounded at 5s total).
+func (a *App) ListCLIs() []CLIInfo {
+	agents := launcher.KnownAgents()
+	out := make([]CLIInfo, len(agents))
+	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
+	defer cancel()
+	var wg sync.WaitGroup
+	for i, ag := range agents {
+		out[i] = CLIInfo{
+			ID:        string(ag.ID),
+			Label:     ag.Label,
+			ModelHint: modelHints[string(ag.ID)],
+			Models:    staticModelSuggestions[string(ag.ID)],
+		}
+		adapter, err := core.GetCLIAdapter(string(ag.ID))
+		if err != nil {
+			continue
+		}
+		wg.Add(1)
+		go func(i int, ad core.CLIAdapter) {
+			defer wg.Done()
+			out[i].Available = ad.Available(ctx) == nil
+		}(i, adapter)
+	}
+	wg.Wait()
+	return out
+}
+
+// ListCLIModels returns live model suggestions for a CLI. For
+// opencode/praimate-code it runs `<bin> models` (one provider/model per
+// line); other CLIs fall back to the static suggestions.
+func (a *App) ListCLIModels(cli string) []string {
+	if cli != "opencode" && cli != "praimate-code" {
+		return staticModelSuggestions[cli]
+	}
+	bin, err := exec.LookPath(cli)
+	if err != nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 15*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, "models")
+	hideConsole(cmd)
+	outBytes, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	var models []string
+	for _, line := range strings.Split(string(outBytes), "\n") {
+		line = strings.TrimSpace(line)
+		// Model lines are provider/model; skip log noise.
+		if line != "" && strings.Contains(line, "/") && !strings.Contains(line, " ") {
+			models = append(models, line)
+		}
+	}
+	return models
+}
+
+// StartCleanChat creates an agent-less chat on a CLI with an optional
+// pinned model. The frontend drives it with SendChat like any other
+// chat; SendChat finds no AgentID and sends no system prompt.
+func (a *App) StartCleanChat(cli, model, cwd string) (*core.Chat, error) {
+	c, err := a.requireCore()
+	if err != nil {
+		return nil, err
+	}
+	if cwd == "" {
+		cwd, _ = os.Getwd()
+	}
+	return c.StartCleanChat(a.ctx, cli, model, cwd)
+}
+
+// --- Workspace (TUI) chats -------------------------------------------------
+
+// WorkspaceChatInfo is one TUI on-disk chat, listed so the GUI can
+// reopen it in the Code terminal. Read-only from the GUI side — the
+// chat's workpath/sandbox stay owned by the TUI flow.
+type WorkspaceChatInfo struct {
+	ID       string    `json:"id"`
+	Label    string    `json:"label"`
+	Agent    string    `json:"agent"`
+	Template string    `json:"template"`
+	LastUsed time.Time `json:"lastUsed"`
+	Sandbox  string    `json:"sandbox"`
+}
+
+// ListWorkspaceChats lists the TUI's on-disk chats (newest first).
+// Returns an empty list when no workspaces root is configured (TUI
+// never ran on this machine).
+func (a *App) ListWorkspaceChats() ([]WorkspaceChatInfo, error) {
+	c, err := a.requireCore()
+	if err != nil {
+		return nil, err
+	}
+	chats, err := c.ListLegacyChats(a.ctx)
+	if err != nil {
+		return []WorkspaceChatInfo{}, nil // unconfigured root = empty, not an error
+	}
+	out := make([]WorkspaceChatInfo, 0, len(chats))
+	for _, ch := range chats {
+		out = append(out, WorkspaceChatInfo{
+			ID: ch.ID, Label: ch.Label, Agent: string(ch.AgentID),
+			Template: ch.Template, LastUsed: ch.LastUsed, Sandbox: ch.SandboxDir,
+		})
+	}
+	return out, nil
+}
+
+// OpenWorkspaceChatResult is what OpenWorkspaceChat hands the frontend
+// so the Code page can attach to the already-running terminal.
+type OpenWorkspaceChatResult struct {
+	TermID string `json:"termId"`
+	CLI    string `json:"cli"`
+	Cwd    string `json:"cwd"`
+	Label  string `json:"label"`
+	Note   string `json:"note"`
+}
+
+// OpenWorkspaceChat relaunches a TUI chat's CLI inside the GUI's Code
+// terminal: same sandbox, same agent CLI, native session resume where
+// the CLI supports it (claude/openclaude/codex). This is the
+// TUI→GUI half of chat sharing; DB chats are the shared half both
+// surfaces already read.
+func (a *App) OpenWorkspaceChat(chatID string) (*OpenWorkspaceChatResult, error) {
+	c, err := a.requireCore()
+	if err != nil {
+		return nil, err
+	}
+	root := c.WorkspacesRoot()
+	if root == "" {
+		return nil, fmt.Errorf("no workspaces root configured (run the TUI once first)")
+	}
+	chat, err := launcher.LoadChat(root, chatID)
+	if err != nil || chat == nil {
+		return nil, fmt.Errorf("load workspace chat %q: %w", chatID, err)
+	}
+	var agent *launcher.Agent
+	for _, ag := range launcher.KnownAgents() {
+		if ag.ID == chat.AgentID {
+			ag := ag
+			agent = &ag
+			break
+		}
+	}
+	if agent == nil {
+		return nil, fmt.Errorf("unknown agent %q on chat %q", chat.AgentID, chatID)
+	}
+	name, args, err := terminalCommand(string(chat.AgentID))
+	if err != nil {
+		return nil, err
+	}
+	resume := launcher.RestoreNativeSession(*agent, *chat)
+	args = append(args, resume.Args...)
+	termID, err := a.terms.start(a.ctx, name, args, chat.SandboxDir, nil)
+	if err != nil {
+		return nil, err
+	}
+	return &OpenWorkspaceChatResult{
+		TermID: termID,
+		CLI:    string(chat.AgentID),
+		Cwd:    chat.SandboxDir,
+		Label:  chat.Label,
+		Note:   resume.Note,
+	}, nil
 }
 
 // --- Agents ----------------------------------------------------------------

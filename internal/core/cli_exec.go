@@ -31,6 +31,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -43,23 +44,55 @@ type execAdapter struct {
 	// message. If replyFile is non-empty the reply is read from that
 	// file (the CLI writes it there); otherwise trimmed stdout is the
 	// reply. tmpDir is a per-call scratch dir the adapter may use.
-	build func(message, tmpDir string) (args []string, replyFile string)
+	// model is the per-turn model override ("" = CLI default); CLIs
+	// without a model flag ignore it.
+	build func(message, model, tmpDir string) (args []string, replyFile string)
 	// stdinMsg pipes the message to the child's stdin instead of argv;
 	// build then must NOT embed the message in args. Required for
 	// newline-safety through Windows .CMD shims (see file comment).
 	stdinMsg bool
+	// extraDirs are checked (before PATH) for the binary — used by
+	// praimate-code, whose standard install lands in the managed bin
+	// dir rather than on PATH.
+	extraDirs []string
+}
+
+// resolveBin locates the adapter's binary: extraDirs first, then PATH.
+func (a *execAdapter) resolveBin() (string, error) {
+	name := a.bin
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	for _, dir := range a.extraDirs {
+		candidate := filepath.Join(dir, name)
+		if fi, err := os.Stat(candidate); err == nil && !fi.IsDir() {
+			return candidate, nil
+		}
+	}
+	return exec.LookPath(a.bin)
+}
+
+// praimateManagedBinDir mirrors installer.PraimateBinDir without the
+// import (core must not grow an installer dependency): the managed
+// standalone dir is <user config dir>/praimate/bin.
+func praimateManagedBinDir() string {
+	base, err := os.UserConfigDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(base, "praimate", "bin")
 }
 
 func (a *execAdapter) Name() string { return a.name }
 
 func (a *execAdapter) SupportsResume() bool { return false }
 
-func (a *execAdapter) Resume(ctx context.Context, sessionID, message string) (*Reply, error) {
+func (a *execAdapter) Resume(ctx context.Context, sessionID, message, model string) (*Reply, error) {
 	return nil, fmt.Errorf("%s adapter does not support resume", a.name)
 }
 
 func (a *execAdapter) Available(ctx context.Context) error {
-	path, err := exec.LookPath(a.bin)
+	path, err := a.resolveBin()
 	if err != nil {
 		return fmt.Errorf("%s CLI not on PATH; install it from the CLIs tab", a.bin)
 	}
@@ -76,7 +109,7 @@ func (a *execAdapter) Available(ctx context.Context) error {
 }
 
 func (a *execAdapter) SingleShot(ctx context.Context, opts SingleShotOpts) (*Reply, error) {
-	path, err := exec.LookPath(a.bin)
+	path, err := a.resolveBin()
 	if err != nil {
 		return nil, fmt.Errorf("%s CLI not on PATH", a.bin)
 	}
@@ -92,7 +125,7 @@ func (a *execAdapter) SingleShot(ctx context.Context, opts SingleShotOpts) (*Rep
 	}
 	defer os.RemoveAll(tmpDir)
 
-	args, replyFile := a.build(msg, tmpDir)
+	args, replyFile := a.build(msg, opts.Model, tmpDir)
 	cmd := exec.CommandContext(ctx, path, args...)
 	hideConsole(cmd)
 	if a.stdinMsg {
@@ -146,9 +179,13 @@ func (a *execAdapter) SingleShot(ctx context.Context, opts SingleShotOpts) (*Rep
 func NewCodexAdapter() *execAdapter {
 	return &execAdapter{
 		name: "codex", bin: "codex", stdinMsg: true,
-		build: func(_, tmpDir string) ([]string, string) {
+		build: func(_, model, tmpDir string) ([]string, string) {
 			out := filepath.Join(tmpDir, "reply.txt")
-			return []string{"exec", "--skip-git-repo-check", "--output-last-message", out, "-"}, out
+			args := []string{"exec", "--skip-git-repo-check", "--output-last-message", out}
+			if model != "" {
+				args = append(args, "-m", model)
+			}
+			return append(args, "-"), out
 		},
 	}
 }
@@ -159,8 +196,14 @@ func NewCodexAdapter() *execAdapter {
 func NewOpenCodeAdapter() *execAdapter {
 	return &execAdapter{
 		name: "opencode", bin: "opencode", stdinMsg: true,
-		build: func(_, _ string) ([]string, string) {
-			return []string{"run"}, ""
+		build: func(_, model, _ string) ([]string, string) {
+			args := []string{"run"}
+			if model != "" {
+				// opencode expects provider/model, e.g.
+				// anthropic/claude-sonnet-4-5.
+				args = append(args, "--model", model)
+			}
+			return args, ""
 		},
 	}
 }
@@ -170,8 +213,13 @@ func NewOpenCodeAdapter() *execAdapter {
 func NewPraimateCodeAdapter() *execAdapter {
 	return &execAdapter{
 		name: "praimate-code", bin: "praimate-code", stdinMsg: true,
-		build: func(_, _ string) ([]string, string) {
-			return []string{"run"}, ""
+		extraDirs: []string{praimateManagedBinDir()},
+		build: func(_, model, _ string) ([]string, string) {
+			args := []string{"run"}
+			if model != "" {
+				args = append(args, "--model", model)
+			}
+			return args, ""
 		},
 	}
 }
@@ -182,8 +230,12 @@ func NewPraimateCodeAdapter() *execAdapter {
 func NewGeminiAdapter() *execAdapter {
 	return &execAdapter{
 		name: "gemini", bin: "gemini", stdinMsg: true,
-		build: func(_, _ string) ([]string, string) {
-			return []string{"-o", "text", "--approval-mode", "yolo"}, ""
+		build: func(_, model, _ string) ([]string, string) {
+			args := []string{"-o", "text", "--approval-mode", "yolo"}
+			if model != "" {
+				args = append(args, "-m", model)
+			}
+			return args, ""
 		},
 	}
 }
@@ -195,7 +247,9 @@ func NewGeminiAdapter() *execAdapter {
 func NewDeepSeekAdapter() *execAdapter {
 	return &execAdapter{
 		name: "deepseek", bin: "deepseek",
-		build: func(message, _ string) ([]string, string) {
+		// No documented model flag — model is ignored (the TUI's config
+		// file picks the model for deepseek).
+		build: func(message, _, _ string) ([]string, string) {
 			return []string{"exec", "--output-format", "text", message}, ""
 		},
 	}

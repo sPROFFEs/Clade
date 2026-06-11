@@ -54,6 +54,12 @@ type ChatSettings struct {
 	// global toggle is off (positive) or opt out when global is on
 	// (negative). Nil means "follow global."
 	MemoryOverride *bool `json:"memory_override,omitempty"`
+
+	// Model, if set, pins the CLI's model for every turn of this chat
+	// (claude/openclaude --model, codex -m, opencode/praimate-code
+	// --model provider/model, gemini -m). Empty means the CLI's own
+	// default. CLIs without a model flag (deepseek) ignore it.
+	Model string `json:"model,omitempty"`
 }
 
 // Message is one stored turn. Role is "user" | "assistant" | "tool" |

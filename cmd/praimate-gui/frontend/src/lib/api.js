@@ -25,7 +25,13 @@ export const api = {
   chatMessages: (id) => call('ChatMessages', id),
   deleteChat: (id) => call('DeleteChat', id),
   startChat: (agentID, cli, cwd) => call('StartChat', agentID, cli, cwd),
+  startCleanChat: (cli, model, cwd) => call('StartCleanChat', cli, model, cwd),
   sendChat: (chatID, message) => call('SendChat', chatID, message),
+
+  listCLIs: () => call('ListCLIs'),
+  listCLIModels: (cli) => call('ListCLIModels', cli),
+  listWorkspaceChats: () => call('ListWorkspaceChats'),
+  openWorkspaceChat: (id) => call('OpenWorkspaceChat', id),
 
   listAgents: () => call('ListAgents'),
   importAgentDialog: () => call('ImportAgentDialog'),

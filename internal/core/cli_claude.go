@@ -101,6 +101,9 @@ func (a *ClaudeAdapter) SingleShot(ctx context.Context, opts SingleShotOpts) (*R
 		return nil, err
 	}
 	args := []string{"--print", "--output-format", "json"}
+	if opts.Model != "" {
+		args = append(args, "--model", opts.Model)
+	}
 	message := opts.Message
 	if opts.SystemPrompt != "" {
 		if isBatchShim(path) {
@@ -117,11 +120,16 @@ func (a *ClaudeAdapter) SingleShot(ctx context.Context, opts SingleShotOpts) (*R
 	return a.runAt(ctx, path, opts.Cwd, opts.Env, args, message)
 }
 
-func (a *ClaudeAdapter) Resume(ctx context.Context, sessionID, message string) (*Reply, error) {
+func (a *ClaudeAdapter) Resume(ctx context.Context, sessionID, message, model string) (*Reply, error) {
 	if sessionID == "" {
 		return nil, errors.New("claude.Resume: empty sessionID")
 	}
 	args := []string{"--print", "--output-format", "json", "--resume", sessionID}
+	if model != "" {
+		// Re-pin on every turn: --resume continues the conversation but
+		// falls back to the default model unless told otherwise.
+		args = append(args, "--model", model)
+	}
 	return a.run(ctx, "", nil, args, message)
 }
 
