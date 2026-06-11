@@ -13,12 +13,17 @@ import (
 	"encoding/base64"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"sort"
+	"strings"
 	"sync"
 
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"github.com/sPROFFEs/PrAImate/internal/core"
+	"github.com/sPROFFEs/PrAImate/internal/installer"
 	"github.com/sPROFFEs/PrAImate/internal/store"
 	"github.com/sPROFFEs/PrAImate/internal/version"
 )
@@ -162,6 +167,36 @@ func (a *App) ResizeTerminal(id string, cols, rows int) error {
 func (a *App) CloseTerminal(id string) {
 	a.terms.close(id)
 }
+
+// InstallPraimateCode downloads the prebuilt PrAImate Code binary into
+// the managed bin dir. Returns the install log on success so the
+// frontend can show what happened. Synchronous — it's a single download.
+func (a *App) InstallPraimateCode() (string, error) {
+	var buf strings.Builder
+	if err := installer.InstallPraimateCode(a.ctx, &buf); err != nil {
+		return buf.String(), err
+	}
+	return buf.String(), nil
+}
+
+// PraimateCodeInstalled reports whether praimate-code resolves on this
+// host (managed bin dir or PATH).
+func (a *App) PraimateCodeInstalled() bool {
+	bin, err := installer.PraimateBinDir()
+	if err == nil {
+		name := "praimate-code"
+		if osIsWindows() {
+			name += ".exe"
+		}
+		if fi, e := os.Stat(filepath.Join(bin, name)); e == nil && !fi.IsDir() {
+			return true
+		}
+	}
+	_, err = exec.LookPath("praimate-code")
+	return err == nil
+}
+
+func osIsWindows() bool { return runtime.GOOS == "windows" }
 
 func (a *App) requireCore() (*core.Core, error) {
 	if a.core == nil {

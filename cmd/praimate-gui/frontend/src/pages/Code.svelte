@@ -9,10 +9,33 @@
   let agents = []
   let error = ''
 
+  // PrAImate Code bundled CLI install state
+  let codeInstalled = true
+  let installing = false
+  let installLog = ''
+
   // setup state
   let agent = null
   let cli = ''
   let cwd = ''
+
+  async function checkCode() {
+    try { codeInstalled = await api.praimateCodeInstalled() } catch { codeInstalled = false }
+  }
+
+  async function installCode() {
+    installing = true
+    installLog = ''
+    error = ''
+    try {
+      installLog = await api.installPraimateCode()
+      await checkCode()
+    } catch (e) {
+      error = 'Install failed: ' + String(e)
+    } finally {
+      installing = false
+    }
+  }
 
   // running terminal
   let started = false
@@ -110,7 +133,7 @@
     exited = false
   }
 
-  onMount(load)
+  onMount(() => { load(); checkCode() })
   onDestroy(teardown)
 </script>
 
@@ -118,6 +141,22 @@
 <p class="subtitle">Run an agent's CLI live in a project folder — the real tool, with streaming, tool calls, and file edits.</p>
 
 {#if error}<div class="banner">{error}</div>{/if}
+
+{#if !started && !codeInstalled}
+  <div class="card">
+    <div class="card-title">PrAImate Code (bundled coding CLI) not installed</div>
+    <div class="card-sub">
+      PrAImate Code is our version-pinned build of OpenCode. Install it once
+      (~150MB download) to use it as a CLI here and via <span class="mono">praimate code</span>.
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button class="btn primary" on:click={installCode} disabled={installing}>
+        {installing ? 'Installing…' : 'Install PrAImate Code'}
+      </button>
+    </div>
+    {#if installLog}<pre class="mono" style="margin-top:10px; max-height:140px; overflow:auto">{installLog}</pre>{/if}
+  </div>
+{/if}
 
 {#if !started}
   {#if !agent}

@@ -35,7 +35,24 @@ const (
 	// ToolScrapeGraph installs a tiny Clade wrapper around ScrapeGraphAI's
 	// Python packages so every agent can call `scrapegraph-search`.
 	ToolScrapeGraph ToolID = "scrapegraph"
+	// ToolPraimateCode is PrAImate Code — our version-pinned, rebranded
+	// build of OpenCode. Unlike the others it isn't pip/npm installable;
+	// the install downloads the prebuilt standalone binary from our
+	// GitHub release into <config>/praimate/bin/, where `praimate code`
+	// looks for it.
+	ToolPraimateCode ToolID = "praimate-code"
 )
+
+// PraimateBinDir is <config>/praimate/bin — where managed standalone
+// binaries (praimate-code) are installed and where the `praimate code`
+// dispatcher looks for them.
+func PraimateBinDir() (string, error) {
+	base, err := os.UserConfigDir()
+	if err != nil {
+		return "", fmt.Errorf("locate user config dir: %w", err)
+	}
+	return filepath.Join(base, "praimate", "bin"), nil
+}
 
 // Tool describes an installable non-agent capability. Same shape as
 // Agent so the installer UI can render either with one code path; only
@@ -71,6 +88,12 @@ func KnownTools() []Tool {
 			Label:       "ScrapeGraphAI search helper",
 			Binary:      "scrapegraph-search",
 			InstallHint: "uv venv + scrapegraphai/scrapegraph-py   (set SGAI_API_KEY for API mode, or SCRAPEGRAPH_LLM_MODEL for OSS/local mode)",
+		},
+		{
+			ID:          ToolPraimateCode,
+			Label:       "PrAImate Code (bundled coding CLI · OpenCode fork)",
+			Binary:      "praimate-code",
+			InstallHint: "downloads the prebuilt standalone (~150MB) from our GitHub release into <config>/praimate/bin/; run with `praimate code`",
 		},
 	}
 }
@@ -111,6 +134,20 @@ func toolCandidatePaths(id ToolID, binary string) []string {
 	// PATH first, in case the user installed by hand.
 	if p, err := exec.LookPath(binary); err == nil {
 		paths = append(paths, p)
+	}
+	// PrAImate Code installs to <config>/praimate/bin, not the per-tool
+	// uv prefix — that's where the `praimate code` dispatcher looks.
+	if id == ToolPraimateCode {
+		if binDir, err := PraimateBinDir(); err == nil {
+			bins := []string{binary}
+			if runtime.GOOS == "windows" {
+				bins = append(bins, binary+".exe")
+			}
+			for _, b := range bins {
+				paths = append(paths, filepath.Join(binDir, b))
+			}
+		}
+		return paths
 	}
 	// Clade-managed prefix second.
 	if binDir, err := ManagedToolBinDir(string(id)); err == nil {
@@ -259,8 +296,84 @@ func allToolMethods(tool ToolID, action Action, current OS) []Method {
 				Prereqs:          []string{"uv"},
 			},
 		}
+	case ToolPraimateCode:
+		return praimateCodeMethods(current)
 	}
 	return nil
+}
+
+// praimateCodeMethods builds the download install for PrAImate Code. It
+// fetches the prebuilt standalone for the host OS/arch from our GitHub
+// release's "latest/download" alias (a stable URL GitHub resolves to the
+// newest release's asset) into <config>/praimate/bin. No toolchain
+// needed — it's a single self-contained binary.
+func praimateCodeMethods(current OS) []Method {
+	binDir, err := PraimateBinDir()
+	if err != nil {
+		return nil
+	}
+	asset := praimateCodeAssetName()
+	const base = "https://github.com/sPROFFEs/PrAImate/releases/latest/download/"
+	url := base + asset
+
+	if current == OSWindows {
+		dest := filepath.Join(binDir, "praimate-code.exe")
+		// Single-quoted PowerShell literals: '\' is NOT an escape char in
+		// PS single-quotes, so Windows paths pass through verbatim (unlike
+		// Go's %q, which would double the backslashes).
+		cmd := fmt.Sprintf(
+			"New-Item -ItemType Directory -Force -Path '%s' | Out-Null; "+
+				"Invoke-WebRequest -Uri '%s' -OutFile '%s'",
+			binDir, url, dest)
+		// ID must name the runner methodAvailable() probes on PATH —
+		// powershell here (the Windows case in methodAvailable).
+		return []Method{{
+			ID:          "powershell",
+			Label:       "Download prebuilt PrAImate Code into <config>\\praimate\\bin",
+			Command:     cmd,
+			Shell:       ShellPowerShell,
+			Recommended: true,
+		}}
+	}
+	dest := filepath.Join(binDir, "praimate-code")
+	cmd := fmt.Sprintf(
+		"mkdir -p %q && curl -fSL %q -o %q && chmod +x %q",
+		binDir, url, dest, dest)
+	// ID "curl" so methodAvailable keeps it visible only when curl is on
+	// PATH; the command itself runs through bash (Shell).
+	return []Method{{
+		ID:          "curl",
+		Label:       "Download prebuilt PrAImate Code into <config>/praimate/bin",
+		Command:     cmd,
+		Shell:       ShellBash,
+		Recommended: true,
+		Prereqs:     []string{"curl"},
+	}}
+}
+
+// InstallPraimateCode runs the recommended download install for the
+// current OS, streaming output to w. One-call helper for surfaces that
+// don't drive the generic tool-method picker (e.g. the GUI). Returns an
+// error if no method is available (e.g. curl missing) or the download
+// fails.
+func InstallPraimateCode(ctx context.Context, w io.Writer) error {
+	methods := ToolMethods(ToolPraimateCode, ActionInstall, DetectOS())
+	if len(methods) == 0 {
+		return fmt.Errorf("no install method available (need curl on Linux/macOS, or PowerShell on Windows)")
+	}
+	return Run(ctx, methods[0], w, w)
+}
+
+// praimateCodeAssetName is the release asset filename for the host.
+// Mirrors the naming the build pipeline uploads.
+func praimateCodeAssetName() string {
+	osPart := runtime.GOOS
+	archPart := runtime.GOARCH
+	name := fmt.Sprintf("praimate-code-%s-%s", osPart, archPart)
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	return name
 }
 
 // EnsureUvReady probes uv on PATH. If missing, returns a clear error

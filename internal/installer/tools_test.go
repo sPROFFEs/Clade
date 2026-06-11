@@ -137,3 +137,30 @@ func containsString(xs []string, want string) bool {
 	}
 	return false
 }
+
+func TestPraimateCodeMethods_PresentPerOS(t *testing.T) {
+	// Linux/macOS → a curl download method; Windows → powershell.
+	unix := allToolMethods(ToolPraimateCode, ActionInstall, OSLinux)
+	if len(unix) != 1 || unix[0].ID != "curl" {
+		t.Fatalf("linux praimate-code methods = %+v", unix)
+	}
+	if !strings.Contains(unix[0].Command, "praimate-code-") {
+		t.Fatalf("download command missing asset url: %q", unix[0].Command)
+	}
+	win := allToolMethods(ToolPraimateCode, ActionInstall, OSWindows)
+	if len(win) != 1 || win[0].ID != "powershell" {
+		t.Fatalf("windows praimate-code methods = %+v", win)
+	}
+}
+
+func TestKnownTools_IncludesPraimateCode(t *testing.T) {
+	found := false
+	for _, tl := range KnownTools() {
+		if tl.ID == ToolPraimateCode {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("praimate-code not in KnownTools")
+	}
+}

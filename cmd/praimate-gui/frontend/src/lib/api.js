@@ -68,6 +68,9 @@ export const api = {
 
   getGUISetting: (k) => call('GetGUISetting', k),
   setGUISetting: (k, v) => call('SetGUISetting', k, v),
+
+  praimateCodeInstalled: () => call('PraimateCodeInstalled'),
+  installPraimateCode: () => call('InstallPraimateCode'),
 }
 
 // onTurn subscribes to streamed workflow turns. Returns an unsubscribe
