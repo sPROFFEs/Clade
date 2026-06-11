@@ -286,7 +286,17 @@ export function TitleBar({ onToggleLeftSidebar }: { onToggleLeftSidebar?: () => 
   const canManageWorkspaces = supportsMultipleWorkspaces;
   const showWorkspaceTabs = supportsMultipleWorkspaces && workspaces.length > 0;
   const [isMaximized, setIsMaximized] = useState(false);
-  const [platform, setPlatform] = useState<string | null>(null);
+  // Start from a userAgent guess so the title bar (and the window
+  // controls on a frameless window) render even if the shell RPC is
+  // slow or the backend is down — getPlatform() refines it when it
+  // answers. Returning null until the RPC resolved left the window
+  // without close/minimize buttons whenever the backend was unhealthy.
+  const [platform, setPlatform] = useState<string>(() => {
+    const ua = navigator.userAgent;
+    if (/Mac/i.test(ua)) return "darwin";
+    if (/Win/i.test(ua)) return "win32";
+    return "linux";
+  });
   const [dialogMode, setDialogMode] = useState<"add" | "edit" | null>(null);
   const tabsRef = useRef<HTMLDivElement>(null);
   const workspaceIds = useMemo(() => workspaces.map((workspace) => workspace.id), [workspaces]);
@@ -336,10 +346,6 @@ export function TitleBar({ onToggleLeftSidebar }: { onToggleLeftSidebar?: () => 
     () => workspaces.find((workspace) => workspace.id === activeWorkspaceId) ?? null,
     [workspaces, activeWorkspaceId],
   );
-
-  if (!platform) {
-    return null;
-  }
 
   const isMac = platform === "darwin";
   const isWebRuntime = !navigator.userAgent.includes("Electron");

@@ -17,7 +17,6 @@ package main
 // failing cryptically.
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -98,17 +97,26 @@ func launchGUI() int {
 		return 1
 	}
 
-	// Capture the child's stderr so that if it dies immediately we can
-	// show the real error instead of leaving the user staring at a
-	// "launched" line with no window.
-	var stderr bytes.Buffer
+	// Send the child's output to a log FILE, not a pipe: we exit right
+	// after the grace period, and a pipe dies with us — the GUI would
+	// then crash with EPIPE the next time it logs. A file handle stays
+	// valid after we're gone, and doubles as the diagnostic source when
+	// the GUI exits immediately.
+	logPath := filepath.Join(os.TempDir(), "praimate-gui-launch.log")
+	logFile, err := os.Create(logPath)
+	if err != nil {
+		logFile = nil // degrade: discard output rather than fail launch
+	}
 	cmd := exec.Command(bin)
-	cmd.Stdout = nil
-	cmd.Stderr = &stderr
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
 	cmd.Stdin = nil
 	if err := cmd.Start(); err != nil {
 		fmt.Fprintf(os.Stderr, "praimate: failed to start %s: %v\n", bin, err)
 		return 1
+	}
+	if logFile != nil {
+		logFile.Close() // child holds its own handle now
 	}
 	pid := cmd.Process.Pid
 
@@ -119,11 +127,12 @@ func launchGUI() int {
 	go func() { exited <- cmd.Wait() }()
 	select {
 	case err := <-exited:
-		msg := strings.TrimSpace(stderr.String())
 		fmt.Fprintln(os.Stderr, "praimate: PrAImate GUI exited immediately without opening a window.")
-		if msg != "" {
-			fmt.Fprintln(os.Stderr)
-			fmt.Fprintln(os.Stderr, msg)
+		if b, rerr := os.ReadFile(logPath); rerr == nil {
+			if msg := strings.TrimSpace(string(b)); msg != "" {
+				fmt.Fprintln(os.Stderr)
+				fmt.Fprintln(os.Stderr, msg)
+			}
 		}
 		if err != nil {
 			var ee *exec.ExitError

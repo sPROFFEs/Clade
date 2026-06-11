@@ -98,7 +98,17 @@ export function resolveHarnessCli(harnessId: HarnessId): HarnessInventoryCliDiag
         encoding: "utf8",
         stdio: ["ignore", "pipe", "ignore"],
       });
-      const candidate = result.stdout?.split(/\r?\n/)[0]?.trim();
+      // `where` can return extensionless shim scripts (e.g. pnpm's
+      // POSIX-shell launcher) that child_process.spawn cannot execute.
+      // Prefer a real .exe; fall back to .cmd/.bat only if that's all
+      // there is (callers may need shell:true for those).
+      const lines = (result.stdout ?? "")
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+      const candidate =
+        lines.find((line) => line.toLowerCase().endsWith(".exe")) ??
+        lines.find((line) => /\.(cmd|bat)$/i.test(line));
       if (candidate)
         return { command, resolvedPath: candidate, checkedPaths: [...allChecked, "where"] };
     }

@@ -17,6 +17,15 @@ import { getHarnessInventories } from "./server/harness-inventory.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+// When the app is launched by a wrapper that exits after spawning us
+// (`praimate -gui`), our stdout/stderr pipes break with it. Console
+// logging (e.g. the [sidecar] output forwarding) then raises EPIPE on
+// the stream — swallow it instead of crashing the main process with an
+// "Uncaught Exception" dialog.
+for (const stream of [process.stdout, process.stderr]) {
+  stream.on("error", () => {});
+}
+
 app.setName("PrAImate GUI");
 app.setPath("userData", path.join(app.getPath("appData"), "PrAImate GUI"));
 
