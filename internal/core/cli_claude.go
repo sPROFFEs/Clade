@@ -27,8 +27,21 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
+
+// isBatchShim reports whether path is a Windows .CMD/.BAT wrapper (how
+// pnpm/npm expose node CLIs on Windows). Batch shims run through
+// cmd.exe, which truncates the command line at the first newline —
+// multi-line argv values cannot survive the trip.
+func isBatchShim(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".cmd", ".bat":
+		return true
+	}
+	return false
+}
 
 // ClaudeAdapter is the production adapter for the Claude Code CLI.
 type ClaudeAdapter struct {
@@ -73,6 +86,7 @@ func (a *ClaudeAdapter) Available(ctx context.Context) error {
 		return err
 	}
 	cmd := exec.CommandContext(ctx, path, "--version")
+	hideConsole(cmd)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("claude --version failed: %w", err)
 	}
@@ -82,11 +96,25 @@ func (a *ClaudeAdapter) Available(ctx context.Context) error {
 func (a *ClaudeAdapter) SupportsResume() bool { return true }
 
 func (a *ClaudeAdapter) SingleShot(ctx context.Context, opts SingleShotOpts) (*Reply, error) {
-	args := []string{"--print", "--output-format", "json"}
-	if opts.SystemPrompt != "" {
-		args = append(args, "--append-system-prompt", opts.SystemPrompt)
+	path, err := a.resolve()
+	if err != nil {
+		return nil, err
 	}
-	return a.run(ctx, opts.Cwd, opts.Env, args, opts.Message)
+	args := []string{"--print", "--output-format", "json"}
+	message := opts.Message
+	if opts.SystemPrompt != "" {
+		if isBatchShim(path) {
+			// pnpm/npm install the CLI as a .CMD batch shim on Windows,
+			// and cmd.exe truncates the command line at the first
+			// newline — a multi-line system prompt via argv silently
+			// loses everything after line one. Prepend it to the stdin
+			// message instead; stdin is newline-safe.
+			message = opts.SystemPrompt + "\n\n" + message
+		} else {
+			args = append(args, "--append-system-prompt", opts.SystemPrompt)
+		}
+	}
+	return a.runAt(ctx, path, opts.Cwd, opts.Env, args, message)
 }
 
 func (a *ClaudeAdapter) Resume(ctx context.Context, sessionID, message string) (*Reply, error) {
@@ -104,7 +132,13 @@ func (a *ClaudeAdapter) run(ctx context.Context, cwd string, env map[string]stri
 	if err != nil {
 		return nil, err
 	}
+	return a.runAt(ctx, path, cwd, env, args, message)
+}
+
+// runAt is run with the binary already resolved.
+func (a *ClaudeAdapter) runAt(ctx context.Context, path, cwd string, env map[string]string, args []string, message string) (*Reply, error) {
 	cmd := exec.CommandContext(ctx, path, args...)
+	hideConsole(cmd)
 	if cwd != "" {
 		cmd.Dir = cwd
 	}
@@ -113,7 +147,7 @@ func (a *ClaudeAdapter) run(ctx context.Context, cwd string, env map[string]stri
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	err = cmd.Run()
+	err := cmd.Run()
 	exitCode := 0
 	if err != nil {
 		var ee *exec.ExitError

@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/praimate.png" alt="PrAImate" width="180" />
+</p>
+
 # PrAImate
 
 ```
@@ -24,9 +28,11 @@ layer around them is yours.
 Two surfaces over one shared SQLite database (`~/.praimate/db.sqlite`):
 
 - **`praimate`** — the TUI. Single static Go binary, no runtime deps.
-- **`praimate-gui`** — the desktop app (Wails + Svelte). Same chats,
-  same agents, same memory; a run launched in one surface shows up in
-  the other.
+- **PrAImate GUI** — the desktop app ([`gui/`](gui/), Electron + React,
+  based on [OpenGUI](https://github.com/akemmanuel/OpenGUI), MIT).
+  Streaming chat with prompt queue, model/backend/agent switching, MCP
+  + skills configuration, and multi-project workspaces — driving
+  PrAImate Code, Claude Code, Codex, and Pi.
 
 What the harness adds on top of your CLIs:
 

@@ -19,5 +19,13 @@ case "$(uname -s)" in
   Linux) TAGS="$TAGS,webkit2_41" ;;
 esac
 
-go build -trimpath -tags "$TAGS" -ldflags '-s -w' -o praimate-gui .
-echo "built ./praimate-gui"
+# Name the output praimate-gui.exe on Windows (Go does NOT auto-append
+# .exe when -o is given) and hide the console via -H windowsgui.
+EXT=""
+LDFLAGS='-s -w'
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) EXT=".exe"; LDFLAGS='-s -w -H windowsgui' ;;
+esac
+
+go build -trimpath -tags "$TAGS" -ldflags "$LDFLAGS" -o "praimate-gui$EXT" .
+echo "built ./praimate-gui$EXT"
