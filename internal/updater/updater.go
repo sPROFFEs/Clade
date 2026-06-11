@@ -262,7 +262,11 @@ func extractFromZip(archivePath, binName string) (string, error) {
 	}
 	defer zr.Close()
 	for _, zf := range zr.File {
-		if path.Base(zf.Name) != binName {
+		// Normalize separators first: zips produced by PowerShell's
+		// Compress-Archive carry backslash entry names, which
+		// path.Base (forward-slash semantics) doesn't split.
+		name := strings.ReplaceAll(zf.Name, `\`, "/")
+		if path.Base(name) != binName {
 			continue
 		}
 		rc, err := zf.Open()

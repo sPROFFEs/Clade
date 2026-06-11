@@ -148,8 +148,18 @@ build_one() {
   if [ "$ARCHIVE" = "1" ]; then
     case "$goos" in
       windows)
+        # IMPORTANT: the windows asset must be a REAL zip with
+        # forward-slash entry names — the shipped updater extracts via
+        # archive/zip + path.Base, and PowerShell's Compress-Archive
+        # writes backslash entries it can't match ("praimate.exe not
+        # found in archive"). Windows' native bsdtar produces correct
+        # zips; git-bash's GNU tar does NOT (-a is silently wrong).
         if command -v zip >/dev/null 2>&1; then
           ( cd dist && zip -qr "praimate-$triplet.zip" "$triplet" )
+        elif [ -x "/c/Windows/System32/tar.exe" ]; then
+          ( cd dist && /c/Windows/System32/tar.exe \
+              --options zip:compression=deflate \
+              -a -cf "praimate-$triplet.zip" "$triplet" )
         elif command -v tar >/dev/null 2>&1; then
           ( cd dist && tar -czf "praimate-$triplet.tar.gz" "$triplet" )
           echo "  (no zip on PATH; built tar.gz instead)" >&2
