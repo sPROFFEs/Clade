@@ -18,19 +18,15 @@
 # internal/version/version.go.
 #
 # GUI coverage with --with-gui:
-#   - native os/arch       — full cgo build (Linux needs webkit2gtk-4.1
-#                            dev headers; macOS needs Xcode CLT)
-#   - windows-amd64        — ALWAYS cross-compilable: Wails v2's Windows
-#                            backend is pure Go syscalls (WebView2 loads
-#                            at runtime), so CGO_ENABLED=0 works
-#   - everything else      — skipped; those platforms build from source
-#                            via cmd/praimate-gui/build.sh
+#   PrAImate GUI is the Electron app under gui/. electron-builder can
+#   only package for the build host's OS, so --with-gui produces ONE
+#   installer per run (NSIS .exe on Windows, .deb/.AppImage on Linux,
+#   .dmg on macOS) and drops it into dist/. Run on each OS (or in CI)
+#   to cover all three. `praimate --gui` launches the INSTALLED app —
+#   the GUI no longer ships inside the bundles.
 #
-# `praimate --gui` dispatches to the praimate-gui binary shipped next
-# to it, so bundles that include the GUI get AIO behaviour for free.
-#
-# Requires: Go 1.21+, tar + zip (only when archiving); node+npm and
-# webkit2gtk-4.1 dev headers when --with-gui is used on Linux.
+# Requires: Go 1.21+, tar + zip (only when archiving); node 24+ and
+# pnpm when --with-gui is used.
 
 set -euo pipefail
 
@@ -97,27 +93,6 @@ build_one() {
   GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 \
     go build -trimpath -ldflags "$LDFLAGS" -o "$out/clade$ext" ./cmd/clade
 
-  # GUI: native target (full cgo) + windows-amd64 (pure-Go cross).
-  if [ "$WITH_GUI" = "1" ]; then
-    if [ "$triplet" = "$NATIVE_TRIPLET" ]; then
-      echo "  + praimate-gui (native)"
-      bash cmd/praimate-gui/build.sh
-      cp "cmd/praimate-gui/praimate-gui$ext" "$out/praimate-gui$ext"
-    elif [ "$triplet" = "windows-amd64" ]; then
-      echo "  + praimate-gui (windows cross)"
-      # Frontend must already be built (the native branch or a prior
-      # run does it); build it here if dist assets are missing.
-      if [ ! -f cmd/praimate-gui/frontend/dist/index.html ]; then
-        ( cd cmd/praimate-gui/frontend && npm install && npm run build )
-      fi
-      ( cd cmd/praimate-gui && \
-        GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
-        go build -trimpath -tags desktop,production \
-          -ldflags "-s -w -H windowsgui" -o praimate-gui.exe . )
-      cp cmd/praimate-gui/praimate-gui.exe "$out/praimate-gui.exe"
-    fi
-  fi
-
   # PrAImate Code (rebranded OpenCode): native target only — it's a
   # Bun-compiled standalone that can't cross-compile from here. Needs
   # bun on PATH; skipped quietly if absent so a plain build still works.
@@ -171,6 +146,27 @@ build_one() {
 for t in "${TARGETS[@]}"; do
   build_one "$t"
 done
+
+# PrAImate GUI (Electron, gui/): one installer for the build host's OS.
+# electron-builder cannot cross-compile installers, so multi-OS coverage
+# means running this on each OS (or in CI).
+if [ "$WITH_GUI" = "1" ]; then
+  if command -v pnpm >/dev/null 2>&1; then
+    echo "→ PrAImate GUI installer (build-host OS)"
+    ( cd gui && pnpm install --frozen-lockfile && \
+      case "$(uname -s)" in
+        Linux)                pnpm exec vp run dist:linux ;;
+        Darwin)               pnpm exec vp run dist:mac ;;
+        MINGW*|MSYS*|CYGWIN*) pnpm exec vp run dist:win ;;
+        *) echo "  (unknown host OS; skipping GUI installer)" >&2 ;;
+      esac )
+    find gui/release -maxdepth 1 -type f \
+      \( -name '*.exe' -o -name '*.deb' -o -name '*.AppImage' -o -name '*.dmg' \) \
+      -exec cp {} dist/ \; 2>/dev/null || true
+  else
+    echo "  (skipping PrAImate GUI installer: pnpm not on PATH)" >&2
+  fi
+fi
 
 echo
 echo "Built ${#TARGETS[@]} target(s). Artifacts under dist/:"

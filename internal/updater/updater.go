@@ -180,12 +180,14 @@ func Apply(asset *Asset, progress func(stage string)) error {
 	}
 
 	// Refresh the sibling binaries shipped in the same archive
-	// (praimate-gui, praimate-code) so `praimate -update` keeps them in
-	// step with the main binary — matching what the installer does. Each
-	// is best-effort: absent from this platform's archive, or not
-	// installed next to praimate, simply means "skip".
+	// (praimate-code) so `praimate -update` keeps them in step with the
+	// main binary — matching what the installer does. Each is
+	// best-effort: absent from this platform's archive, or not installed
+	// next to praimate, simply means "skip". (The desktop GUI is the
+	// standalone Electron app since 1.1.4 — it updates itself and no
+	// longer ships inside the bundles.)
 	exeDir := filepath.Dir(exePath)
-	for _, sib := range []string{"praimate-gui", "praimate-code"} {
+	for _, sib := range []string{"praimate-code"} {
 		name := sib
 		if runtime.GOOS == "windows" {
 			name += ".exe"

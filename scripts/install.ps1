@@ -186,8 +186,10 @@ function Install-Binary {
         Step "Installing to $Dest"
         Copy-Item -Path (Join-Path $extracted "praimate.exe") -Destination $Dest -Force
         Copy-Item -Path (Join-Path $extracted "wpc.exe")   -Destination $Dest -Force
-        # Desktop GUI ships prebuilt in the windows-amd64 archive.
-        # Install it next to praimate.exe so `praimate --gui` finds it.
+        # Legacy archives (<=1.1.3) shipped praimate-gui.exe inside the
+        # bundle. The desktop GUI is now the standalone PrAImate GUI
+        # Electron app (PrAImate-GUI.Setup.<version>.exe on the release).
+        # Keep the copy for old archives so re-installs still work.
         $guiSrc = Join-Path $extracted "praimate-gui.exe"
         if (Test-Path $guiSrc) {
             Copy-Item -Path $guiSrc -Destination $Dest -Force

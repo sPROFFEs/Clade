@@ -7,29 +7,56 @@ import (
 	"testing"
 )
 
-func TestResolveGUIBinary_PrefersSibling(t *testing.T) {
+func TestResolveGUIBinary_FindsOnPath(t *testing.T) {
 	dir := t.TempDir()
 	name := "praimate-gui"
 	if runtime.GOOS == "windows" {
 		name += ".exe"
 	}
-	sibling := filepath.Join(dir, name)
-	if err := os.WriteFile(sibling, []byte("#!/bin/sh\n"), 0o755); err != nil {
+	bin := filepath.Join(dir, name)
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	fakeExe := filepath.Join(dir, "praimate")
+	t.Setenv("PATH", dir)
+	// Keep the install-location candidates from matching a real install
+	// on the test machine.
+	t.Setenv("LOCALAPPDATA", t.TempDir())
+	t.Setenv("ProgramFiles", t.TempDir())
+	t.Setenv("ProgramFiles(x86)", t.TempDir())
 
-	got := resolveGUIBinary(fakeExe)
-	if got != sibling {
-		t.Fatalf("resolveGUIBinary = %q, want sibling %q", got, sibling)
+	got := resolveGUIBinary()
+	if got != bin {
+		t.Fatalf("resolveGUIBinary = %q, want PATH hit %q", got, bin)
+	}
+}
+
+func TestResolveGUIBinary_PrefersInstalledApp(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("install-candidate layout under test is the Windows one")
+	}
+	local := t.TempDir()
+	installed := filepath.Join(local, "Programs", "PrAImate GUI", "PrAImate GUI.exe")
+	if err := os.MkdirAll(filepath.Dir(installed), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(installed, []byte("MZ"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LOCALAPPDATA", local)
+	t.Setenv("PATH", t.TempDir())
+
+	got := resolveGUIBinary()
+	if got != installed {
+		t.Fatalf("resolveGUIBinary = %q, want installed app %q", got, installed)
 	}
 }
 
 func TestResolveGUIBinary_MissingReturnsEmpty(t *testing.T) {
-	// Point exe at an empty dir and ensure PATH can't resolve it either.
 	t.Setenv("PATH", t.TempDir())
-	got := resolveGUIBinary(filepath.Join(t.TempDir(), "praimate"))
-	if got != "" {
+	t.Setenv("LOCALAPPDATA", t.TempDir())
+	t.Setenv("ProgramFiles", t.TempDir())
+	t.Setenv("ProgramFiles(x86)", t.TempDir())
+	if got := resolveGUIBinary(); got != "" {
 		t.Fatalf("expected empty result when gui binary absent, got %q", got)
 	}
 }
