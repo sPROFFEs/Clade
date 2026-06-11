@@ -79,6 +79,18 @@ export const api = {
 
   praimateCodeInstalled: () => call('PraimateCodeInstalled'),
   installPraimateCode: () => call('InstallPraimateCode'),
+
+  backupStatus: () => call('BackupStatus'),
+  setBackupEnabled: (on) => call('SetBackupEnabled', on),
+  setBackupRemote: (url) => call('SetBackupRemote', url),
+  testBackupRemote: (url) => call('TestBackupRemote', url),
+  backupSyncNow: () => call('BackupSyncNow'),
+  resolveBackupDivergence: (strategy) => call('ResolveBackupDivergence', strategy),
+  backupForcePush: () => call('BackupForcePush'),
+  backupResetFromRemote: () => call('BackupResetFromRemote'),
+  backupDisconnect: () => call('BackupDisconnect'),
+  setBackupAutoSync: (on) => call('SetBackupAutoSync', on),
+  setBackupForceLocal: (on) => call('SetBackupForceLocal', on),
 }
 
 // onTurn subscribes to streamed workflow turns. Returns an unsubscribe

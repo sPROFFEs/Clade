@@ -18,6 +18,82 @@
   let error = ''
   let agents = []
 
+  // Backup (git sync of the workspaces root — shared with the TUI)
+  let bk = null            // BackupState
+  let bkBusy = ''          // label of the in-flight op, '' = idle
+  let bkMsg = ''           // last op result line
+  let bkRemote = ''        // remote URL input
+  let bkDiverged = null    // {localCommits, remoteCommits} when resolution needed
+
+  function fmtDate(s) {
+    try { return new Date(s).toLocaleString() } catch { return s }
+  }
+
+  async function bkLoad() {
+    try {
+      bk = await api.backupStatus()
+      bkRemote = bk?.remoteUrl || ''
+    } catch (e) {
+      bk = null
+      error = String(e)
+    }
+  }
+
+  async function bkOp(label, fn) {
+    if (bkBusy) return
+    bkBusy = label
+    bkMsg = ''
+    error = ''
+    try {
+      const res = await fn()
+      if (res) { bk = res; bkRemote = bk.remoteUrl || '' }
+      bkDiverged = null
+      bkMsg = label + ' ✓'
+    } catch (e) {
+      error = String(e)
+    } finally {
+      bkBusy = ''
+    }
+  }
+
+  async function bkSync() {
+    if (bkBusy) return
+    bkBusy = 'Sync'
+    bkMsg = ''
+    error = ''
+    bkDiverged = null
+    try {
+      const res = await api.backupSyncNow()
+      bk = res.state
+      bkRemote = bk.remoteUrl || ''
+      if (res.action === 'diverged') {
+        bkDiverged = { local: res.localCommits || [], remote: res.remoteCommits || [] }
+        bkMsg = 'Diverged — pick a resolution below.'
+      } else {
+        bkMsg = { in_sync: 'In sync ✓', pushed: 'Pushed local changes ✓', pulled: 'Pulled remote changes ✓', no_remote: 'No remote configured.' }[res.action] || res.action
+      }
+    } catch (e) {
+      error = String(e)
+    } finally {
+      bkBusy = ''
+    }
+  }
+
+  async function bkTest() {
+    if (bkBusy) return
+    bkBusy = 'Test'
+    bkMsg = ''
+    error = ''
+    try {
+      const branch = await api.testBackupRemote(bkRemote)
+      bkMsg = `Connection OK — default branch: ${branch}`
+    } catch (e) {
+      error = String(e)
+    } finally {
+      bkBusy = ''
+    }
+  }
+
   // Watchers
   let watchers = []
   let wAgent = ''
@@ -45,6 +121,7 @@
     } catch (e) {
       error = String(e)
     }
+    await bkLoad()
   }
 
   async function addWatcher() {
@@ -121,6 +198,99 @@
     </div>
   </div>
 </div>
+
+<h1 style="font-size:16px; margin-top:24px">Backup — git sync</h1>
+<p class="subtitle">Mirrors your chats + templates (the same workspaces root the TUI uses) to a git remote. Settings are shared with the TUI's Backup tab.</p>
+
+{#if !bk}
+  <div class="card card-sub">Loading backup status…</div>
+{:else if !bk.supported}
+  <div class="card card-sub">No workspaces root configured yet — run the <span class="mono">praimate</span> TUI once to set it up.</div>
+{:else}
+  <div class="card">
+    <div class="row" style="justify-content: space-between">
+      <div>
+        <div class="card-title">Backup enabled</div>
+        <div class="card-sub">
+          {#if bk.enabled && bk.initialized}
+            {bk.branch || 'main'}
+            {#if bk.ahead || bk.behind} · ↑{bk.ahead} ↓{bk.behind}{:else} · in sync{/if}
+            {#if bk.lastCommit} · {bk.lastCommit}{/if}
+          {:else if bk.enabled}
+            enabled, repo not initialised yet
+          {:else}
+            off — flip to initialise the workspaces root as a git repo
+          {/if}
+        </div>
+        {#if bk.lastSyncAt}<div class="card-sub">last sync: {fmtDate(bk.lastSyncAt)}{#if bk.machineId} · machine: <span class="mono">{bk.machineId}</span>{/if}</div>{/if}
+      </div>
+      <button class="btn" class:primary={bk.enabled} disabled={!!bkBusy}
+        on:click={() => bkOp(bk.enabled ? 'Disable' : 'Enable', () => api.setBackupEnabled(!bk.enabled))}>
+        {bk.enabled ? 'On' : 'Off'}
+      </button>
+    </div>
+
+    {#if bk.enabled}
+      <label class="lbl">Remote URL (https or ssh — uses your git client's credentials)</label>
+      <div class="row">
+        <input class="field grow mono" placeholder="git@github.com:you/praimate-backup.git" bind:value={bkRemote} />
+        <button class="btn" disabled={!!bkBusy || !bkRemote.trim()} on:click={bkTest}>Test</button>
+        <button class="btn" disabled={!!bkBusy} on:click={() => bkOp('Save remote', () => api.setBackupRemote(bkRemote))}>Save</button>
+      </div>
+
+      <div class="row" style="margin-top:12px">
+        <button class="btn primary" disabled={!!bkBusy || !bk.remoteUrl} on:click={bkSync}>
+          {bkBusy === 'Sync' ? 'Syncing…' : 'Sync now'}
+        </button>
+        <button class="btn" disabled={!!bkBusy}
+          on:click={() => bkOp(bk.autoSync ? 'Auto-sync off' : 'Auto-sync on', () => api.setBackupAutoSync(!bk.autoSync))}>
+          Auto-sync: {bk.autoSync ? 'on' : 'off'}
+        </button>
+        {#if bk.autoSync}
+          <button class="btn" disabled={!!bkBusy}
+            on:click={() => bkOp(bk.forceLocal ? 'Force-local off' : 'Force-local on', () => api.setBackupForceLocal(!bk.forceLocal))}>
+            Force local: {bk.forceLocal ? 'on' : 'off'}
+          </button>
+        {/if}
+        <div class="grow"></div>
+        <button class="btn danger" disabled={!!bkBusy || !bk.remoteUrl}
+          on:click={() => confirm('Force-push local state over the remote?') && bkOp('Force push', api.backupForcePush)}>Force push</button>
+        <button class="btn danger" disabled={!!bkBusy || !bk.remoteUrl}
+          on:click={() => confirm('Discard ALL local changes and reset to the remote?') && confirm('Really? Local commits and uncommitted changes will be lost.') && bkOp('Reset from remote', api.backupResetFromRemote)}>Reset from remote</button>
+        <button class="btn danger" disabled={!!bkBusy || !bk.remoteUrl}
+          on:click={() => bkOp('Disconnect', api.backupDisconnect)}>Disconnect</button>
+      </div>
+
+      {#if bkMsg}<div class="card-sub" style="margin-top:8px">{bkMsg}</div>{/if}
+
+      {#if bkDiverged}
+        <div class="card" style="margin-top:10px; border-color: var(--warn)">
+          <div class="card-title">Diverged — local and remote both have new commits</div>
+          <div class="row" style="align-items: flex-start; margin-top:8px">
+            <div class="grow">
+              <div class="card-sub" style="font-weight:600">Local only</div>
+              {#each bkDiverged.local as c}<div class="mono card-sub">{c}</div>{/each}
+              {#if bkDiverged.local.length === 0}<div class="card-sub">(none)</div>{/if}
+            </div>
+            <div class="grow">
+              <div class="card-sub" style="font-weight:600">Remote only</div>
+              {#each bkDiverged.remote as c}<div class="mono card-sub">{c}</div>{/each}
+              {#if bkDiverged.remote.length === 0}<div class="card-sub">(none)</div>{/if}
+            </div>
+          </div>
+          <div class="row" style="margin-top:10px">
+            <button class="btn primary" disabled={!!bkBusy} on:click={() => bkOp('Merge', () => api.resolveBackupDivergence('merge'))}>Merge (keep both)</button>
+            <button class="btn" disabled={!!bkBusy} on:click={() => bkOp('Rebase', () => api.resolveBackupDivergence('rebase'))}>Rebase local on remote</button>
+            <button class="btn danger" disabled={!!bkBusy}
+              on:click={() => confirm('Discard the remote-only commits?') && bkOp('Force push', () => api.resolveBackupDivergence('forcepush'))}>Force push (keep local)</button>
+            <button class="btn danger" disabled={!!bkBusy}
+              on:click={() => confirm('Discard the local-only commits?') && bkOp('Reset', () => api.resolveBackupDivergence('reset'))}>Reset (keep remote)</button>
+          </div>
+        </div>
+      {/if}
+    {/if}
+  </div>
+{/if}
 
 <h1 style="font-size:16px; margin-top:24px">Folder watchers</h1>
 {#each watchers as w}
