@@ -84,6 +84,28 @@ func (s *Store) DB() *sql.DB { return s.db }
 // Path returns the on-disk path the store was opened against.
 func (s *Store) Path() string { return s.path }
 
+// Snapshot writes a consistent copy of the database to dest using
+// SQLite's VACUUM INTO. Unlike copying the file, this is safe while the
+// DB is open with WAL mode — it produces a single, fully-checkpointed
+// file with no -wal/-shm sidecars. Used by the backup feature to commit
+// the DB into the synced repo.
+func (s *Store) Snapshot(ctx context.Context, dest string) error {
+	if s == nil || s.db == nil {
+		return errors.New("store.Snapshot: nil store")
+	}
+	if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
+		return fmt.Errorf("store.Snapshot: mkdir: %w", err)
+	}
+	// Remove a prior snapshot — VACUUM INTO refuses to overwrite.
+	_ = os.Remove(dest)
+	// dest is a trusted, app-controlled path; quote single quotes defensively.
+	q := "VACUUM INTO '" + strings.ReplaceAll(dest, "'", "''") + "'"
+	if _, err := s.db.ExecContext(ctx, q); err != nil {
+		return fmt.Errorf("store.Snapshot: vacuum into %s: %w", dest, err)
+	}
+	return nil
+}
+
 // SchemaVersion returns the highest applied migration number, or 0 if
 // no migrations have run.
 func (s *Store) SchemaVersion(ctx context.Context) (int, error) {

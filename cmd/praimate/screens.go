@@ -14,6 +14,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/sPROFFEs/PrAImate/internal/backup"
+	"github.com/sPROFFEs/PrAImate/internal/installer"
 	"github.com/sPROFFEs/PrAImate/internal/launcher"
 )
 
@@ -583,6 +584,13 @@ func (m agentsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return false
 		})
+		// PrAImate Code is a coding CLI we provide; surface it in the
+		// CLIs browser (install-only mode), not as a chat-launch target
+		// or a companion tool. Appended last; Enter/i routes to its
+		// download installer (see praimateCodeAgentID handling below).
+		if m.override == nil && m.ws.Name == "" {
+			items = append(items, praimateCodeBrowserEntry())
+		}
 		m.items = items
 		m.loading = false
 		// Cursor seed priority:
@@ -621,6 +629,11 @@ func (m agentsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			a := m.items[m.cursor]
+			// PrAImate Code: our bundled coding CLI — install via the
+			// download method, not the agent-launch / agent-install path.
+			if a.ID == praimateCodeAgentID {
+				return m, wrap(newToolInstallModel(m.cfg, installer.ToolPraimateCode))
+			}
 			if !a.Available {
 				// Greyed-out: route to install screen on Enter too,
 				// since that's the natural action the user wants.
@@ -683,6 +696,9 @@ func (m agentsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// the 'install' = upgrade path).
 			if m.cursor >= len(m.items) {
 				return m, nil
+			}
+			if m.items[m.cursor].ID == praimateCodeAgentID {
+				return m, wrap(newToolInstallModel(m.cfg, installer.ToolPraimateCode))
 			}
 			return m, wrap(newInstallModel(m.cfg, m.ws, m.items[m.cursor].ID))
 		case "o":

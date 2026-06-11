@@ -111,7 +111,7 @@ func TestIsZipURL(t *testing.T) {
 		"https://github.com/org/repo.git":       false,
 		"git@github.com:org/repo.git":           false,
 		"file:///tmp/skill.zip":                 false, // we only do http(s) zip
-		"":                                     false,
+		"":                                      false,
 	}
 	for in, want := range cases {
 		if got := isZipURL(in); got != want {

@@ -85,9 +85,9 @@ func (m MaintenanceConfig) promotionWindow() float64 {
 // DecayResult reports what DecayPinned did. Useful for logging and
 // for the Memory TUI's "last maintenance" status line.
 type DecayResult struct {
-	Scanned int     // rows examined
-	Decayed int     // rows whose salience changed
-	NowUTC  string  // ISO timestamp written into last_decayed_at
+	Scanned int    // rows examined
+	Decayed int    // rows whose salience changed
+	NowUTC  string // ISO timestamp written into last_decayed_at
 }
 
 // DecayPinned scales each fact's salience by exp(-Δdays / halfLife)

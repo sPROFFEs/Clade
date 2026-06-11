@@ -12,7 +12,7 @@ func TestCreateChat_AutoSlugAndDefaults(t *testing.T) {
 	ctx := context.Background()
 
 	ch, err := c.CreateChat(ctx, CreateChatRequest{
-		Title: "Refactor the Launcher!",
+		Title:    "Refactor the Launcher!",
 		CLIAgent: "claude",
 	})
 	if err != nil {

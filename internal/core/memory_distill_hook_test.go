@@ -15,8 +15,8 @@ type mockDistiller struct {
 	calls int
 }
 
-func (m *mockDistiller) Name() string                       { return m.name }
-func (m *mockDistiller) Available(_ context.Context) error  { return m.avail }
+func (m *mockDistiller) Name() string                      { return m.name }
+func (m *mockDistiller) Available(_ context.Context) error { return m.avail }
 func (m *mockDistiller) Distill(_ context.Context, _ []DistillMessage) (*DistillResult, error) {
 	m.calls++
 	if m.err != nil {

@@ -555,6 +555,23 @@ func (a *App) ConnectMCP(catalogueKey, apiKey string) (*core.MCPServer, error) {
 	})
 }
 
+// AddCustomMCP registers a user-defined MCP server (local or remote)
+// that isn't in the catalogue — e.g. hexstrike-ai. envText is
+// newline/comma-separated KEY=VALUE pairs.
+func (a *App) AddCustomMCP(name, transport, command, url, envText string) (*core.MCPServer, error) {
+	c, err := a.requireCore()
+	if err != nil {
+		return nil, err
+	}
+	return c.AddCustomMCP(a.ctx, core.AddCustomMCPRequest{
+		Name:      name,
+		Transport: transport,
+		Command:   command,
+		URL:       url,
+		Env:       core.ParseEnvLines(envText),
+	})
+}
+
 func (a *App) SetMCPEnabled(id string, enabled bool) error {
 	c, err := a.requireCore()
 	if err != nil {

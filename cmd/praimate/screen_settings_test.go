@@ -99,4 +99,3 @@ func TestSettingsScreen_MenuRoundTripsOnTemplate(t *testing.T) {
 		t.Errorf("OnlineSkills = %v", loaded.Settings.OnlineSkills)
 	}
 }
-

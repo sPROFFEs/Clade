@@ -288,8 +288,11 @@ func slugifyLabel(s string) string {
 // so the existing wpc compile + launch + resume machinery works
 // unchanged.
 //
-// templateName is recorded in chat.json as "agent:<id>" so the chat
-// list can show provenance without a Template existing on disk.
+// The agent id is recorded as the chat's Template (provenance) AND
+// becomes the compiled workpath name, so it MUST be a valid workpath
+// identifier (^[a-z0-9][a-z0-9_-]*$). PrAImate agent ids are kebab-case
+// and already satisfy that; we defensively slugify anyway so a
+// hand-imported agent with an odd id can't break the launch.
 func CreateChatFromInstructions(root, label string, agent AgentID, agentID, description, instructions string) (Chat, error) {
 	if strings.TrimSpace(label) == "" {
 		return Chat{}, fmt.Errorf("chat label cannot be empty")
@@ -323,7 +326,12 @@ func CreateChatFromInstructions(root, label string, agent AgentID, agentID, desc
 		return Chat{}, err
 	}
 
-	templateName := "agent:" + agentID
+	// Workpath name = the agent id, slugified to the workpath identifier
+	// grammar so wpc validation (^[a-z0-9][a-z0-9_-]*$) always passes.
+	templateName := workpathSlug(agentID)
+	if templateName == "" {
+		templateName = "agent"
+	}
 	manifest := chatManifest{
 		Label:     label,
 		Template:  templateName,
@@ -352,4 +360,25 @@ func CreateChatFromInstructions(root, label string, agent AgentID, agentID, desc
 		LastUsed:    now,
 		Description: description,
 	}, nil
+}
+
+// workpathSlug normalises an agent id to the workpath name grammar
+// (^[a-z0-9][a-z0-9_-]*$): lowercase, keep [a-z0-9_-], drop everything
+// else, and trim leading chars that aren't alphanumeric.
+func workpathSlug(s string) string {
+	b := make([]byte, 0, len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= 'A' && c <= 'Z':
+			b = append(b, c+('a'-'A'))
+		case (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_':
+			b = append(b, c)
+		}
+	}
+	// Trim leading non-alphanumerics so the first char matches [a-z0-9].
+	for len(b) > 0 && !((b[0] >= 'a' && b[0] <= 'z') || (b[0] >= '0' && b[0] <= '9')) {
+		b = b[1:]
+	}
+	return string(b)
 }

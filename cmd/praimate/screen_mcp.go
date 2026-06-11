@@ -33,6 +33,23 @@ type mcpModel struct {
 	editingKey bool
 	apiKey     textinput.Model
 	pending    *core.MCPCatalogueEntry
+
+	// Custom (non-catalogue) stdio server form. http/sse custom servers
+	// are added from the GUI; the TUI covers the common local-stdio case
+	// (e.g. hexstrike-ai).
+	customMode bool
+	customStep int // 0=name, 1=command, 2=env
+	customName textinput.Model
+	customCmd  textinput.Model
+	customEnv  textinput.Model
+}
+
+func newMCPTextInput(placeholder string, width int) textinput.Model {
+	ti := textinput.New()
+	ti.Placeholder = placeholder
+	ti.CharLimit = 4096
+	ti.Width = width
+	return ti
 }
 
 func newMCPModel(cfg *launcher.Config) mcpModel {
@@ -89,6 +106,9 @@ func (m mcpModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.apiKey.SetValue("")
 		return m, m.Init()
 	case tea.KeyMsg:
+		if m.customMode {
+			return m.updateCustom(msg)
+		}
 		if m.editingKey {
 			switch msg.String() {
 			case "esc":
@@ -121,6 +141,15 @@ func (m mcpModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "r":
 			m.loaded = false
 			return m, m.Init()
+		case "n":
+			// Open the custom (local stdio) MCP form.
+			m.customMode = true
+			m.customStep = 0
+			m.customName = newMCPTextInput("HexStrike AI", 48)
+			m.customCmd = newMCPTextInput("hexstrike-mcp --port 9000", 56)
+			m.customEnv = newMCPTextInput("HEXSTRIKE_TOKEN=...,OTHER=...", 56)
+			m.customName.Focus()
+			return m, textinput.Blink
 		case "enter", "c":
 			if m.tab == mcpTabCatalogue {
 				return m.startConnect()
@@ -133,6 +162,66 @@ func (m mcpModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// updateCustom drives the 3-step custom stdio MCP form.
+func (m mcpModel) updateCustom(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.customMode = false
+		return m, nil
+	case "enter":
+		if m.customStep < 2 {
+			m.customStep++
+			m.focusCustomStep()
+			return m, textinput.Blink
+		}
+		// Submit.
+		name := strings.TrimSpace(m.customName.Value())
+		cmdLine := strings.TrimSpace(m.customCmd.Value())
+		env := m.customEnv.Value()
+		m.customMode = false
+		return m, func() tea.Msg {
+			c := getAppCore()
+			if c == nil {
+				return mcpActionMsg{err: fmtCoreInitErr()}
+			}
+			srv, err := c.AddCustomMCP(context.Background(), core.AddCustomMCPRequest{
+				Name:      name,
+				Transport: "stdio",
+				Command:   cmdLine,
+				Env:       core.ParseEnvLines(env),
+			})
+			if err != nil {
+				return mcpActionMsg{err: err}
+			}
+			return mcpActionMsg{status: "added custom MCP: " + srv.Name}
+		}
+	}
+	var cmd tea.Cmd
+	switch m.customStep {
+	case 0:
+		m.customName, cmd = m.customName.Update(msg)
+	case 1:
+		m.customCmd, cmd = m.customCmd.Update(msg)
+	case 2:
+		m.customEnv, cmd = m.customEnv.Update(msg)
+	}
+	return m, cmd
+}
+
+func (m *mcpModel) focusCustomStep() {
+	m.customName.Blur()
+	m.customCmd.Blur()
+	m.customEnv.Blur()
+	switch m.customStep {
+	case 0:
+		m.customName.Focus()
+	case 1:
+		m.customCmd.Focus()
+	case 2:
+		m.customEnv.Focus()
+	}
 }
 
 func (m *mcpModel) clampCursor() {
@@ -245,16 +334,19 @@ func (m mcpModel) Title() string {
 }
 
 func (m mcpModel) NavSection() string   { return navSectionMCP }
-func (m mcpModel) CapturingInput() bool { return m.editingKey }
+func (m mcpModel) CapturingInput() bool { return m.editingKey || m.customMode }
 
 func (m mcpModel) Help() string {
+	if m.customMode {
+		return "enter next/submit · esc cancel"
+	}
 	if m.editingKey {
 		return "enter connect · esc cancel"
 	}
 	if m.tab == mcpTabConnected {
 		return "h/l switch tab · enter toggle · d delete · r reload · ctrl-c quit"
 	}
-	return "h/l switch tab · enter connect · r reload · ctrl-c quit"
+	return "h/l switch tab · enter connect · n add custom · r reload · ctrl-c quit"
 }
 
 func (m mcpModel) Body() string {
@@ -273,6 +365,21 @@ func (m mcpModel) Body() string {
 		b.WriteString(subtitleStyle.Render("Connect "+m.pending.Name) + "\n")
 		b.WriteString(descStyle.Render("API key is stored in ~/.praimate/db.sqlite and injected as an environment variable at launch.") + "\n")
 		b.WriteString(m.apiKey.View() + "\n")
+		return b.String()
+	}
+	if m.customMode {
+		b.WriteString(subtitleStyle.Render("Add custom MCP server (local, stdio)") + "\n")
+		b.WriteString(descStyle.Render("For self-hosted servers not in the catalogue (e.g. hexstrike-ai). http/sse: use the GUI.") + "\n\n")
+		field := func(label string, ti textinput.Model, step int) {
+			marker := "  "
+			if m.customStep == step {
+				marker = "▸ "
+			}
+			b.WriteString(marker + okStyle.Render(label) + "\n    " + ti.View() + "\n")
+		}
+		field("Name", m.customName, 0)
+		field("Command (may include args)", m.customCmd, 1)
+		field("Environment (KEY=VALUE, comma/line separated)", m.customEnv, 2)
 		return b.String()
 	}
 	if m.tab == mcpTabConnected {

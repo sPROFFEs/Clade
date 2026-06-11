@@ -36,7 +36,7 @@ type SessionSummary struct {
 	ToolCalls      int      `json:"toolCalls"`
 	ToolNames      []string `json:"toolNames,omitempty"`
 
-	FirstUserExcerpt    string `json:"firstUserExcerpt,omitempty"`
+	FirstUserExcerpt     string `json:"firstUserExcerpt,omitempty"`
 	LastAssistantExcerpt string `json:"lastAssistantExcerpt,omitempty"`
 
 	Headline string `json:"headline,omitempty"`

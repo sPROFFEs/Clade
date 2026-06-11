@@ -43,7 +43,7 @@ const (
 //
 //   - Ollama: BaseURL + Model required; APIKey optional.
 //   - CLI:    CLIName required (must match a registered CLIAdapter
-//             Name()); other fields ignored.
+//     Name()); other fields ignored.
 type DistillEndpoint struct {
 	Kind    DistillEndpointKind
 	BaseURL string

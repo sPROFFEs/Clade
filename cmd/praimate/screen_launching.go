@@ -134,8 +134,8 @@ func (m launchingModel) Help() string {
 	}
 	return "ctrl-c quit"
 }
-func (m launchingModel) NavSection() string    { return navSectionChats }
-func (m launchingModel) CapturingInput() bool  { return false }
+func (m launchingModel) NavSection() string   { return navSectionChats }
+func (m launchingModel) CapturingInput() bool { return false }
 
 func (m launchingModel) Body() string {
 	var b strings.Builder

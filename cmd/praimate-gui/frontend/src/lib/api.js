@@ -48,6 +48,8 @@ export const api = {
   mcpCatalogue: () => call('MCPCatalogue'),
   mcpServers: () => call('MCPServers'),
   connectMCP: (key, apiKey) => call('ConnectMCP', key, apiKey),
+  addCustomMCP: (name, transport, command, url, envText) =>
+    call('AddCustomMCP', name, transport, command, url, envText),
   setMCPEnabled: (id, on) => call('SetMCPEnabled', id, on),
   deleteMCPServer: (id) => call('DeleteMCPServer', id),
 

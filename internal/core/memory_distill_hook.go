@@ -29,10 +29,10 @@ import (
 //
 // The endpoint is resolved by priority:
 //
-//   1. ep argument (caller-supplied)
-//   2. chat.Settings.DistillEndpoint
-//   3. global default (Phase 3c stores nothing global yet; future
-//      Settings TUI work writes settings.memory.distill_endpoint)
+//  1. ep argument (caller-supplied)
+//  2. chat.Settings.DistillEndpoint
+//  3. global default (Phase 3c stores nothing global yet; future
+//     Settings TUI work writes settings.memory.distill_endpoint)
 //
 // If no endpoint resolves OR memory is disabled (and no chat override
 // flips it on), DistillChat returns (0, nil) — not an error.

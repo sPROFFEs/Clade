@@ -134,9 +134,9 @@ func summariseFragment(path string) (title, description string) {
 // The result honors the loader's resolution rule (paths in imports:
 // resolve relative to the PARENT of the workpath's source dir), so:
 //
-//   workpathDir = .../templates/<name>/           → "_common/<bundleName>"
-//   workpathDir = .../templates/<name>/workpath/  → "../_common/<bundleName>"
-//   workpathDir = .../chats/<chat>/workpath/      → "../../templates/_common/<bundleName>"
+//	workpathDir = .../templates/<name>/           → "_common/<bundleName>"
+//	workpathDir = .../templates/<name>/workpath/  → "../_common/<bundleName>"
+//	workpathDir = .../chats/<chat>/workpath/      → "../../templates/_common/<bundleName>"
 //
 // Always returns forward-slash form so the JSON written stays
 // platform-portable.

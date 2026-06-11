@@ -6,10 +6,14 @@
   let agents = []
   let error = ''
 
+  // Per-agent chosen CLI for the Chat button (defaults to first support).
+  let chatCli = {}
+
   // Start an interactive chat with this agent and jump to the Chats page.
   async function chat(a) {
     try {
-      const c = await api.startChat(a.id, (a.supports && a.supports[0]) || 'claude', '')
+      const cli = chatCli[a.id] || (a.supports && a.supports[0]) || 'claude'
+      const c = await api.startChat(a.id, cli, '')
       openChatId.set(c.ID)
       activePage.set('chats')
     } catch (e) {
@@ -122,6 +126,11 @@
           {#each a.supports || [] as s}<span class="pill">{s}</span>{/each}
         </div>
       </div>
+      {#if (a.supports || []).length > 1}
+        <select class="field" style="max-width:130px" bind:value={chatCli[a.id]}>
+          {#each a.supports as s}<option value={s}>{s}</option>{/each}
+        </select>
+      {/if}
       <button class="btn primary" on:click={() => chat(a)}>Chat</button>
       <button class="btn" on:click={() => pickAgent(a)}>Run workflow</button>
     </div>

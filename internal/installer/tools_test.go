@@ -153,14 +153,12 @@ func TestPraimateCodeMethods_PresentPerOS(t *testing.T) {
 	}
 }
 
-func TestKnownTools_IncludesPraimateCode(t *testing.T) {
-	found := false
+func TestKnownTools_ExcludesPraimateCode(t *testing.T) {
+	// PrAImate Code is a CLI surfaced in the CLIs browser, not a
+	// companion tool — it must NOT appear in the Tools catalog.
 	for _, tl := range KnownTools() {
 		if tl.ID == ToolPraimateCode {
-			found = true
+			t.Fatal("praimate-code should not be in KnownTools (it's a CLI)")
 		}
-	}
-	if !found {
-		t.Fatal("praimate-code not in KnownTools")
 	}
 }

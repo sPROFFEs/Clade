@@ -247,8 +247,8 @@ func (m installModel) Help() string {
 	}
 	return "↑/↓ select · n toggle Node opt-in · enter run · esc back"
 }
-func (m installModel) NavSection() string    { return navSectionAgents }
-func (m installModel) CapturingInput() bool  { return false }
+func (m installModel) NavSection() string   { return navSectionAgents }
+func (m installModel) CapturingInput() bool { return false }
 
 func (m installModel) Body() string {
 	var b strings.Builder
@@ -260,7 +260,7 @@ func (m installModel) Body() string {
 	}
 
 	if !m.running {
-		b.WriteString(hintStyle.Render("Pick a method. Recommended is marked. " +
+		b.WriteString(hintStyle.Render("Pick a method. Recommended is marked. "+
 			"You'll see the exact command before it runs.") + "\n\n")
 		for i, mth := range m.methods {
 			isSel := i == m.cursor

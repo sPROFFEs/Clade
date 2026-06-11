@@ -22,9 +22,9 @@ type RenderedStep struct {
 // in execution order; if any input fails validation the function
 // returns no steps and the first error.
 type RenderedWorkflow struct {
-	AgentID  string
-	Name     string
-	Steps    []RenderedStep
+	AgentID string
+	Name    string
+	Steps   []RenderedStep
 }
 
 // RenderWorkflow expands every step of w against the given inputs and

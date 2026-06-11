@@ -18,17 +18,17 @@ const AgentSchema = "praimate.agent/v1"
 // keys and a leading schema field so future format versions can be
 // detected before unmarshalling.
 type agentYAML struct {
-	Schema          string             `yaml:"schema"`
-	ID              string             `yaml:"id"`
-	Name            string             `yaml:"name"`
-	Description     string             `yaml:"description,omitempty"`
-	Icon            string             `yaml:"icon,omitempty"`
-	Instructions    string             `yaml:"instructions"`
-	Supports        []string           `yaml:"supports"`
-	Tools           []string           `yaml:"tools,omitempty"`
-	MCPServers      []string           `yaml:"mcp_servers,omitempty"`
-	Workflows       []workflowYAML     `yaml:"workflows,omitempty"`
-	DefaultWorkflow string             `yaml:"default_workflow,omitempty"`
+	Schema          string         `yaml:"schema"`
+	ID              string         `yaml:"id"`
+	Name            string         `yaml:"name"`
+	Description     string         `yaml:"description,omitempty"`
+	Icon            string         `yaml:"icon,omitempty"`
+	Instructions    string         `yaml:"instructions"`
+	Supports        []string       `yaml:"supports"`
+	Tools           []string       `yaml:"tools,omitempty"`
+	MCPServers      []string       `yaml:"mcp_servers,omitempty"`
+	Workflows       []workflowYAML `yaml:"workflows,omitempty"`
+	DefaultWorkflow string         `yaml:"default_workflow,omitempty"`
 }
 
 type workflowYAML struct {

@@ -296,3 +296,48 @@ func TestPrepareMCPForRun_MissingDeclaredServerErrors(t *testing.T) {
 		t.Fatalf("expected ErrMCPServerNotFound, got %v", err)
 	}
 }
+
+func TestAddCustomMCP_Stdio(t *testing.T) {
+	c, _ := New(Options{Store: openTempStore(t)})
+	srv, err := c.AddCustomMCP(context.Background(), AddCustomMCPRequest{
+		Name:      "HexStrike AI",
+		Transport: "stdio",
+		Command:   "hexstrike-mcp --port 9000",
+		Env:       map[string]string{"HEXSTRIKE_TOKEN": "secret"},
+	})
+	if err != nil {
+		t.Fatalf("AddCustomMCP: %v", err)
+	}
+	if srv.ID != "hexstrike-ai" {
+		t.Fatalf("id = %q, want hexstrike-ai", srv.ID)
+	}
+	if srv.Command != "hexstrike-mcp" || len(srv.Args) != 2 || srv.Args[0] != "--port" {
+		t.Fatalf("command/args parse wrong: %q %v", srv.Command, srv.Args)
+	}
+	if srv.Env["HEXSTRIKE_TOKEN"] != "secret" {
+		t.Fatalf("env not stored: %v", srv.Env)
+	}
+	if srv.CatalogueKey != "" {
+		t.Fatalf("custom server should have no catalogue key, got %q", srv.CatalogueKey)
+	}
+}
+
+func TestAddCustomMCP_HTTPRequiresURL(t *testing.T) {
+	c, _ := New(Options{Store: openTempStore(t)})
+	_, err := c.AddCustomMCP(context.Background(), AddCustomMCPRequest{
+		Name: "remote", Transport: "http",
+	})
+	if err == nil {
+		t.Fatal("expected URL-required error for http transport")
+	}
+}
+
+func TestParseEnvLines(t *testing.T) {
+	got := ParseEnvLines("A=1\nB = 2 , C=3\n\nbad")
+	if got["A"] != "1" || got["B"] != "2" || got["C"] != "3" {
+		t.Fatalf("parse wrong: %v", got)
+	}
+	if _, ok := got["bad"]; ok {
+		t.Fatalf("line without = should be skipped: %v", got)
+	}
+}

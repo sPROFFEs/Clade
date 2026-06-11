@@ -19,11 +19,15 @@ package main
 // instead of failing cryptically.
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
+	"time"
 )
 
 // resolveGUIBinary returns the path to praimate-gui, or "" if not
@@ -67,18 +71,49 @@ func launchGUI() int {
 		return 1
 	}
 
+	// Capture the child's stderr so that if it dies immediately (a stale
+	// binary missing Wails build tags, a webkit init failure, no display,
+	// …) we can show the real error instead of leaving the user staring
+	// at a "launched" line with no window.
+	var stderr bytes.Buffer
 	cmd := exec.Command(bin)
 	cmd.Stdout = nil
-	cmd.Stderr = nil
+	cmd.Stderr = &stderr
 	cmd.Stdin = nil
 	if err := cmd.Start(); err != nil {
 		fmt.Fprintf(os.Stderr, "praimate: failed to start %s: %v\n", bin, err)
 		return 1
 	}
 	pid := cmd.Process.Pid
-	// Detach: don't wait. Release the process handle so the GUI keeps
-	// running after this dispatcher exits.
-	_ = cmd.Process.Release()
-	fmt.Printf("launched praimate-gui (pid %d)\n", pid)
-	return 0
+
+	// Wait briefly. If the GUI is still alive after the grace period it
+	// almost certainly opened (or is opening) its window, so we detach.
+	// If it exited, surface why.
+	exited := make(chan error, 1)
+	go func() { exited <- cmd.Wait() }()
+	select {
+	case err := <-exited:
+		msg := strings.TrimSpace(stderr.String())
+		fmt.Fprintln(os.Stderr, "praimate: praimate-gui exited immediately without opening a window.")
+		if msg != "" {
+			fmt.Fprintln(os.Stderr)
+			fmt.Fprintln(os.Stderr, msg)
+		}
+		if strings.Contains(msg, "build tags") {
+			fmt.Fprintln(os.Stderr)
+			fmt.Fprintln(os.Stderr, "This looks like an older praimate-gui build. Reinstall PrAImate 1.1.1+")
+			fmt.Fprintln(os.Stderr, "or rebuild the GUI: cd cmd/praimate-gui && ./build.sh")
+		}
+		if err != nil {
+			var ee *exec.ExitError
+			if errors.As(err, &ee) {
+				return ee.ExitCode()
+			}
+		}
+		return 1
+	case <-time.After(1500 * time.Millisecond):
+		_ = cmd.Process.Release()
+		fmt.Printf("launched praimate-gui (pid %d)\n", pid)
+		return 0
+	}
 }

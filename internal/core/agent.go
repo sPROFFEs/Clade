@@ -44,7 +44,7 @@ type Workflow struct {
 type WorkflowInput struct {
 	Name        string `json:"name"`
 	Prompt      string `json:"prompt"`
-	Type        string `json:"type"`           // "string" | "text" | "int" | "bool"
+	Type        string `json:"type"` // "string" | "text" | "int" | "bool"
 	Required    bool   `json:"required"`
 	Placeholder string `json:"placeholder,omitempty"`
 	Default     string `json:"default,omitempty"`
@@ -72,8 +72,8 @@ type WorkflowStep struct {
 type StepKind string
 
 const (
-	StepUserMessage       StepKind = "user_message"
-	StepWaitForAssistant  StepKind = "wait_for_assistant"
+	StepUserMessage      StepKind = "user_message"
+	StepWaitForAssistant StepKind = "wait_for_assistant"
 )
 
 // AllStepKinds lists every kind the executor understands today. Used

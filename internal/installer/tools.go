@@ -89,12 +89,10 @@ func KnownTools() []Tool {
 			Binary:      "scrapegraph-search",
 			InstallHint: "uv venv + scrapegraphai/scrapegraph-py   (set SGAI_API_KEY for API mode, or SCRAPEGRAPH_LLM_MODEL for OSS/local mode)",
 		},
-		{
-			ID:          ToolPraimateCode,
-			Label:       "PrAImate Code (bundled coding CLI · OpenCode fork)",
-			Binary:      "praimate-code",
-			InstallHint: "downloads the prebuilt standalone (~150MB) from our GitHub release into <config>/praimate/bin/; run with `praimate code`",
-		},
+		// PrAImate Code is intentionally NOT here — it's a coding CLI, not
+		// a companion tool, so it's surfaced in the CLIs browser instead.
+		// Its install methods (ToolPraimateCode) still live in this package
+		// and are reached from the CLIs screen.
 	}
 }
 

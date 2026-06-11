@@ -135,9 +135,9 @@ func (m filesModel) View() string {
 func (m filesModel) Title() string {
 	return fmt.Sprintf("Edit files · %s", m.label)
 }
-func (m filesModel) Help() string          { return "↑/↓ select · enter edit · esc back" }
-func (m filesModel) NavSection() string    { return navSectionChats }
-func (m filesModel) CapturingInput() bool  { return false }
+func (m filesModel) Help() string         { return "↑/↓ select · enter edit · esc back" }
+func (m filesModel) NavSection() string   { return navSectionChats }
+func (m filesModel) CapturingInput() bool { return false }
 
 func (m filesModel) Body() string {
 	var b strings.Builder

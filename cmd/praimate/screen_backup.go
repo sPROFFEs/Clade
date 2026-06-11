@@ -30,8 +30,8 @@ import (
 // Thin shims so the file can use lookup/set/unset env without
 // re-importing os at every call site.
 func lookupEnv(k string) (string, bool) { return os.LookupEnv(k) }
-func setEnv(k, v string)                 { _ = os.Setenv(k, v) }
-func unsetEnv(k string)                  { _ = os.Unsetenv(k) }
+func setEnv(k, v string)                { _ = os.Setenv(k, v) }
+func unsetEnv(k string)                 { _ = os.Unsetenv(k) }
 
 // backupRow indexes the action list. Keep in sync with renderActions.
 type backupRow int
@@ -107,7 +107,7 @@ func newBackupModel(cfg *launcher.Config) *backupModel {
 
 func (m *backupModel) Init() tea.Cmd { return m.refresh() }
 
-func (m *backupModel) Title() string  { return "Backup · git sync" }
+func (m *backupModel) Title() string      { return "Backup · git sync" }
 func (m *backupModel) NavSection() string { return navSectionBackup }
 func (m *backupModel) CapturingInput() bool {
 	return m.mode == backupModeEditURL
@@ -744,7 +744,7 @@ func (m *backupModel) renderURLEditor() string {
 	b.WriteString(inputLabelStyle.Render("Remote URL: "))
 	b.WriteString(m.urlInput.View() + "\n\n")
 	b.WriteString(descStyle.Render(
-		"Examples: https://github.com/<user>/<repo>.git · git@github.com:<user>/<repo>.git\n"+
+		"Examples: https://github.com/<user>/<repo>.git · git@github.com:<user>/<repo>.git\n" +
 			"Empty + Enter = clear the URL (effectively the same as Disconnect)."))
 	return b.String()
 }

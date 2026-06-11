@@ -27,9 +27,9 @@ func (m helpPaneModel) View() string {
 	return renderChrome(m.Title(), m.Body(), m.Help())
 }
 
-func (m helpPaneModel) Title() string         { return "Help · keybinds & concepts" }
-func (m helpPaneModel) NavSection() string    { return navSectionHelp }
-func (m helpPaneModel) CapturingInput() bool  { return false }
+func (m helpPaneModel) Title() string        { return "Help · keybinds & concepts" }
+func (m helpPaneModel) NavSection() string   { return navSectionHelp }
+func (m helpPaneModel) CapturingInput() bool { return false }
 func (m helpPaneModel) Help() string {
 	return "ctrl-p palette · tab focus · ctrl-1..7 sections · ctrl-c quit"
 }
@@ -73,6 +73,6 @@ func (m helpPaneModel) Body() string {
 	b.WriteString("\n")
 
 	b.WriteString(subtitleStyle.Render("Workspaces root") + "\n")
-	b.WriteString(descStyle.Render("  " + m.cfg.WorkspacesRoot) + "\n")
+	b.WriteString(descStyle.Render("  "+m.cfg.WorkspacesRoot) + "\n")
 	return b.String()
 }

@@ -17,7 +17,7 @@ func seedAgent(t *testing.T, c *Core, id string) string {
 		Instructions: "x",
 		Supports:     []string{"claude"},
 		Workflows: []Workflow{{
-			Name: "go",
+			Name:  "go",
 			Steps: []WorkflowStep{{Kind: StepUserMessage, Template: "x"}},
 		}},
 	})

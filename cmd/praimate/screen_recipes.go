@@ -37,6 +37,7 @@ type recipeStep int
 
 const (
 	stepPickAgent recipeStep = iota
+	stepPickCLI              // choose which CLI drives an interactive chat
 	stepPickWorkflow
 	stepFillInputs
 	stepPrivacyReview
@@ -68,6 +69,12 @@ type recipesModel struct {
 	// CLI to drive — defaults to "claude" since it's the only adapter
 	// registered today. Phase 2d adds Codex and OpenCode.
 	cli string
+
+	// Interactive-chat CLI picker (the `c` flow). cliChoices is the
+	// selected agent's Supports list; cliCursor indexes it.
+	chatAgent  *core.Agent
+	cliChoices []string
+	cliCursor  int
 
 	// Runtime state for stepRunning / stepShowResult.
 	runStart  time.Time
@@ -162,17 +169,17 @@ func (m recipesModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.err = fmt.Sprintf("agent %q supports no CLI", agent.ID)
 				return m, nil
 			}
-			label := agent.Name + " " + time.Now().Format("Jan-2 15:04")
-			chat, err := launcher.CreateChatFromInstructions(
-				m.cfg.WorkspacesRoot, label,
-				launcher.AgentID(agent.Supports[0]),
-				agent.ID, firstLine(agent.Description), agent.Instructions,
-			)
-			if err != nil {
-				m.err = err.Error()
-				return m, nil
+			// One supported CLI → launch directly. Multiple → let the
+			// user pick which CLI drives the chat.
+			if len(agent.Supports) == 1 {
+				return m.startChatWithCLI(&agent, agent.Supports[0])
 			}
-			return m, wrap(newLaunchingModel(m.cfg, chat))
+			a := agent
+			m.chatAgent = &a
+			m.cliChoices = agent.Supports
+			m.cliCursor = 0
+			m.step = stepPickCLI
+			return m, nil
 		case "enter":
 			if len(m.agents) == 0 {
 				return m, nil
@@ -192,6 +199,23 @@ func (m recipesModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m.beginInputs(wf), textinput.Blink
 			}
 			m.step = stepPickWorkflow
+		}
+
+	case stepPickCLI:
+		switch msg.String() {
+		case "esc":
+			m.step = stepPickAgent
+			m.chatAgent = nil
+		case "up", "k":
+			if m.cliCursor > 0 {
+				m.cliCursor--
+			}
+		case "down", "j":
+			if m.cliCursor < len(m.cliChoices)-1 {
+				m.cliCursor++
+			}
+		case "enter":
+			return m.startChatWithCLI(m.chatAgent, m.cliChoices[m.cliCursor])
 		}
 
 	case stepPickWorkflow:
@@ -269,6 +293,23 @@ func (m recipesModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // beginInputs moves the model to stepFillInputs with one textinput per
 // WorkflowInput. If the workflow has zero inputs, jumps straight to
 // submit (kicks the run off immediately).
+// startChatWithCLI synthesises a workpath from the agent's instructions
+// bound to the chosen CLI and hands off to the normal launch flow.
+func (m recipesModel) startChatWithCLI(agent *core.Agent, cli string) (tea.Model, tea.Cmd) {
+	label := agent.Name + " " + time.Now().Format("Jan-2 15:04")
+	chat, err := launcher.CreateChatFromInstructions(
+		m.cfg.WorkspacesRoot, label,
+		launcher.AgentID(cli),
+		agent.ID, firstLine(agent.Description), agent.Instructions,
+	)
+	if err != nil {
+		m.err = err.Error()
+		m.step = stepPickAgent
+		return m, nil
+	}
+	return m, wrap(newLaunchingModel(m.cfg, chat))
+}
+
 func (m recipesModel) beginInputs(wf *core.Workflow) recipesModel {
 	m.selectedWf = wf
 	m.step = stepFillInputs
@@ -403,6 +444,8 @@ func (m recipesModel) Title() string {
 	switch m.step {
 	case stepPickAgent:
 		return "Agents · pick an agent"
+	case stepPickCLI:
+		return "Agents · " + m.chatAgent.Name + " · pick a CLI"
 	case stepPickWorkflow:
 		return "Agents · " + m.selectedAgent.Name + " · pick a workflow"
 	case stepFillInputs:
@@ -425,6 +468,8 @@ func (m recipesModel) Help() string {
 	switch m.step {
 	case stepPickAgent:
 		return "↑↓ select · enter run workflow · c interactive chat · esc back · ctrl-c quit"
+	case stepPickCLI:
+		return "↑↓ select CLI · enter start chat · esc back"
 	case stepPickWorkflow:
 		return "↑↓ select · enter open · esc back · ctrl-c quit"
 	case stepFillInputs:
@@ -450,6 +495,8 @@ func (m recipesModel) Body() string {
 	switch m.step {
 	case stepPickAgent:
 		return m.bodyPickAgent()
+	case stepPickCLI:
+		return m.bodyPickCLI()
 	case stepPickWorkflow:
 		return m.bodyPickWorkflow()
 	case stepFillInputs:
@@ -462,6 +509,20 @@ func (m recipesModel) Body() string {
 		return m.bodyShowResult()
 	}
 	return ""
+}
+
+func (m recipesModel) bodyPickCLI() string {
+	var b strings.Builder
+	b.WriteString(subtitleStyle.Render("Which CLI should drive this chat?") + "\n")
+	b.WriteString(descStyle.Render(m.chatAgent.Name+" supports several — pick one.") + "\n\n")
+	for i, cli := range m.cliChoices {
+		marker := "  "
+		if i == m.cliCursor {
+			marker = "▸ "
+		}
+		b.WriteString(marker + okStyle.Render(cli) + "\n")
+	}
+	return b.String()
 }
 
 func (m recipesModel) bodyPickAgent() string {

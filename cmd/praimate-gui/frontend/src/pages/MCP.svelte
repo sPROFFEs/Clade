@@ -8,6 +8,26 @@
   let connecting = null // catalogue entry being connected
   let apiKey = ''
 
+  // custom-server form
+  let showCustom = false
+  let cName = ''
+  let cTransport = 'stdio'
+  let cCommand = ''
+  let cURL = ''
+  let cEnv = ''
+
+  async function addCustom() {
+    if (!cName.trim()) { error = 'Custom MCP needs a name'; return }
+    try {
+      await api.addCustomMCP(cName.trim(), cTransport, cCommand.trim(), cURL.trim(), cEnv)
+      showCustom = false
+      cName = ''; cCommand = ''; cURL = ''; cEnv = ''
+      await load()
+    } catch (e) {
+      error = String(e)
+    }
+  }
+
   async function load() {
     try {
       catalogue = (await api.mcpCatalogue()) || []
@@ -49,6 +69,39 @@
 <p class="subtitle">Connect MCP providers once; agents that declare them get per-CLI config written at launch.</p>
 
 {#if error}<div class="banner">{error}</div>{/if}
+
+<div class="row" style="margin-bottom:12px">
+  <button class="btn" on:click={() => (showCustom = !showCustom)}>
+    {showCustom ? 'Cancel' : '+ Add custom MCP server'}
+  </button>
+</div>
+
+{#if showCustom}
+  <div class="card">
+    <div class="card-title">Add a custom MCP server</div>
+    <div class="card-sub">For locally-run or self-hosted servers not in the catalogue (e.g. hexstrike-ai).</div>
+    <label class="lbl">Name</label>
+    <input class="field" bind:value={cName} placeholder="HexStrike AI" />
+    <label class="lbl">Transport</label>
+    <select class="field" style="max-width:200px" bind:value={cTransport}>
+      <option value="stdio">stdio (local command)</option>
+      <option value="http">http</option>
+      <option value="sse">sse</option>
+    </select>
+    {#if cTransport === 'stdio'}
+      <label class="lbl">Command (may include args)</label>
+      <input class="field mono" bind:value={cCommand} placeholder="hexstrike-mcp --port 9000" />
+    {:else}
+      <label class="lbl">URL</label>
+      <input class="field mono" bind:value={cURL} placeholder="http://127.0.0.1:9000/mcp" />
+    {/if}
+    <label class="lbl">Environment (KEY=VALUE per line — tokens, etc.)</label>
+    <textarea class="field mono" rows="3" bind:value={cEnv} placeholder="HEXSTRIKE_TOKEN=..."></textarea>
+    <div class="row" style="margin-top:10px">
+      <button class="btn primary" on:click={addCustom}>Add server</button>
+    </div>
+  </div>
+{/if}
 
 {#if connecting}
   <div class="card">

@@ -280,7 +280,6 @@ func TestChatListModel_EnterOnNewOpensAgentsPane(t *testing.T) {
 	}
 }
 
-
 func TestChatListModel_HelpAdaptsToCursor(t *testing.T) {
 	tmp := seededRoot(t)
 	redirectConfig(t, t.TempDir())
@@ -314,8 +313,6 @@ func TestChatListModel_HelpAdaptsToCursor(t *testing.T) {
 		t.Errorf("on the new-chat row, help should explain Enter's effect:\n%s", help)
 	}
 }
-
-
 
 func TestChatListModel_EnterOnExistingGoesToLaunchingScreen(t *testing.T) {
 	tmp := seededRoot(t)
@@ -419,7 +416,6 @@ func TestChatListModel_AKeyDoesNotOpenAgentsPicker(t *testing.T) {
 		}
 	}
 }
-
 
 func TestChatListModel_DeleteFlowConfirmsAndRemoves(t *testing.T) {
 	tmp := seededRoot(t)

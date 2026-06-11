@@ -13,18 +13,18 @@ import (
 // switch palettes by swapping one struct. The defaults aim for both
 // dark and light terminals (256-colour palette).
 type theme struct {
-	Border      lipgloss.Color // borders + light separators
-	Title       lipgloss.Color // app name, big section labels
-	Subtitle    lipgloss.Color // secondary header text
-	Body        lipgloss.Color // default text
-	Muted       lipgloss.Color // hints, descriptions, help bar
-	Accent      lipgloss.Color // headers, focus highlights
-	SelectedBG  lipgloss.Color // background of the highlighted row
-	SelectedFG  lipgloss.Color // foreground of the highlighted row
-	Success     lipgloss.Color // ✓ marks, availability badges
-	Warning     lipgloss.Color // soft warnings
-	Error       lipgloss.Color // failures, hard errors
-	Disabled    lipgloss.Color // greyed-out items
+	Border     lipgloss.Color // borders + light separators
+	Title      lipgloss.Color // app name, big section labels
+	Subtitle   lipgloss.Color // secondary header text
+	Body       lipgloss.Color // default text
+	Muted      lipgloss.Color // hints, descriptions, help bar
+	Accent     lipgloss.Color // headers, focus highlights
+	SelectedBG lipgloss.Color // background of the highlighted row
+	SelectedFG lipgloss.Color // foreground of the highlighted row
+	Success    lipgloss.Color // ✓ marks, availability badges
+	Warning    lipgloss.Color // soft warnings
+	Error      lipgloss.Color // failures, hard errors
+	Disabled   lipgloss.Color // greyed-out items
 }
 
 var defaultTheme = theme{
