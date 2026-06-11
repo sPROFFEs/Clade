@@ -25,12 +25,13 @@ var ErrProbeTimeout = errors.New("--version probe timed out")
 type AgentID string
 
 const (
-	AgentClaude     AgentID = "claude"
-	AgentOpenClaude AgentID = "openclaude"
-	AgentCodex      AgentID = "codex"
-	AgentOpenCode   AgentID = "opencode"
-	AgentGemini     AgentID = "gemini"
-	AgentDeepSeek   AgentID = "deepseek"
+	AgentClaude       AgentID = "claude"
+	AgentOpenClaude   AgentID = "openclaude"
+	AgentCodex        AgentID = "codex"
+	AgentOpenCode     AgentID = "opencode"
+	AgentGemini       AgentID = "gemini"
+	AgentDeepSeek     AgentID = "deepseek"
+	AgentPraimateCode AgentID = "praimate-code"
 )
 
 // Agent describes one supported CLI agent. WpcTarget is the wpc target
@@ -104,6 +105,16 @@ func KnownAgents() []Agent {
 			Binary:      "opencode",
 			WpcTarget:   "codex",
 			InstallHint: "curl -fsSL https://opencode.ai/install | bash   |  pnpm add -g opencode-ai",
+		},
+		{
+			ID:     AgentPraimateCode,
+			Label:  "PrAImate Code (bundled OpenCode build)",
+			Binary: "praimate-code",
+			// OpenCode-based: same AGENTS.md context convention as the
+			// codex/opencode wpc target, so the mission compiles to a
+			// file praimate-code picks up at launch.
+			WpcTarget:   "codex",
+			InstallHint: "install from the CLIs tab, or: praimate -install-tool... (downloads the bundled build)",
 		},
 		{
 			ID:          AgentGemini,

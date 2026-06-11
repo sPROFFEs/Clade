@@ -34,8 +34,12 @@ instructions: |
 
 supports:
   - claude
+  - openclaude
   - codex
   - opencode
+  - praimate-code
+  - gemini
+  - deepseek
 
 tools:
   - file_read

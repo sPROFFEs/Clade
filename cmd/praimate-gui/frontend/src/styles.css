@@ -1,20 +1,25 @@
-/* PrAImate GUI — dark-primary theme, Osaurus-inspired layout.
-   System font stack; no webfont fetches (app must work fully offline). */
+/* PrAImate GUI — code-oriented dark theme, OpenCode-inspired.
+   Terminal aesthetic: monospace-forward, sharp, low-chrome. System
+   fonts only (app must work fully offline). */
 
 :root {
-  --bg: #101218;
-  --bg-panel: #171a22;
-  --bg-raised: #1e222d;
-  --border: #2a2f3d;
+  color-scheme: dark; /* makes native widgets (select, scrollbars) render dark */
+  --bg: #0d1017;
+  --bg-panel: #14171f;
+  --bg-raised: #1b1f2a;
+  --bg-input: #0a0c11;
+  --border: #262b38;
+  --border-bright: #333b4d;
   --text: #e6e9f0;
-  --text-dim: #9aa3b5;
+  --text-dim: #8b93a7;
   --accent: #7aa2f7;
-  --accent-soft: rgba(122, 162, 247, 0.15);
+  --accent-soft: rgba(122, 162, 247, 0.14);
   --ok: #9ece6a;
   --warn: #e0af68;
   --err: #f7768e;
-  --radius: 10px;
-  --mono: ui-monospace, 'JetBrains Mono', 'Fira Code', Menlo, monospace;
+  --radius: 6px;
+  --mono: ui-monospace, 'JetBrains Mono', 'Fira Code', 'SFMono-Regular', Menlo, Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif;
 }
 
 * { box-sizing: border-box; }
@@ -24,7 +29,7 @@ html, body {
   height: 100%;
   background: var(--bg);
   color: var(--text);
-  font: 14px/1.5 -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif;
+  font: 13.5px/1.5 var(--sans);
 }
 
 #app { height: 100%; }
@@ -32,23 +37,25 @@ html, body {
 .shell { display: flex; height: 100vh; }
 
 .sidebar {
-  width: 210px;
+  width: 196px;
   flex-shrink: 0;
   background: var(--bg-panel);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  padding: 14px 10px;
-  gap: 2px;
+  padding: 12px 8px;
+  gap: 1px;
 }
 
 .brand {
+  font-family: var(--mono);
   font-weight: 700;
-  font-size: 16px;
+  font-size: 14px;
   letter-spacing: 0.5px;
-  padding: 6px 12px 16px;
+  padding: 6px 12px 14px;
   color: var(--accent);
 }
+.brand::before { content: "▍"; color: var(--accent); margin-right: 2px; }
 
 .nav-item {
   display: block;
@@ -57,77 +64,110 @@ html, body {
   background: none;
   border: none;
   color: var(--text-dim);
-  padding: 9px 12px;
+  padding: 8px 12px;
   border-radius: var(--radius);
   cursor: pointer;
-  font-size: 14px;
+  font-family: var(--mono);
+  font-size: 13px;
 }
 .nav-item:hover { background: var(--bg-raised); color: var(--text); }
-.nav-item.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.nav-item.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+  box-shadow: inset 2px 0 0 var(--accent);
+}
 
 .main {
   flex: 1;
   overflow-y: auto;
-  padding: 24px 28px;
+  padding: 22px 26px;
 }
 
-h1 { font-size: 20px; margin: 0 0 4px; }
-.subtitle { color: var(--text-dim); margin: 0 0 20px; font-size: 13px; }
+h1 { font-family: var(--mono); font-size: 18px; margin: 0 0 4px; font-weight: 600; }
+.subtitle { color: var(--text-dim); margin: 0 0 20px; font-size: 12.5px; }
 
 .card {
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 14px 16px;
-  margin-bottom: 10px;
+  padding: 13px 15px;
+  margin-bottom: 9px;
 }
 .card-title { font-weight: 600; margin-bottom: 2px; }
-.card-sub { color: var(--text-dim); font-size: 12.5px; }
+.card-sub { color: var(--text-dim); font-size: 12px; }
 
-.row { display: flex; align-items: center; gap: 10px; }
+.row { display: flex; align-items: center; gap: 9px; }
 .row .grow { flex: 1; }
 
 button.btn {
   background: var(--bg-raised);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-bright);
   color: var(--text);
-  border-radius: 8px;
-  padding: 7px 14px;
+  border-radius: var(--radius);
+  padding: 7px 13px;
   cursor: pointer;
-  font-size: 13px;
+  font-family: var(--mono);
+  font-size: 12.5px;
 }
-button.btn:hover { border-color: var(--accent); }
-button.btn.primary { background: var(--accent); border-color: var(--accent); color: #0d1017; font-weight: 600; }
+button.btn:hover { border-color: var(--accent); color: var(--accent); }
+button.btn.primary { background: var(--accent); border-color: var(--accent); color: #0a0c11; font-weight: 700; }
+button.btn.primary:hover { color: #0a0c11; filter: brightness(1.08); }
 button.btn.danger:hover { border-color: var(--err); color: var(--err); }
-button.btn:disabled { opacity: 0.45; cursor: default; }
+button.btn:disabled { opacity: 0.4; cursor: default; }
+button.btn:disabled:hover { border-color: var(--border-bright); color: var(--text); }
 
+/* Form controls — explicit dark styling so native widgets (especially
+   <select> dropdowns) never fall back to white-bg/gray-text. */
 input.field, select.field, textarea.field {
-  background: var(--bg);
-  border: 1px solid var(--border);
+  background: var(--bg-input);
+  border: 1px solid var(--border-bright);
   color: var(--text);
-  border-radius: 8px;
+  border-radius: var(--radius);
   padding: 8px 10px;
-  font-size: 13.5px;
+  font-size: 13px;
+  font-family: var(--sans);
   width: 100%;
 }
+.field.mono { font-family: var(--mono); }
 input.field:focus, select.field:focus, textarea.field:focus {
   outline: none;
   border-color: var(--accent);
 }
-label.lbl { display: block; font-size: 12.5px; color: var(--text-dim); margin: 10px 0 4px; }
+input.field::placeholder, textarea.field::placeholder { color: var(--text-dim); opacity: 0.7; }
+select.field {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--text-dim) 50%),
+                    linear-gradient(135deg, var(--text-dim) 50%, transparent 50%);
+  background-position: calc(100% - 16px) center, calc(100% - 11px) center;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  padding-right: 28px;
+  cursor: pointer;
+}
+/* The open dropdown list — force dark bg + light text on every option. */
+select.field option,
+select.field optgroup {
+  background: var(--bg-panel);
+  color: var(--text);
+}
+label.lbl { display: block; font-size: 12px; color: var(--text-dim); margin: 10px 0 4px; font-family: var(--mono); }
 
 .pill {
   display: inline-block;
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 99px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  padding: 2px 7px;
+  border-radius: var(--radius);
   background: var(--bg-raised);
+  border: 1px solid var(--border);
   color: var(--text-dim);
   margin-right: 4px;
 }
-.pill.ok { color: var(--ok); }
-.pill.err { color: var(--err); }
-.pill.warn { color: var(--warn); }
+.pill.ok { color: var(--ok); border-color: rgba(158,206,106,0.3); }
+.pill.err { color: var(--err); border-color: rgba(247,118,142,0.3); }
+.pill.warn { color: var(--warn); border-color: rgba(224,175,104,0.3); }
 
 .msg {
   border-radius: var(--radius);
@@ -136,25 +176,35 @@ label.lbl { display: block; font-size: 12.5px; color: var(--text-dim); margin: 1
   white-space: pre-wrap;
   word-break: break-word;
 }
-.msg.user { background: var(--accent-soft); }
+.msg.user { background: var(--accent-soft); border: 1px solid rgba(122,162,247,0.25); }
 .msg.assistant { background: var(--bg-panel); border: 1px solid var(--border); }
-.msg .who { font-size: 11px; color: var(--text-dim); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+.msg .who { font-family: var(--mono); font-size: 10.5px; color: var(--text-dim); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
 
-.mono { font-family: var(--mono); font-size: 12.5px; }
+.mono { font-family: var(--mono); font-size: 12px; }
 
 .banner {
-  background: rgba(247, 118, 142, 0.12);
+  background: rgba(247, 118, 142, 0.1);
   border: 1px solid var(--err);
   color: var(--err);
   border-radius: var(--radius);
   padding: 10px 14px;
   margin-bottom: 16px;
+  font-family: var(--mono);
+  font-size: 12.5px;
 }
 
-.empty { color: var(--text-dim); padding: 30px 0; text-align: center; }
+.empty { color: var(--text-dim); padding: 30px 0; text-align: center; font-family: var(--mono); }
 
 table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
 table.tbl th { text-align: left; color: var(--text-dim); font-weight: 500; padding: 6px 8px; border-bottom: 1px solid var(--border); }
 table.tbl td { padding: 7px 8px; border-bottom: 1px solid var(--border); }
 
 .toggle { cursor: pointer; }
+
+/* Dark scrollbars to match the terminal aesthetic. */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 6px; border: 2px solid var(--bg); }
+::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+
+pre { font-family: var(--mono); font-size: 12px; }

@@ -842,6 +842,12 @@ func allMethods(agent AgentID, action Action, current OS) []Method {
 	openclaudeDisplayCmd := "pnpm add" + pnpmRegistryFlag + " " + openclaudePkg
 
 	switch agent {
+	case AgentID("praimate-code"):
+		// PrAImate Code isn't pip/npm installable — it's our prebuilt
+		// standalone, downloaded from the GitHub release. Reuse the
+		// Tool download methods so the agent-install screen works when a
+		// chat picks praimate-code before it's installed.
+		return praimateCodeMethods(current)
 	case AgentClaude:
 		switch current {
 		case OSMacOS:

@@ -27,6 +27,8 @@ func terminalCommand(cli string) (name string, args []string, err error) {
 		return "codex", nil, nil
 	case "opencode":
 		return "opencode", nil, nil
+	case "praimate-code":
+		return "praimate-code", nil, nil
 	case "gemini":
 		return "gemini", nil, nil
 	case "deepseek":

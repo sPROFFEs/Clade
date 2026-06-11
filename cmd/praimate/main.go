@@ -113,6 +113,9 @@ func main() {
 	// each <config>/clade/tools/<name>/bin to PATH so wpc-staged template
 	// scripts can call those binaries by name without knowing the prefix.
 	installer.ImportClademToolsToPath()
+	// And the managed standalone bin dir (<config>/praimate/bin) so
+	// praimate-code is found by agent detection and `praimate code`.
+	installer.ImportPraimateBinToPath()
 
 	// One-shot config migrations. Codex 0.40+ hard-errors on
 	// wire_api="chat" — rewrite our managed block to "responses" so

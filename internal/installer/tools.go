@@ -453,6 +453,35 @@ func ImportClademToolsToPath() {
 	}
 }
 
+// ImportPraimateBinToPath prepends <config>/praimate/bin to PATH so
+// managed standalone binaries installed there (praimate-code) are
+// discoverable by agent detection and `praimate code`. Called at
+// startup alongside ImportClademToolsToPath.
+func ImportPraimateBinToPath() {
+	binDir, err := PraimateBinDir()
+	if err != nil {
+		return
+	}
+	if _, err := os.Stat(binDir); err != nil {
+		return
+	}
+	sep := ":"
+	if runtime.GOOS == "windows" {
+		sep = ";"
+	}
+	path := os.Getenv("PATH")
+	cmp := func(a, b string) bool { return a == b }
+	if runtime.GOOS == "windows" {
+		cmp = strings.EqualFold
+	}
+	for _, entry := range strings.Split(path, sep) {
+		if cmp(strings.TrimRight(entry, `\/`), strings.TrimRight(binDir, `\/`)) {
+			return // already present
+		}
+	}
+	_ = os.Setenv("PATH", binDir+sep+path)
+}
+
 // installUvIntoManagedPrefix runs `uv tool install <pkg>` with
 // UV_TOOL_DIR / UV_TOOL_BIN_DIR pointed at the Clade-managed prefix so
 // the binary lands at <prefix>/bin/<m.ManagedPrefix> and uv's package

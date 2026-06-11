@@ -47,8 +47,12 @@ instructions: |
 
 supports:
   - claude
+  - openclaude
   - codex
   - opencode
+  - praimate-code
+  - gemini
+  - deepseek
 
 workflows:
   - name: Build an agent

@@ -10,13 +10,15 @@
   import MCP from './pages/MCP.svelte'
   import Settings from './pages/Settings.svelte'
 
+  // Code-oriented order: lead with the live coding terminal, then
+  // conversations and agents, with config last.
   const pages = [
-    { id: 'chats', label: 'Chats', component: Chats },
     { id: 'code', label: 'Code', component: Code },
+    { id: 'chats', label: 'Chats', component: Chats },
     { id: 'run', label: 'Agents', component: Run },
     { id: 'agents', label: 'CLIs & Workflows', component: Agents },
-    { id: 'memory', label: 'Memory', component: Memory },
     { id: 'mcp', label: 'MCP', component: MCP },
+    { id: 'memory', label: 'Memory', component: Memory },
     { id: 'settings', label: 'Settings', component: Settings },
   ]
 
