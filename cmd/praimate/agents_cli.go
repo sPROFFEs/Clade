@@ -35,7 +35,7 @@ func openCore() (*core.Core, func(), error) {
 		st.Close()
 		return nil, nil, fmt.Errorf("seed builtins: %w", err)
 	}
-	core.RegisterCLIAdapter(core.NewClaudeAdapter())
+	core.RegisterAllCLIAdapters()
 	return c, func() { _ = st.Close() }, nil
 }
 

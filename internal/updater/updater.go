@@ -178,6 +178,37 @@ func Apply(asset *Asset, progress func(stage string)) error {
 	if err := swapBinary(exePath, stagedBin); err != nil {
 		return fmt.Errorf("swap binary: %w", err)
 	}
+
+	// Refresh the sibling binaries shipped in the same archive
+	// (praimate-gui, praimate-code) so `praimate -update` keeps them in
+	// step with the main binary — matching what the installer does. Each
+	// is best-effort: absent from this platform's archive, or not
+	// installed next to praimate, simply means "skip".
+	exeDir := filepath.Dir(exePath)
+	for _, sib := range []string{"praimate-gui", "praimate-code"} {
+		name := sib
+		if runtime.GOOS == "windows" {
+			name += ".exe"
+		}
+		dst := filepath.Join(exeDir, name)
+		// Only refresh a sibling the user actually has installed.
+		if _, err := os.Stat(dst); err != nil {
+			continue
+		}
+		staged, err := extractBinary(archivePath, name)
+		if err != nil {
+			// Not in this archive (other platforms) — leave the existing one.
+			continue
+		}
+		progress("updating " + sib)
+		if err := swapBinary(dst, staged); err != nil {
+			os.Remove(staged)
+			// Non-fatal: the main binary already updated.
+			progress("warning: could not update " + sib + ": " + err.Error())
+			continue
+		}
+		os.Remove(staged)
+	}
 	return nil
 }
 

@@ -32,16 +32,40 @@ import (
 
 // ClaudeAdapter is the production adapter for the Claude Code CLI.
 type ClaudeAdapter struct {
-	// BinaryPath overrides the discovered `claude` location. Empty =
+	// BinaryPath overrides the discovered binary location. Empty =
 	// look it up on PATH. Useful for tests and for users with a
 	// non-standard install.
 	BinaryPath string
+
+	// name/binary let this same JSON-protocol adapter serve OpenClaude,
+	// a Claude Code fork with identical --print/--output-format/--resume
+	// flags. Empty defaults to "claude".
+	name   string
+	binary string
 }
 
-// NewClaudeAdapter returns a ready-to-register adapter.
+// NewClaudeAdapter returns a ready-to-register adapter for `claude`.
 func NewClaudeAdapter() *ClaudeAdapter { return &ClaudeAdapter{} }
 
-func (a *ClaudeAdapter) Name() string { return "claude" }
+// NewOpenClaudeAdapter returns an adapter for `openclaude` (Claude Code
+// fork, same headless protocol).
+func NewOpenClaudeAdapter() *ClaudeAdapter {
+	return &ClaudeAdapter{name: "openclaude", binary: "openclaude"}
+}
+
+func (a *ClaudeAdapter) Name() string {
+	if a.name != "" {
+		return a.name
+	}
+	return "claude"
+}
+
+func (a *ClaudeAdapter) binName() string {
+	if a.binary != "" {
+		return a.binary
+	}
+	return "claude"
+}
 
 func (a *ClaudeAdapter) Available(ctx context.Context) error {
 	path, err := a.resolve()
@@ -111,9 +135,9 @@ func (a *ClaudeAdapter) resolve() (string, error) {
 	if a.BinaryPath != "" {
 		return a.BinaryPath, nil
 	}
-	p, err := exec.LookPath("claude")
+	p, err := exec.LookPath(a.binName())
 	if err != nil {
-		return "", fmt.Errorf("claude CLI not on PATH; install via `praimate -install-tool claude` or visit https://docs.claude.com/claude-code")
+		return "", fmt.Errorf("%s CLI not on PATH; install it from the CLIs tab", a.binName())
 	}
 	return p, nil
 }

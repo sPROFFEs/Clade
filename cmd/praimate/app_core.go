@@ -57,7 +57,7 @@ func initAppCore() {
 			appCoreErr = err
 			return
 		}
-		core.RegisterCLIAdapter(core.NewClaudeAdapter())
+		core.RegisterAllCLIAdapters()
 		watchers, _ := c.StartWatcherDaemon(context.Background(), core.WatcherDaemonOptions{
 			WatcherDispatchOptions: core.WatcherDispatchOptions{CLI: "claude"},
 		})

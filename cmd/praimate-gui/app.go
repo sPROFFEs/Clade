@@ -75,7 +75,7 @@ func (a *App) startup(ctx context.Context) {
 		a.initErr = err.Error()
 		return
 	}
-	core.RegisterCLIAdapter(core.NewClaudeAdapter())
+	core.RegisterAllCLIAdapters()
 
 	// Same automation daemons the TUI runs — watchers and schedules
 	// fire regardless of which surface is open.
