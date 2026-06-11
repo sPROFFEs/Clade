@@ -36,6 +36,13 @@ import (
 )
 
 func main() {
+	// `praimate code [args...]` dispatches to the bundled praimate-code
+	// binary (our rebranded build of OpenCode). Handled before
+	// flag.Parse so OpenCode's own flags pass straight through.
+	if len(os.Args) >= 2 && os.Args[1] == "code" {
+		os.Exit(runCode(os.Args[2:]))
+	}
+
 	versionFlag := flag.Bool("version", false, "print version and exit")
 	guiFlag := flag.Bool("gui", false,
 		"launch the praimate-gui desktop app and exit (looks next to this binary, then PATH)")

@@ -40,12 +40,14 @@ VERSION="${VERSION:-1.0.0}"
 EXTRA_LDFLAGS="${LDFLAGS:--s -w}"  # strip symbols by default — tiny binaries
 ARCHIVE=1
 WITH_GUI=0
+WITH_CODE=0
 TARGETS=()
 
 for arg in "$@"; do
   case "$arg" in
     --no-archive) ARCHIVE=0 ;;
     --with-gui) WITH_GUI=1 ;;
+    --with-code) WITH_CODE=1 ;;
     --version=*) VERSION="${arg#--version=}" ;;
     -h|--help)
       sed -n '2,26p' "$0"
@@ -113,6 +115,18 @@ build_one() {
         go build -trimpath -tags desktop,production \
           -ldflags "-s -w -H windowsgui" -o praimate-gui.exe . )
       cp cmd/praimate-gui/praimate-gui.exe "$out/praimate-gui.exe"
+    fi
+  fi
+
+  # PrAImate Code (rebranded OpenCode): native target only — it's a
+  # Bun-compiled standalone that can't cross-compile from here. Needs
+  # bun on PATH; skipped quietly if absent so a plain build still works.
+  if [ "$WITH_CODE" = "1" ] && [ "$triplet" = "$NATIVE_TRIPLET" ]; then
+    if command -v bun >/dev/null 2>&1; then
+      echo "  + praimate-code (native, via build-praimate-code.sh)"
+      OUT="$out" bash scripts/build-praimate-code.sh
+    else
+      echo "  (skipping praimate-code: bun not on PATH)" >&2
     fi
   fi
 

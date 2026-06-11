@@ -282,6 +282,14 @@ install_from_release() {
     $SUDO install -m 0755 "$extracted/praimate-gui" "$DEST/praimate-gui"
     c_grn "  praimate-gui installed (launch with: praimate --gui)"
   fi
+  # PrAImate Code (bundled coding CLI). Large (~150MB); only in archives
+  # built with --with-code. Installed next to praimate so `praimate code`
+  # finds it.
+  if [[ -f "$extracted/praimate-code" ]]; then
+    $SUDO install -m 0755 "$extracted/praimate-code" "$DEST/praimate-code"
+    [[ -f "$extracted/PRAIMATE-CODE-LICENSE" ]] && $SUDO cp "$extracted/PRAIMATE-CODE-LICENSE" "$DEST/" 2>/dev/null || true
+    c_grn "  praimate-code installed (launch with: praimate code)"
+  fi
   # Ship the bundled samples next to the binary at the XDG-style path
   # the launcher already probes (see internal/launcher SampleCandidates:
   # "<execDir>/../share/praimate/samples/workpaths"). Without this, the

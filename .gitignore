@@ -11,3 +11,6 @@ dist/
 /praimate
 /praimate.exe
 /praimate-gui
+/praimate-code
+/praimate-code.exe
+dist/**/praimate-code

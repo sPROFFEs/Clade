@@ -193,6 +193,11 @@ function Install-Binary {
             Copy-Item -Path $guiSrc -Destination $Dest -Force
             Write-Host "  v praimate-gui.exe installed (launch with: praimate --gui)" -ForegroundColor Green
         }
+        $codeSrc = Join-Path $extracted "praimate-code.exe"
+        if (Test-Path $codeSrc) {
+            Copy-Item -Path $codeSrc -Destination $Dest -Force
+            Write-Host "  v praimate-code.exe installed (launch with: praimate code)" -ForegroundColor Green
+        }
         # Ship the bundled samples next to the binary at the same path
         # the launcher probes in SampleCandidates:
         # "<execDir>\..\share\praimate\samples\workpaths". Without this,
