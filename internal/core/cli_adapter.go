@@ -74,6 +74,9 @@ type ResumeOpts struct {
 	// Approval re-pins the "ask" wiring. Same semantics as
 	// SingleShotOpts.Approval.
 	Approval *ApprovalConfig
+	// Env extends the child environment, same as SingleShotOpts.Env —
+	// per-chat local-endpoint routing must apply on resumed turns too.
+	Env map[string]string
 }
 
 // Reply is what a CLI adapter returns after one turn. Fields beyond

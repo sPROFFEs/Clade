@@ -5,12 +5,14 @@
   import { initTheme, themeMode, setThemeMode } from './lib/theme.js'
   import logo from './assets/praimate.png'
   import Chats from './pages/Chats.svelte'
-  import Run from './pages/Run.svelte'
   import Code from './pages/Code.svelte'
   import Agents from './pages/Agents.svelte'
+  import CLIs from './pages/CLIs.svelte'
+  import LocalLLM from './pages/LocalLLM.svelte'
   import Memory from './pages/Memory.svelte'
   import MCP from './pages/MCP.svelte'
   import Settings from './pages/Settings.svelte'
+  import Editor from './pages/Editor.svelte'
 
   // Lucide-style outline icon paths (24x24 viewBox, stroke-based).
   const icons = {
@@ -32,17 +34,26 @@
   const pages = [
     { id: 'code', label: 'Code', icon: icons.code, component: Code },
     { id: 'chats', label: 'Chats', icon: icons.chats, component: Chats },
-    { id: 'run', label: 'Agents', icon: icons.run, component: Run },
-    { id: 'agents', label: 'CLIs & Workflows', icon: icons.agents, component: Agents },
+    { id: 'agents', label: 'Agents', icon: icons.run, component: Agents },
+    { id: 'clis', label: 'CLIs', icon: icons.agents, component: CLIs },
+    { id: 'localllm', label: 'Local LLM', icon: icons.monitor, component: LocalLLM },
     { id: 'mcp', label: 'MCP', icon: icons.mcp, component: MCP },
     { id: 'memory', label: 'Memory', icon: icons.memory, component: Memory },
     { id: 'settings', label: 'Settings', icon: icons.settings, component: Settings },
   ]
 
   let health = null
+  // Studio mode: this process was spawned as a document-editor window —
+  // render the Editor shell instead of the main app.
+  let editorMode = null
 
   onMount(async () => {
     initTheme()
+    try {
+      editorMode = await api.editorMode()
+    } catch {
+      editorMode = { active: false }
+    }
     try {
       health = await api.health()
     } catch (e) {
@@ -64,6 +75,9 @@
   $: current = pages.find((p) => p.id === $activePage) || pages[0]
 </script>
 
+{#if editorMode?.active}
+  <Editor folder={editorMode.folder} chatId={editorMode.chatId} />
+{:else if editorMode}
 <div class="shell">
   <nav class="sidebar">
     <div class="brand">
@@ -105,3 +119,4 @@
     {/key}
   </main>
 </div>
+{/if}

@@ -43,6 +43,41 @@ func (a *App) SetChatTools(chatID, tools string) error {
 	return c.UpdateChatSettings(a.ctx, chatID, func(s *core.ChatSettings) { s.Tools = tools })
 }
 
+// UpdateChatConfig reconfigures an existing chat (CLI / model / tools /
+// per-chat local endpoint) — the GUI counterpart of the TUI's per-chat
+// settings. Switching CLI starts a fresh session on the next turn
+// (history stays). Empty localEndpoint clears the local route.
+func (a *App) UpdateChatConfig(chatID, cli, model, tools, localEndpoint, localAPIKey, localModel string) error {
+	switch tools {
+	case "", "ask", "edits", "full":
+	default:
+		return fmt.Errorf("unknown tools level %q", tools)
+	}
+	c, err := a.requireCore()
+	if err != nil {
+		return err
+	}
+	if err := c.UpdateChatConfig(a.ctx, chatID, cli, model, tools); err != nil {
+		return err
+	}
+	return c.UpdateChatSettings(a.ctx, chatID, func(s *core.ChatSettings) {
+		if localEndpoint == "" {
+			s.Local = nil
+			return
+		}
+		s.Local = &core.ChatLocalEndpoint{Endpoint: localEndpoint, APIKey: localAPIKey, Model: localModel}
+	})
+}
+
+// SearchChats finds chats by title or message content.
+func (a *App) SearchChats(query string) ([]core.Chat, error) {
+	c, err := a.requireCore()
+	if err != nil {
+		return nil, err
+	}
+	return c.SearchChats(a.ctx, query, 50)
+}
+
 // RunChatCommand executes a "!" composer command in the chat's working
 // directory and returns the persisted output turn.
 func (a *App) RunChatCommand(chatID, command string) (*core.ChatTurn, error) {

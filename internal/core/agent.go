@@ -20,6 +20,12 @@ type Agent struct {
 	Workflows       []Workflow `json:"workflows"`
 	DefaultWorkflow string     `json:"default_workflow,omitempty"`
 
+	// Surfaces gates where the agent can be launched from in the GUI:
+	// "chat" (interpreter chat), "terminal" (live CLI terminal),
+	// "editor" (live document studio). Empty = allowed everywhere —
+	// the backward-compatible default.
+	Surfaces []string `json:"surfaces"`
+
 	// SourcePath is the YAML file the agent was last imported from, if
 	// any. Empty for agents created in-place via the TUI/GUI.
 	SourcePath string `json:"source_path,omitempty"`
@@ -79,6 +85,23 @@ const (
 // AllStepKinds lists every kind the executor understands today. Used
 // by Validate() so unknown kinds in user YAML fail fast at import.
 var AllStepKinds = []StepKind{StepUserMessage, StepWaitForAssistant}
+
+// AllSurfaces lists the GUI launch surfaces an agent can be gated to.
+var AllSurfaces = []string{"chat", "terminal", "editor"}
+
+// AllowsSurface reports whether the agent may be launched from the
+// given surface. An empty Surfaces list allows everything.
+func (a *Agent) AllowsSurface(surface string) bool {
+	if len(a.Surfaces) == 0 {
+		return true
+	}
+	for _, s := range a.Surfaces {
+		if s == surface {
+			return true
+		}
+	}
+	return false
+}
 
 // FindWorkflow returns the named workflow on the agent, or nil if none
 // matches. Names are compared case-sensitively to match YAML import

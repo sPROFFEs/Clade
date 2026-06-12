@@ -56,7 +56,7 @@ func (a *ClaudeAdapter) ResumeStream(ctx context.Context, sessionID string, opts
 		return nil, err
 	}
 	defer cleanup()
-	return a.runStream(ctx, path, "", nil, append(args, extra...), opts.Message, emit)
+	return a.runStream(ctx, path, "", opts.Env, append(args, extra...), opts.Message, emit)
 }
 
 // runStream is runAt's streaming sibling: stdout is consumed line by

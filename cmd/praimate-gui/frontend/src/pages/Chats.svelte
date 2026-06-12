@@ -32,13 +32,37 @@
   $: lastAssistant = [...messages].reverse().find((m) => m.Role === 'assistant')
   $: deniedTools = (lastAssistant?.Meta?.activity || []).some((t) => !t.ok)
 
-  // New clean chat (CLI + model, no agent)
+  // New clean chat (CLI + model + tools, no agent)
   let creating = false
   let clis = []
   let newCli = ''
   let newModel = ''
+  let newTools = ''
   let modelSuggestions = []
   let starting = false
+
+  // Per-chat settings editor (CLI / model / tools), mirroring the TUI's
+  // per-chat settings sheet. Works on the open thread AND from list rows.
+  let cfg = null // {chat, cli, model, tools, local*, suggestions}
+  let cfgSaving = false
+
+  // Search across titles AND message content (TUI parity).
+  let search = ''
+  let searchResults = null
+  let searchTimer
+  function onSearchInput() {
+    clearTimeout(searchTimer)
+    const q = search.trim()
+    if (!q) { searchResults = null; return }
+    searchTimer = setTimeout(async () => {
+      try {
+        searchResults = (await api.searchChats(q)) || []
+      } catch (e) {
+        error = String(e)
+      }
+    }, 250)
+  }
+  $: shownChats = searchResults ?? chats
 
   async function load() {
     try {
@@ -54,9 +78,58 @@
     }
   }
 
+  async function openConfig(chat) {
+    error = ''
+    try {
+      if (clis.length === 0) clis = (await api.listCLIs()) || []
+      cfg = {
+        chat,
+        cli: chat.CLIAgent,
+        model: chat.Settings?.model || '',
+        tools: chat.Settings?.tools || '',
+        localEndpoint: chat.Settings?.local?.endpoint || '',
+        localApiKey: chat.Settings?.local?.api_key || '',
+        localModel: chat.Settings?.local?.model || '',
+        suggestions: (await api.listCLIModels(chat.CLIAgent).catch(() => [])) || [],
+      }
+    } catch (e) {
+      error = String(e)
+    }
+  }
+
+  async function cfgCliChanged() {
+    if (!cfg) return
+    cfg.suggestions = (await api.listCLIModels(cfg.cli).catch(() => [])) || []
+    cfg = cfg
+  }
+
+  async function saveConfig() {
+    if (!cfg) return
+    cfgSaving = true
+    error = ''
+    try {
+      await api.updateChatConfig(
+        cfg.chat.ID, cfg.cli, cfg.model.trim(), cfg.tools,
+        cfg.localEndpoint.trim(), cfg.localApiKey, cfg.localModel.trim())
+      const id = cfg.chat.ID
+      cfg = null
+      await load()
+      const fresh = chats.find((x) => x.ID === id)
+      if (selected?.ID === id && fresh) {
+        selected = fresh
+        toolsLevel = fresh.Settings?.tools || ''
+      }
+    } catch (e) {
+      error = String(e)
+    } finally {
+      cfgSaving = false
+    }
+  }
+
   async function openNewChat() {
     creating = true
     newModel = ''
+    newTools = ''
     try {
       clis = (await api.listCLIs()) || []
       const firstAvailable = clis.find((c) => c.available)
@@ -86,6 +159,7 @@
     error = ''
     try {
       const chat = await api.startCleanChat(newCli, modelSupported ? newModel.trim() : '', '')
+      if (newTools) await api.setChatTools(chat.ID, newTools)
       creating = false
       await load()
       const c = chats.find((x) => x.ID === chat.ID) || chat
@@ -293,6 +367,46 @@
   })
 </script>
 
+{#if cfg}
+  <div class="card" style="border-color: var(--accent, #888)">
+    <div class="card-title">Chat settings — {cfg.chat.Title}</div>
+    <div class="card-sub">Same controls as the TUI's per-chat settings. Switching the CLI starts a fresh session on the next message; the history stays.</div>
+    <label class="lbl">CLI</label>
+    <select class="field" style="max-width:320px" bind:value={cfg.cli} on:change={cfgCliChanged}>
+      {#each clis as c}
+        <option value={c.id} disabled={!c.available && c.id !== cfg.chat.CLIAgent}>
+          {c.label}{c.available ? '' : ' — not installed'}
+        </option>
+      {/each}
+    </select>
+    <label class="lbl">Model (blank = CLI default)</label>
+    <input class="field mono" style="max-width:420px" list="cfg-model-suggestions" bind:value={cfg.model} />
+    <datalist id="cfg-model-suggestions">
+      {#each cfg.suggestions as m}<option value={m}></option>{/each}
+    </datalist>
+    <label class="lbl">Tools</label>
+    <div class="row">
+      {#each TOOL_LEVELS as lvl}
+        <button class="btn sm" class:primary={cfg.tools === lvl.id} title={lvl.hint} on:click={() => (cfg.tools = lvl.id)}>{lvl.label}</button>
+      {/each}
+    </div>
+    {#if cfg.cli === 'claude' || cfg.cli === 'openclaude'}
+      <label class="lbl" style="margin-top:10px">Local endpoint (optional — routes THIS chat through a self-hosted backend)</label>
+      <div class="row">
+        <input class="field grow mono" placeholder="http://localhost:11434 (blank = cloud)" bind:value={cfg.localEndpoint} />
+        <input class="field mono" style="max-width:180px" type="password" placeholder="API key" bind:value={cfg.localApiKey} />
+        <input class="field mono" style="max-width:180px" placeholder="backend model" bind:value={cfg.localModel} />
+      </div>
+    {:else if cfg.localEndpoint}
+      <div class="card-sub" style="margin-top:8px">Per-chat local routing applies to claude/openclaude only — {cfg.cli} reads its global config (Local LLM tab).</div>
+    {/if}
+    <div class="row" style="margin-top:12px">
+      <button class="btn primary" on:click={saveConfig} disabled={cfgSaving}>{cfgSaving ? 'Saving…' : 'Save'}</button>
+      <button class="btn" on:click={() => (cfg = null)}>Cancel</button>
+    </div>
+  </div>
+{/if}
+
 {#if selected}
   <div class="row" style="margin-bottom: 12px">
     <button class="btn" on:click={back}>← Chats</button>
@@ -312,6 +426,7 @@
           on:click={() => setTools(lvl.id)}>{lvl.label}</button>
       {/each}
     </div>
+    <button class="btn" on:click={() => openConfig(selected)} title="Change the CLI / model / tools behind this chat">⚙ Edit</button>
     <button class="btn danger" on:click={() => remove(selected)}>Delete</button>
   </div>
 
@@ -438,6 +553,16 @@
   </div>
   <p class="subtitle">Conversations persist to the shared database. Start a clean chat on any CLI/model, or use an agent persona from the Agents page.</p>
 
+  <input
+    class="field"
+    style="max-width:420px; margin-bottom:10px"
+    placeholder="Search chats (titles and message content)…"
+    bind:value={search}
+    on:input={onSearchInput} />
+  {#if searchResults !== null}
+    <div class="card-sub" style="margin-bottom:8px">{searchResults.length} match(es) for “{search.trim()}”</div>
+  {/if}
+
   {#if error}<div class="banner">{error}</div>{/if}
 
   {#if creating}
@@ -463,6 +588,12 @@
       <datalist id="model-suggestions">
         {#each modelSuggestions as m}<option value={m}></option>{/each}
       </datalist>
+      <label class="lbl">Tools</label>
+      <div class="row">
+        {#each TOOL_LEVELS as lvl}
+          <button class="btn sm" class:primary={newTools === lvl.id} title={lvl.hint} on:click={() => (newTools = lvl.id)}>{lvl.label}</button>
+        {/each}
+      </div>
       <div class="row" style="margin-top:12px">
         <button class="btn primary" on:click={startClean} disabled={starting || !newCli}>
           {starting ? 'Starting…' : 'Start chat'}
@@ -472,10 +603,10 @@
     </div>
   {/if}
 
-  {#if chats.length === 0 && !creating}
-    <div class="empty">No chats yet — press “New chat”, or start one from an agent on the Agents page.</div>
+  {#if shownChats.length === 0 && !creating}
+    <div class="empty">{searchResults !== null ? 'No chats match the search.' : 'No chats yet — press “New chat”, or start one from an agent on the Agents page.'}</div>
   {/if}
-  {#each chats as chat}
+  {#each shownChats as chat}
     <div class="card row">
       <div class="grow" style="cursor:pointer" on:click={() => open(chat)} on:keydown={(e) => e.key === 'Enter' && open(chat)} role="button" tabindex="0">
         <div class="card-title">{chat.Title}</div>
@@ -487,6 +618,7 @@
         </div>
       </div>
       <button class="btn" on:click={() => open(chat)}>Open</button>
+      <button class="btn" on:click={() => openConfig(chat)} title="Change CLI / model / tools">Edit</button>
       <button class="btn danger" on:click={() => remove(chat)}>Delete</button>
     </div>
   {/each}

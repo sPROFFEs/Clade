@@ -58,6 +58,11 @@ type App struct {
 	// Tools level). Guarded by approvalMu.
 	approvalMu sync.Mutex
 	approval   *approvalBroker
+
+	// editorOwnWrites suppresses fsnotify echoes of the studio's own
+	// file flushes (editor_window.go). Guarded by editorMu.
+	editorMu        sync.Mutex
+	editorOwnWrites map[string]time.Time
 }
 
 func NewApp() *App {
@@ -109,22 +114,32 @@ func (a *App) startup(ctx context.Context) {
 	// approval_broker.go).
 	c.SetApprovalProvider(a.approvalProvider)
 
-	// Same automation daemons the TUI runs — watchers and schedules
-	// fire regardless of which surface is open.
-	watchers, _ := c.StartWatcherDaemon(context.Background(), core.WatcherDaemonOptions{
-		WatcherDispatchOptions: core.WatcherDispatchOptions{CLI: "claude"},
-	})
-	schedules, _ := c.StartScheduleDaemon(context.Background(), core.ScheduleDaemonOptions{
-		ScheduleDispatchOptions: core.ScheduleDispatchOptions{CLI: "claude"},
-	})
+	if editorFolder == "" {
+		// Same automation daemons the TUI runs — watchers and schedules
+		// fire regardless of which surface is open. NOT in studio-window
+		// processes: the main window already runs them, and two daemons
+		// on one DB would double-fire every schedule.
+		watchers, _ := c.StartWatcherDaemon(context.Background(), core.WatcherDaemonOptions{
+			WatcherDispatchOptions: core.WatcherDispatchOptions{CLI: "claude"},
+		})
+		schedules, _ := c.StartScheduleDaemon(context.Background(), core.ScheduleDaemonOptions{
+			ScheduleDispatchOptions: core.ScheduleDispatchOptions{CLI: "claude"},
+		})
 
-	a.daemonMu.Lock()
-	a.watchers = watchers
-	a.schedules = schedules
-	a.daemonMu.Unlock()
+		a.daemonMu.Lock()
+		a.watchers = watchers
+		a.schedules = schedules
+		a.daemonMu.Unlock()
+	}
 
 	a.st = st
 	a.core = c
+
+	if editorFolder != "" {
+		// Studio window: stream external file changes (the agent's
+		// edits) into the open tabs.
+		a.startEditorWatcher()
+	}
 }
 
 func (a *App) shutdown(ctx context.Context) {

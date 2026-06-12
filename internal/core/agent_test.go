@@ -386,3 +386,57 @@ func TestResolveDefaultWorkflow(t *testing.T) {
 		t.Fatalf("expected workflow B, got %v", w)
 	}
 }
+
+// Surfaces gate where an agent can launch from in the GUI. Empty =
+// everywhere (backward compat); values round-trip through YAML and DB.
+func TestAgentSurfaces_RoundTripAndGating(t *testing.T) {
+	c, _ := New(Options{Store: openTempStore(t)})
+	ctx := context.Background()
+
+	yamlBody := []byte(`schema: praimate.agent/v1
+id: docs-writer
+name: Docs Writer
+instructions: write docs
+supports: [claude]
+surfaces: [editor, chat]
+`)
+	a, err := c.ImportAgentYAML(ctx, yamlBody, "")
+	if err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	got, err := c.GetAgent(ctx, a.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if len(got.Surfaces) != 2 || !got.AllowsSurface("editor") || !got.AllowsSurface("chat") {
+		t.Fatalf("surfaces = %v", got.Surfaces)
+	}
+	if got.AllowsSurface("terminal") {
+		t.Error("terminal should be gated off")
+	}
+	// Re-export keeps the field.
+	raw, err := MarshalAgentYAML(got)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(raw), "surfaces:") {
+		t.Errorf("exported yaml lost surfaces:\n%s", raw)
+	}
+	// Empty surfaces = allowed everywhere.
+	empty := &Agent{}
+	for _, s := range AllSurfaces {
+		if !empty.AllowsSurface(s) {
+			t.Errorf("empty surfaces must allow %s", s)
+		}
+	}
+	// Unknown surface fails validation.
+	if _, err := c.ImportAgentYAML(ctx, []byte(`schema: praimate.agent/v1
+id: bad
+name: Bad
+instructions: x
+supports: [claude]
+surfaces: [browser]
+`), ""); err == nil {
+		t.Error("unknown surface must fail validation")
+	}
+}

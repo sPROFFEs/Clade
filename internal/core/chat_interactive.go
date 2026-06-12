@@ -19,6 +19,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/sPROFFEs/PrAImate/internal/ollama"
 )
 
 // ChatTurn is one completed interactive exchange.
@@ -61,6 +63,65 @@ func (c *Core) UpdateChatSettings(ctx context.Context, chatID string, fn func(*C
 		`UPDATE chats SET settings_json = ?, updated_at = ? WHERE id = ?`,
 		string(raw), time.Now().UTC().Format(time.RFC3339Nano), chatID)
 	return err
+}
+
+// UpdateChatConfig reconfigures an existing chat: the CLI behind it,
+// the pinned model and the Tools level — the GUI counterpart of the
+// TUI's per-chat settings sheet. Switching the CLI clears the stored
+// session id (a session belongs to the CLI that created it; the next
+// turn starts a fresh session on the new CLI with full history still
+// in the DB). Empty cli keeps the current one.
+// SearchChats finds chats whose title OR message content matches the
+// query (case-insensitive substring). Newest first.
+func (c *Core) SearchChats(ctx context.Context, query string, limit int) ([]Chat, error) {
+	if c.store == nil {
+		return nil, errors.New("SearchChats: no store configured")
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	like := "%" + strings.ToLower(strings.TrimSpace(query)) + "%"
+	rows, err := c.store.DB().QueryContext(ctx, `
+		SELECT `+chatColumns+` FROM chats
+		WHERE lower(title) LIKE ?
+		   OR id IN (SELECT chat_id FROM messages WHERE lower(content) LIKE ?)
+		ORDER BY updated_at DESC LIMIT ?`, like, like, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Chat
+	for rows.Next() {
+		ch, err := scanChat(rows.Scan)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *ch)
+	}
+	return out, rows.Err()
+}
+
+func (c *Core) UpdateChatConfig(ctx context.Context, chatID, cli, model, tools string) error {
+	if c.store == nil {
+		return errors.New("UpdateChatConfig: no store configured")
+	}
+	chat, err := c.GetChat(ctx, chatID)
+	if err != nil {
+		return err
+	}
+	if cli != "" && cli != chat.CLIAgent {
+		if _, err := GetCLIAdapter(cli); err != nil {
+			return err
+		}
+		if _, err := c.store.DB().ExecContext(ctx,
+			`UPDATE chats SET cli_agent = ?, session_id = NULL WHERE id = ?`, cli, chatID); err != nil {
+			return fmt.Errorf("UpdateChatConfig: switch cli: %w", err)
+		}
+	}
+	return c.UpdateChatSettings(ctx, chatID, func(s *ChatSettings) {
+		s.Model = model
+		s.Tools = tools
+	})
 }
 
 // ContinueChat sends userMessage to the chat's CLI and returns the
@@ -173,14 +234,29 @@ func (c *Core) ContinueChatStream(ctx context.Context, chatID, userMessage, cwd,
 	if chat.Settings.Tools == "ask" && c.approvalProvider != nil {
 		approval = c.approvalProvider(chatID)
 	}
-	resumeOpts := ResumeOpts{Message: outbound, Model: chat.Settings.Model, Tools: chat.Settings.Tools, Approval: approval}
+	// Per-chat local endpoint: env-route claude/openclaude through the
+	// self-hosted backend; the backend model name doubles as the model
+	// pin when none is set explicitly.
+	model := chat.Settings.Model
+	var env map[string]string
+	if l := chat.Settings.Local; l != nil && l.Endpoint != "" &&
+		(chat.CLIAgent == "claude" || chat.CLIAgent == "openclaude") {
+		if model == "" {
+			model = l.Model
+		}
+		env = ollama.ClaudeEnv(ollama.Settings{
+			Endpoint: l.Endpoint, APIKey: l.APIKey, Model: l.Model,
+		})
+	}
+	resumeOpts := ResumeOpts{Message: outbound, Model: model, Tools: chat.Settings.Tools, Approval: approval, Env: env}
 	shotOpts := SingleShotOpts{
 		Cwd:          cwd,
 		Message:      outbound,
 		SystemPrompt: privacyRedactPlain(privacy, systemPrompt),
-		Model:        chat.Settings.Model,
+		Model:        model,
 		Tools:        chat.Settings.Tools,
 		Approval:     approval,
+		Env:          env,
 	}
 	resuming := chat.SessionID != "" && adapter.SupportsResume()
 

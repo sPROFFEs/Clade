@@ -15,6 +15,20 @@
     { id: 'system', label: 'System' },
   ]
 
+  // Update check (Settings parity with `praimate -update`'s probe).
+  let updateInfo = null
+  let checkingUpdate = false
+  async function checkUpdate() {
+    checkingUpdate = true
+    try {
+      updateInfo = await api.checkUpdate()
+    } catch (e) {
+      error = String(e)
+    } finally {
+      checkingUpdate = false
+    }
+  }
+
   let error = ''
   let agents = []
 
@@ -160,7 +174,28 @@
 
 {#if error}<div class="banner">{error}</div>{/if}
 
-<h1 style="font-size:16px">Appearance</h1>
+<h1 style="font-size:16px">Updates</h1>
+<div class="card">
+  <div class="row">
+    <div class="grow">
+      <div class="card-title">PrAImate version</div>
+      <div class="card-sub">
+        {#if updateInfo}
+          {#if updateInfo.hasUpdate}
+            v{updateInfo.current} → <strong>v{updateInfo.latest} available</strong> — run <span class="mono">praimate -update</span> (refreshes the GUI binary too), or download: <span class="mono">{updateInfo.url}</span>
+          {:else}
+            v{updateInfo.current} — up to date
+          {/if}
+        {:else}
+          Check GitHub for a newer release.
+        {/if}
+      </div>
+    </div>
+    <button class="btn" on:click={checkUpdate} disabled={checkingUpdate}>{checkingUpdate ? 'Checking…' : 'Check for updates'}</button>
+  </div>
+</div>
+
+<h1 style="font-size:16px; margin-top:24px">Appearance</h1>
 <div class="card">
   <div class="row" style="justify-content: space-between">
     <div>

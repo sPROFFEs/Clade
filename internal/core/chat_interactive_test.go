@@ -91,3 +91,47 @@ func TestContinueChat_RedactsOutboundRevealsReply(t *testing.T) {
 		t.Fatalf("reply should reveal the secret: %q", turn.Reply)
 	}
 }
+
+// UpdateChatConfig is the GUI's per-chat settings sheet: switching the
+// CLI clears the session id (sessions belong to their CLI), and model +
+// tools persist into the settings JSON.
+func TestUpdateChatConfig_SwitchesCLIAndClearsSession(t *testing.T) {
+	c, _ := New(Options{Store: openTempStore(t)})
+	ctx := context.Background()
+	RegisterAllCLIAdapters()
+
+	ch, err := c.CreateChat(ctx, CreateChatRequest{Title: "cfg", CLIAgent: "claude"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := c.SetChatSessionID(ctx, ch.ID, "sess-old"); err != nil {
+		t.Fatalf("set session: %v", err)
+	}
+
+	if err := c.UpdateChatConfig(ctx, ch.ID, "codex", "gpt-5.1-codex", "edits"); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	got, _ := c.GetChat(ctx, ch.ID)
+	if got.CLIAgent != "codex" {
+		t.Errorf("cli = %q", got.CLIAgent)
+	}
+	if got.SessionID != "" {
+		t.Errorf("session must clear on CLI switch, got %q", got.SessionID)
+	}
+	if got.Settings.Model != "gpt-5.1-codex" || got.Settings.Tools != "edits" {
+		t.Errorf("settings = %+v", got.Settings)
+	}
+
+	// Same CLI: session survives; unknown CLI: rejected.
+	_ = c.SetChatSessionID(ctx, ch.ID, "sess-new")
+	if err := c.UpdateChatConfig(ctx, ch.ID, "codex", "", ""); err != nil {
+		t.Fatalf("same-cli update: %v", err)
+	}
+	got, _ = c.GetChat(ctx, ch.ID)
+	if got.SessionID != "sess-new" {
+		t.Errorf("session must survive same-CLI update, got %q", got.SessionID)
+	}
+	if err := c.UpdateChatConfig(ctx, ch.ID, "not-a-cli", "", ""); err == nil {
+		t.Error("unknown CLI must be rejected")
+	}
+}

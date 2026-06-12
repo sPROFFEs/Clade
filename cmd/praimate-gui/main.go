@@ -47,10 +47,24 @@ func main() {
 		os.Exit(runApprovalShim(os.Stdin, os.Stdout, endpoint, token))
 	}
 
+	// Studio mode: `praimate-gui -editor <folder> -editor-chat <id>`
+	// opens the document-studio window instead of the main app (Wails
+	// v2 has one window per process — see editor_window.go).
+	title := "PrAImate GUI"
+	if len(os.Args) >= 3 && os.Args[1] == "-editor" {
+		editorFolder = os.Args[2]
+		for i := 3; i+1 < len(os.Args); i++ {
+			if os.Args[i] == "-editor-chat" {
+				editorChatID = os.Args[i+1]
+			}
+		}
+		title = "PrAImate Studio — " + editorFolder
+	}
+
 	app := NewApp()
 
 	err := wails.Run(&options.App{
-		Title:  "PrAImate GUI",
+		Title:  title,
 		Width:  1280,
 		Height: 820,
 		AssetServer: &assetserver.Options{

@@ -283,7 +283,9 @@ func probeVersion(parent context.Context, path string) (string, error) {
 	const deadline = 8 * time.Second
 	ctx, cancel := context.WithTimeout(parent, deadline)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, path, "--version").CombinedOutput()
+	probe := exec.CommandContext(ctx, path, "--version")
+	hideConsole(probe)
+	out, err := probe.CombinedOutput()
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return "", fmt.Errorf("%w after %s (binary is slow to start, "+

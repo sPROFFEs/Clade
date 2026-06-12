@@ -1,0 +1,175 @@
+package main
+
+// CLIs tab bindings — detection + installation of the wrapped CLI
+// agents, mirroring the TUI's install screen: list the known CLIs with
+// live detection status, surface the per-OS install methods from
+// internal/installer, and run the chosen method with its output
+// streamed to the frontend over "praimate:install" events.
+
+import (
+	"context"
+	"strings"
+	"time"
+
+	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
+
+	"github.com/sPROFFEs/PrAImate/internal/installer"
+	"github.com/sPROFFEs/PrAImate/internal/launcher"
+)
+
+// CLIBackend is one wrapped CLI with its detection status.
+type CLIBackend struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Binary      string `json:"binary"`
+	Installed   bool   `json:"installed"`
+	Version     string `json:"version,omitempty"`
+	ProbeError  string `json:"probeError,omitempty"`
+	InstallHint string `json:"installHint,omitempty"`
+}
+
+// ListCLIBackends detects every known CLI (8s probe each, parallel via
+// launcher.DetectAgents) and returns the status list for the CLIs tab.
+func (a *App) ListCLIBackends() ([]CLIBackend, error) {
+	ctx, cancel := context.WithTimeout(a.ctx, 30*time.Second)
+	defer cancel()
+	detected := launcher.DetectAgents(ctx)
+	out := make([]CLIBackend, 0, len(detected))
+	for _, ag := range detected {
+		out = append(out, CLIBackend{
+			ID:          string(ag.ID),
+			Label:       ag.Label,
+			Binary:      ag.Binary,
+			Installed:   ag.Available,
+			Version:     ag.Version,
+			ProbeError:  ag.ProbeError,
+			InstallHint: ag.InstallHint,
+		})
+	}
+	return out, nil
+}
+
+// InstallMethod is one way to install/update a CLI on this OS.
+type InstallMethod struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Command     string `json:"command"`
+	Recommended bool   `json:"recommended"`
+	MissingPrereqs []string `json:"missingPrereqs,omitempty"`
+}
+
+// ListInstallMethods returns the runnable install methods for a CLI on
+// the current OS, recommended first (installer.Methods ordering).
+func (a *App) ListInstallMethods(cli string) ([]InstallMethod, error) {
+	methods := installer.Methods(installer.AgentID(cli), installer.ActionInstall, installer.DetectOS())
+	out := make([]InstallMethod, 0, len(methods))
+	for _, m := range methods {
+		out = append(out, InstallMethod{
+			ID:             m.ID,
+			Label:          m.Label,
+			Command:        m.Command,
+			Recommended:    m.Recommended,
+			MissingPrereqs: installer.PrereqsMissing(m),
+		})
+	}
+	return out, nil
+}
+
+// installLogWriter streams installer output lines to the frontend.
+type installLogWriter struct {
+	ctx context.Context
+	cli string
+}
+
+func (w installLogWriter) Write(p []byte) (int, error) {
+	for _, line := range strings.Split(strings.TrimRight(string(p), "\n"), "\n") {
+		wruntime.EventsEmit(w.ctx, "praimate:install", map[string]string{"cli": w.cli, "line": line})
+	}
+	return len(p), nil
+}
+
+// InstallCLI runs the chosen install method, streaming output over
+// "praimate:install". Returns when the method finishes; the frontend
+// re-probes the CLI list afterwards.
+func (a *App) InstallCLI(cli, methodID string) error {
+	methods := installer.Methods(installer.AgentID(cli), installer.ActionInstall, installer.DetectOS())
+	for _, m := range methods {
+		if m.ID == methodID {
+			w := installLogWriter{ctx: a.ctx, cli: cli}
+			ctx, cancel := context.WithTimeout(a.ctx, 15*time.Minute)
+			defer cancel()
+			return installer.RunWithOptions(ctx, m, installer.RunOptions{InstallNode: true}, w, w)
+		}
+	}
+	return errUnknownMethod(cli, methodID)
+}
+
+func errUnknownMethod(cli, id string) error {
+	return &installError{cli: cli, id: id}
+}
+
+type installError struct{ cli, id string }
+
+func (e *installError) Error() string {
+	return "no install method " + e.id + " for " + e.cli + " on this OS"
+}
+
+// --- managed tools (graphify, gstack, scrapegraph) ----------------------------
+
+// ManagedTool mirrors installer.Tool for the CLIs tab's tools section.
+// praimate-code is excluded — it has its own dedicated row.
+type ManagedTool struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Binary      string `json:"binary"`
+	Installed   bool   `json:"installed"`
+	Version     string `json:"version,omitempty"`
+	InstallHint string `json:"installHint,omitempty"`
+}
+
+// ListManagedTools detects the PrAImate-managed helper tools.
+func (a *App) ListManagedTools() ([]ManagedTool, error) {
+	ctx, cancel := context.WithTimeout(a.ctx, 30*time.Second)
+	defer cancel()
+	tools := installer.DetectTools(ctx)
+	out := make([]ManagedTool, 0, len(tools))
+	for _, t := range tools {
+		if t.ID == installer.ToolPraimateCode {
+			continue
+		}
+		out = append(out, ManagedTool{
+			ID: string(t.ID), Label: t.Label, Binary: t.Binary,
+			Installed: t.Available, Version: t.Version, InstallHint: t.InstallHint,
+		})
+	}
+	return out, nil
+}
+
+// ListToolInstallMethods returns the runnable install methods for a
+// managed tool on this OS.
+func (a *App) ListToolInstallMethods(tool string) ([]InstallMethod, error) {
+	methods := installer.ToolMethods(installer.ToolID(tool), installer.ActionInstall, installer.DetectOS())
+	out := make([]InstallMethod, 0, len(methods))
+	for _, m := range methods {
+		out = append(out, InstallMethod{
+			ID: m.ID, Label: m.Label, Command: m.Command,
+			Recommended: m.Recommended, MissingPrereqs: installer.PrereqsMissing(m),
+		})
+	}
+	return out, nil
+}
+
+// InstallManagedTool runs the chosen method, streaming output over the
+// same "praimate:install" channel the CLI installs use.
+func (a *App) InstallManagedTool(tool, methodID string) error {
+	methods := installer.ToolMethods(installer.ToolID(tool), installer.ActionInstall, installer.DetectOS())
+	for _, m := range methods {
+		if m.ID == methodID {
+			w := installLogWriter{ctx: a.ctx, cli: tool}
+			ctx, cancel := context.WithTimeout(a.ctx, 15*time.Minute)
+			defer cancel()
+			return installer.Run(ctx, m, w, w)
+		}
+	}
+	return errUnknownMethod(tool, methodID)
+}

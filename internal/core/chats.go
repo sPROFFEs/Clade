@@ -67,6 +67,24 @@ type ChatSettings struct {
 	// (auto-approve file edits), "full" (skip approvals entirely). See
 	// SingleShotOpts.Tools for the per-CLI flag mapping.
 	Tools string `json:"tools,omitempty"`
+
+	// Local, if set, routes this chat through a self-hosted
+	// OpenAI-compatible endpoint instead of the CLI's cloud backend —
+	// the DB-chat counterpart of the TUI's per-chat Ollama wizard.
+	// Effective for claude/openclaude (per-turn env routing); the other
+	// CLIs read their global home-dir config, which the Local LLM tab
+	// manages (architecture invariant: claude config is per-chat only).
+	Local *ChatLocalEndpoint `json:"local,omitempty"`
+}
+
+// ChatLocalEndpoint is a per-chat local-LLM route.
+type ChatLocalEndpoint struct {
+	Endpoint string `json:"endpoint,omitempty"`
+	APIKey   string `json:"api_key,omitempty"`
+	// Model is the backend model name at the endpoint (e.g.
+	// "qwen3-coder"). Used as the chat's model when no explicit model
+	// pin is set.
+	Model string `json:"model,omitempty"`
 }
 
 // Message is one stored turn. Role is "user" | "assistant" | "tool" |

@@ -47,6 +47,34 @@ export const api = {
   importAgentDialog: () => call('ImportAgentDialog'),
   exportAgentDialog: (id) => call('ExportAgentDialog', id),
   deleteAgent: (id) => call('DeleteAgent', id),
+  agentYAML: (id) => call('AgentYAML', id),
+  saveAgentYAML: (yaml) => call('SaveAgentYAML', yaml),
+  newAgentTemplateYAML: () => call('NewAgentTemplateYAML'),
+
+  updateChatConfig: (chatID, cli, model, tools, localEndpoint, localApiKey, localModel) =>
+    call('UpdateChatConfig', chatID, cli, model, tools, localEndpoint || '', localApiKey || '', localModel || ''),
+  searchChats: (q) => call('SearchChats', q),
+
+  listCLIBackends: () => call('ListCLIBackends'),
+  listInstallMethods: (cli) => call('ListInstallMethods', cli),
+  installCLI: (cli, methodID) => call('InstallCLI', cli, methodID),
+  listManagedTools: () => call('ListManagedTools'),
+  listToolInstallMethods: (tool) => call('ListToolInstallMethods', tool),
+  installManagedTool: (tool, methodID) => call('InstallManagedTool', tool, methodID),
+  checkUpdate: () => call('CheckUpdate'),
+
+  getLocalLLM: () => call('GetLocalLLM'),
+  setLocalLLM: (d) => call('SetLocalLLM', d),
+  testLocalLLM: (endpoint, apiKey) => call('TestLocalLLM', endpoint, apiKey),
+
+  editorMode: () => call('EditorMode'),
+  editorListFiles: () => call('EditorListFiles'),
+  editorReadFile: (rel) => call('EditorReadFile', rel),
+  editorWriteFile: (rel, content) => call('EditorWriteFile', rel, content),
+  editorCreateFile: (rel) => call('EditorCreateFile', rel),
+  openEditorWindow: (folder, agentID, cli, chatID) =>
+    call('OpenEditorWindow', folder, agentID, cli, chatID),
+  startTerminal: (agentID, cli, cwd) => call('StartTerminal', agentID, cli, cwd),
 
   pickFolder: () => call('PickFolder'),
   runWorkflow: (agentID, workflow, cli, cwd, inputs) =>
