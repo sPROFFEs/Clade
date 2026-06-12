@@ -9,7 +9,8 @@
   //     scroll position survive instead of the whole buffer reloading.
   import { onMount, onDestroy, createEventDispatcher } from 'svelte'
   import { EditorView, basicSetup } from 'codemirror'
-  import { EditorState, Compartment } from '@codemirror/state'
+  import { EditorState, StateField, StateEffect } from '@codemirror/state'
+  import { showTooltip } from '@codemirror/view'
   import { markdown } from '@codemirror/lang-markdown'
   import { yaml } from '@codemirror/lang-yaml'
 
@@ -20,6 +21,21 @@
   let host
   let view
   let applyingExternal = false
+
+  // Ask-menu tooltip — rendered through CodeMirror's OWN tooltip layer.
+  // On this app's webkit targets, arbitrary overlays (any z-index, even
+  // portaled to <body>) can be painted UNDER the editor text by buggy
+  // GPU paths; CM tooltips are the one overlay channel the editor
+  // guarantees to layer above its content everywhere.
+  const setAskTooltip = StateEffect.define()
+  const askTooltipField = StateField.define({
+    create: () => null,
+    update(value, tr) {
+      for (const e of tr.effects) if (e.is(setAskTooltip)) value = e.value
+      return value
+    },
+    provide: (f) => showTooltip.from(f),
+  })
 
   function langExt() {
     if (lang === 'yaml') return [yaml()]
@@ -40,6 +56,7 @@
         doc: value,
         extensions: [
           basicSetup,
+          askTooltipField,
           ...langExt(),
           theme,
           EditorView.lineWrapping,
@@ -100,6 +117,28 @@
 
   export function getValue() {
     return view ? view.state.doc.toString() : value
+  }
+
+  // openAskMenu shows makeDOM()'s element as a CM tooltip anchored at
+  // the end of the current selection (or cursor line). closeAskMenu
+  // hides it. The caller owns the DOM contents and wiring.
+  export function openAskMenu(makeDOM) {
+    if (!view) return
+    const pos = view.state.selection.main.to
+    view.dispatch({
+      effects: setAskTooltip.of({
+        pos,
+        above: false,
+        strictSide: false,
+        arrow: false,
+        create: () => ({ dom: makeDOM() }),
+      }),
+    })
+  }
+
+  export function closeAskMenu() {
+    if (!view) return
+    view.dispatch({ effects: setAskTooltip.of(null) })
   }
 
   // --- formatting helpers for the studio toolbar ----------------------

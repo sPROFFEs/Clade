@@ -172,12 +172,13 @@
 
   // --- right-click → ask the agent about the selection ----------------------
   //
-  // Rendered as a DOCKED CARD at the top of the chat pane, not a
-  // floating popup over the document: WebKit's compositor on broken
-  // GPU drivers paints editor layers over overlays regardless of
-  // z-index, so the only artifact-proof place is outside the editor.
+  // The menu is rendered THROUGH CodeMirror's tooltip layer, anchored
+  // at the selection. Any independent overlay (whatever its z-index,
+  // even portaled to <body>) can be painted under the editor text by
+  // buggy webkit GPU paths; the editor's own tooltip channel is the
+  // one overlay it guarantees to layer correctly everywhere.
 
-  let ask = null // {text, fromLine, toLine, custom}
+  let ask = null // {text, fromLine, toLine}
   const ASK_ACTIONS = [
     'Improve the writing',
     'Fix grammar and spelling',
@@ -187,16 +188,69 @@
     'Translate to English',
   ]
 
+  function closeAsk() {
+    activeTab?.ref?.closeAskMenu()
+    ask = null
+  }
+
   function onAskCtx(e) {
-    ask = { ...e.detail, custom: '' }
-    // The card lives in the chat pane — make sure it's visible.
-    chatOpen = true
+    ask = { ...e.detail }
+    const t = tabs.find((x) => x.path === active)
+    t?.ref?.openAskMenu(buildAskDom)
+  }
+
+  // The tooltip DOM is built imperatively (CodeMirror owns its
+  // lifecycle), so its styles live under :global(.ask-menu …) below.
+  function buildAskDom() {
+    const root = document.createElement('div')
+    root.className = 'ask-menu'
+
+    const head = document.createElement('div')
+    head.className = 'ask-head'
+    head.textContent = `Ask the agent — lines ${ask.fromLine}–${ask.toLine}`
+    const x = document.createElement('button')
+    x.className = 'ask-close'
+    x.textContent = '×'
+    x.onclick = closeAsk
+    head.appendChild(x)
+    root.appendChild(head)
+
+    for (const act of ASK_ACTIONS) {
+      const b = document.createElement('button')
+      b.className = 'ask-item'
+      b.textContent = act
+      b.onclick = () => askAgent(act)
+      root.appendChild(b)
+    }
+
+    const row = document.createElement('div')
+    row.className = 'ask-free'
+    const input = document.createElement('input')
+    input.className = 'field'
+    input.placeholder = 'Or tell it what to do…'
+    input.onkeydown = (ev) => {
+      if (ev.key === 'Enter' && input.value.trim()) askAgent(input.value)
+      if (ev.key === 'Escape') closeAsk()
+      ev.stopPropagation() // keep CM from swallowing keystrokes
+    }
+    const go = document.createElement('button')
+    go.className = 'ask-go'
+    go.textContent = 'Go'
+    go.onclick = () => input.value.trim() && askAgent(input.value)
+    row.appendChild(input)
+    row.appendChild(go)
+    root.appendChild(row)
+
+    // Don't let clicks inside the menu move the editor selection.
+    root.onmousedown = (ev) => ev.stopPropagation()
+    setTimeout(() => input.focus(), 0)
+    return root
   }
 
   async function askAgent(instruction) {
     if (!ask || !instruction.trim() || sending) return
     const a = ask
-    ask = null
+    closeAsk()
     const snippet = a.text.length > 4000 ? a.text.slice(0, 4000) + '…' : a.text
     const msg =
       `In ${active} (lines ${a.fromLine}–${a.toLine}), apply this instruction to the selected text and edit the file directly, keeping everything else unchanged.\n\n` +
@@ -313,7 +367,7 @@
   }
 
   function onWindowKey(e) {
-    if (e.key === 'Escape' && ask) ask = null
+    if (e.key === 'Escape' && ask) closeAsk()
   }
 
   let unsubFs = () => {}
@@ -424,29 +478,6 @@
       <span class="pill">{chat?.CLIAgent || ''}</span>
       <button class="btn sm" title="Hide chat" on:click={() => (chatOpen = false)}>▸</button>
     </div>
-    {#if ask}
-      <div class="ask-card">
-        <div class="ask-head">
-          Selection — lines {ask.fromLine}–{ask.toLine}
-          <button class="ask-close" on:click={() => (ask = null)}>×</button>
-        </div>
-        <div class="ask-snippet mono">{ask.text.length > 120 ? ask.text.slice(0, 120) + '…' : ask.text}</div>
-        <div class="ask-actions">
-          {#each ASK_ACTIONS as act}
-            <button class="ask-act" on:click={() => askAgent(act)} disabled={sending}>{act}</button>
-          {/each}
-        </div>
-        <div class="ask-free">
-          <input
-            class="field grow"
-            style="font-size:12px; padding:4px 6px"
-            placeholder="Or tell it what to do…"
-            bind:value={ask.custom}
-            on:keydown={(e) => e.key === 'Enter' && askAgent(ask.custom)} />
-          <button class="btn sm primary" on:click={() => askAgent(ask.custom)} disabled={!ask.custom.trim()}>Go</button>
-        </div>
-      </div>
-    {/if}
     <div class="thread" bind:this={threadEl}>
       {#each messages as m}
         <div class="msg {m.Role === 'user' ? 'user' : 'assistant'}" class:pending={m._pending}>
@@ -496,6 +527,9 @@
   </aside>
   {/if}
 </div>
+
+<!-- The ask-menu renders inside CodeMirror's tooltip layer; see
+     buildAskDom() and the :global(.ask-menu) styles. -->
 
 <style>
   .studio {
@@ -653,45 +687,54 @@
     vertical-align: -1px;
     accent-color: var(--accent, #7c6cf2);
   }
-  .ask-card {
-    border: 1px solid var(--accent, #7c6cf2);
+  /* Ask-menu lives inside CodeMirror's tooltip (imperative DOM →
+     :global). The .cm-tooltip wrapper gets a clean panel look too. */
+  :global(.cm-tooltip:has(> .ask-menu)) {
+    background: var(--panel);
+    border: 1px solid var(--border);
     border-radius: var(--radius);
-    background: var(--bg);
-    padding: 8px 10px;
-    margin-bottom: 8px;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
   }
-  .ask-head {
+  :global(.ask-menu) {
+    width: 300px;
+    padding: 10px;
+    font-family: inherit;
+  }
+  :global(.ask-menu .ask-head) {
     font-size: 12px;
     color: var(--text-dim);
     display: flex;
     justify-content: space-between;
     align-items: center;
+    margin-bottom: 4px;
   }
-  .ask-snippet {
-    font-size: 11px;
-    color: var(--text-dim);
-    border-left: 2px solid var(--border);
-    padding-left: 8px;
-    margin: 6px 0;
-    white-space: pre-wrap;
-    word-break: break-word;
-    max-height: 56px;
-    overflow: hidden;
-  }
-  .ask-actions { display: flex; flex-wrap: wrap; gap: 4px; }
-  .ask-act {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 999px;
+  :global(.ask-menu .ask-item) {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
     color: var(--text);
-    font-size: 12px;
-    padding: 3px 10px;
+    font-size: 13px;
+    padding: 6px 8px;
+    border-radius: 6px;
     cursor: pointer;
     line-height: 1.3;
+    font-family: inherit;
   }
-  .ask-act:hover { background: var(--raised, rgba(127,127,127,0.15)); }
-  .ask-free { display: flex; gap: 4px; margin-top: 8px; align-items: center; }
-  .ask-close {
+  :global(.ask-menu .ask-item:hover) { background: var(--raised, rgba(127, 127, 127, 0.15)); }
+  :global(.ask-menu .ask-free) { display: flex; gap: 4px; margin-top: 8px; align-items: center; }
+  :global(.ask-menu .ask-free input) { font-size: 12px; padding: 4px 6px; flex: 1; min-width: 0; }
+  :global(.ask-menu .ask-go) {
+    background: var(--accent, #7c6cf2);
+    border: none;
+    border-radius: 8px;
+    color: #fff;
+    font-size: 12px;
+    padding: 5px 12px;
+    cursor: pointer;
+  }
+  :global(.ask-menu .ask-close) {
     background: none;
     border: none;
     color: var(--text-dim);
