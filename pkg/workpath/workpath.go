@@ -174,7 +174,7 @@ func (t Tool) AllScripts() []string {
 	return nil
 }
 
-// HookEvent is a portable Clade-side event name. Each target maps these
+// HookEvent is a portable PrAImate-side event name. Each target maps these
 // to its own native hook vocabulary (or returns "unsupported" for
 // targets without a stable hook system yet — codex, opencode, gemini,
 // mika). The names mirror Claude Code's events translated to
@@ -203,7 +203,7 @@ var AllHookEvents = map[HookEvent]bool{
 // lifecycle event fires. Source is a hooks.json file at the workpath
 // root or inside an imported bundle.
 type Hook struct {
-	// Event is the portable Clade event name. See HookEvent constants.
+	// Event is the portable PrAImate event name. See HookEvent constants.
 	Event HookEvent `json:"event"`
 	// Matcher is the optional pattern that gates the hook. For tool
 	// events (pre_tool / post_tool) it matches the tool name (regex

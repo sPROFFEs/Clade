@@ -78,7 +78,7 @@ func OpenChatWithOptions(c Chat, opts OpenChatOptions) (LaunchPlan, Agent, error
 	// SIGKILL fallback: MirrorInSlice with preserveNewerHome=true
 	// compares mtimes and refuses to overwrite home-dir files that
 	// are newer than the slice. This protects users whose previous
-	// Clade was killed between agent exit and mirror-out — their
+	// PrAImate was killed between agent exit and mirror-out — their
 	// last turns survive in the home dir and the next launch picks
 	// them up instead of being clobbered by a stale slice.
 	//

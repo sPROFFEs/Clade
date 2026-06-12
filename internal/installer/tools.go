@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-// ToolID names a non-agent capability Clade can install — a CLI the
+// ToolID names a non-agent capability PrAImate can install — a CLI the
 // agent calls but the user doesn't launch as a primary session. Lives
 // alongside AgentID so the installer can offer install/update for both
 // without polluting the agent picker.
@@ -22,15 +22,15 @@ type ToolID string
 
 const (
 	// ToolGraphify is the knowledge-graph builder for codebases / docs.
-	// Installed into a Clade-managed prefix via `uv tool install` so the
+	// Installed into a PrAImate-managed prefix via `uv tool install` so the
 	// install is isolated from the user's Python environment.
 	ToolGraphify ToolID = "graphify"
 	// ToolGstack is Garry Tan's skill pack. It is not a normal binary
 	// helper: setup installs slash-command skills into supported hosts
-	// (Claude Code, Codex, OpenCode, etc.). Clade keeps the git checkout
+	// (Claude Code, Codex, OpenCode, etc.). PrAImate keeps the git checkout
 	// under clade/tools/gstack and runs upstream setup from there.
 	ToolGstack ToolID = "gstack"
-	// ToolScrapeGraph installs a tiny Clade wrapper around ScrapeGraphAI's
+	// ToolScrapeGraph installs a tiny PrAImate wrapper around ScrapeGraphAI's
 	// Python packages so every agent can call `scrapegraph-search`.
 	ToolScrapeGraph ToolID = "scrapegraph"
 	// ToolPraimateCode is PrAImate Code — our version-pinned, rebranded
@@ -95,7 +95,7 @@ func KnownTools() []Tool {
 }
 
 // DetectTools mirrors DetectAgents: probes each known tool by trying its
-// binary on PATH AND its Clade-managed prefix, taking the first that
+// binary on PATH AND its PrAImate-managed prefix, taking the first that
 // produces a clean --version exit.
 func DetectTools(ctx context.Context) []Tool {
 	tools := KnownTools()
@@ -187,8 +187,8 @@ func probeToolVersion(parent context.Context, path string) (string, error) {
 	return strings.TrimSpace(line), nil
 }
 
-// ManagedToolPrefix returns the Clade-owned directory where a managed
-// tool lives, alongside Clade's own config under
+// ManagedToolPrefix returns the PrAImate-owned directory where a managed
+// tool lives, alongside PrAImate's own config under
 // os.UserConfigDir()/clade/tools/<name>/. Parallel to ManagedAgentPrefix
 // but a separate subtree so an agent named "graphify" couldn't ever
 // collide with a tool named "graphify".
@@ -238,7 +238,7 @@ func allToolMethods(tool ToolID, action Action, current OS) []Method {
 	case ToolGraphify:
 		// uv tool install graphifyy — pure Python wheels, no native
 		// deps, no postinstall scripts (unlike the openclaude case).
-		// Installed into a Clade-managed prefix via UV_TOOL_DIR /
+		// Installed into a PrAImate-managed prefix via UV_TOOL_DIR /
 		// UV_TOOL_BIN_DIR so the user's global PATH stays unaffected
 		// and the install is fully isolated from any system Python.
 		//
@@ -269,7 +269,7 @@ func allToolMethods(tool ToolID, action Action, current OS) []Method {
 		// pack tool rather than a generic runtime helper.
 		//
 		// GSTACK_SKIP_* prevents setup from making system package-manager
-		// changes (fonts/coreutils). Clade should install the skill pack,
+		// changes (fonts/coreutils). PrAImate should install the skill pack,
 		// not mutate the host OS behind the user's back.
 		return []Method{
 			{
@@ -285,7 +285,7 @@ func allToolMethods(tool ToolID, action Action, current OS) []Method {
 		}
 	case ToolScrapeGraph:
 		// scrapegraphai does not expose a stable console script we can
-		// rely on. Install the packages into a Clade-owned venv and write
+		// rely on. Install the packages into a PrAImate-owned venv and write
 		// our own small `scrapegraph-search` wrapper. The wrapper supports
 		// ScrapeGraphAI v2 API mode (SGAI_API_KEY) and OSS SearchGraph mode
 		// (local/Ollama-capable via SCRAPEGRAPH_LLM_MODEL).
@@ -410,14 +410,14 @@ func EnsureUvReady(ctx context.Context, w io.Writer) ([]string, error) {
 	return nil, fmt.Errorf("uv not on PATH.\n%s", hint)
 }
 
-// ImportClademToolsToPath prepends every existing managed-tool bin dir
+// ImportManagedToolsToPath prepends every existing managed-tool bin dir
 // to PATH so child processes (the launched agent + its tool wrappers)
 // can find graphify-and-friends without the user editing their shell
 // rc. Mirrors ImportPnpmPathIfPresent. No-op when the tools dir
 // doesn't exist yet (first-run, no tools installed).
 //
 // Safe to call repeatedly; existing entries on PATH are not duplicated.
-func ImportClademToolsToPath() {
+func ImportManagedToolsToPath() {
 	base, err := os.UserConfigDir()
 	if err != nil {
 		return
@@ -467,7 +467,7 @@ func ImportClademToolsToPath() {
 // ImportPraimateBinToPath prepends <config>/praimate/bin to PATH so
 // managed standalone binaries installed there (praimate-code) are
 // discoverable by agent detection and `praimate code`. Called at
-// startup alongside ImportClademToolsToPath.
+// startup alongside ImportManagedToolsToPath.
 func ImportPraimateBinToPath() {
 	binDir, err := PraimateBinDir()
 	if err != nil {
@@ -494,7 +494,7 @@ func ImportPraimateBinToPath() {
 }
 
 // installUvIntoManagedPrefix runs `uv tool install <pkg>` with
-// UV_TOOL_DIR / UV_TOOL_BIN_DIR pointed at the Clade-managed prefix so
+// UV_TOOL_DIR / UV_TOOL_BIN_DIR pointed at the PrAImate-managed prefix so
 // the binary lands at <prefix>/bin/<m.ManagedPrefix> and uv's package
 // state stays in <prefix>/tools/. Mirrors the pnpm managed-prefix
 // flow's UX (progress to stdout, success criterion = bin exists).

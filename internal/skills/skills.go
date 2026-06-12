@@ -109,7 +109,7 @@ func isZipURL(raw string) bool {
 func fetchZip(ctx context.Context, raw, dst string) error {
 	// We need a Reader-at-offset to feed archive/zip, so download to a
 	// tempfile rather than buffering the whole thing in memory.
-	tmp, err := os.CreateTemp("", "clade-skill-*.zip")
+	tmp, err := os.CreateTemp("", "praimate-skill-*.zip")
 	if err != nil {
 		return fmt.Errorf("temp file: %w", err)
 	}
@@ -123,7 +123,7 @@ func fetchZip(ctx context.Context, raw, dst string) error {
 	}
 	// Friendly UA so GitHub etc. don't deny us. Default Go UA is fine
 	// but a named one helps the operator spot us in logs.
-	req.Header.Set("User-Agent", "clade-skills/1.0")
+	req.Header.Set("User-Agent", "praimate-skills/1.0")
 	client := &http.Client{Timeout: 5 * time.Minute}
 	resp, err := client.Do(req)
 	if err != nil {

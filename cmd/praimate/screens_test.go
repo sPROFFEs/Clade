@@ -18,7 +18,7 @@ import (
 	"github.com/sPROFFEs/PrAImate/internal/launcher"
 )
 
-// repoRoot is two dirs above the package dir (cmd/clade).
+// repoRoot is two dirs above the package dir (cmd/praimate).
 func repoRoot(t *testing.T) string {
 	t.Helper()
 	_, file, _, ok := runtime.Caller(0)
@@ -627,7 +627,7 @@ func TestAgentsScreen_EnterOnUnavailableRoutesToInstall(t *testing.T) {
 func TestRootModel_LaunchReturnsExecProcessCmd(t *testing.T) {
 	// rootModel.Update no longer quits on a launch — it returns a
 	// tea.ExecProcess command that runs the agent inside the running
-	// Bubbletea program (stay-in-Clade). We just confirm cfg gets
+	// Bubbletea program (stay-in-PrAImate). We just confirm cfg gets
 	// persisted onto the rootModel and a non-nil Cmd is returned.
 	root := &rootModel{screen: newFirstRun()}
 	plan := launcher.LaunchPlan{Command: fakeCmd(), Args: fakeArgs(), Dir: t.TempDir()}

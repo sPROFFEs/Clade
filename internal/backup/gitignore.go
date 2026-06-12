@@ -1,6 +1,6 @@
 package backup
 
-// Managed .gitignore + .gitattributes writers. Clade owns these two
+// Managed .gitignore + .gitattributes writers. PrAImate owns these two
 // files when it manages the workspaces root as a backup repo.
 //
 // .gitignore semantics — per user instruction:
@@ -13,10 +13,10 @@ package backup
 // .gitattributes semantics:
 //   - Register a custom merge driver for MEMORY.md so concurrent edits
 //     across machines concatenate instead of producing conflict
-//     markers. The driver itself is `clade --merge-memory` and is
+//     markers. The driver itself is `praimate --merge-memory` and is
 //     wired into .git/config by Init/Clone (see repo.go).
 //
-// Both files start with a magic comment identifying them as Clade-
+// Both files start with a magic comment identifying them as PrAImate-
 // managed. If the user has hand-edited them (comment missing), we
 // leave them alone — never silently clobber a customised file.
 
@@ -30,7 +30,7 @@ import (
 	"strings"
 )
 
-const managedGitignoreContent = `# Managed by Clade — do not edit by hand.
+const managedGitignoreContent = `# Managed by PrAImate — do not edit by hand.
 # Tracks the chats/ and templates/ subtrees. Stray files at the root
 # of the workspaces directory are ignored so they don't accidentally
 # propagate across machines.
@@ -48,7 +48,7 @@ const managedGitignoreContent = `# Managed by Clade — do not edit by hand.
 !/.gitattributes
 `
 
-const managedGitattributesContent = `# Managed by Clade — do not edit by hand.
+const managedGitattributesContent = `# Managed by PrAImate — do not edit by hand.
 # Custom merge driver for MEMORY.md so concurrent edits across
 # machines concatenate instead of producing conflict markers.
 
@@ -61,7 +61,12 @@ templates/*/workpath/MEMORY.md merge=clade-memory
 .praimate-state/** merge=praimate-theirs
 `
 
-const cladeManagedMarker = "# Managed by Clade — do not edit by hand."
+const praimateManagedMarker = "# Managed by PrAImate — do not edit by hand."
+
+// legacyManagedMarker is the pre-rebrand marker. Files carrying it are
+// still OURS to manage — treating them as user-edited would freeze
+// every pre-1.1.13 backup repo's managed files forever.
+const legacyManagedMarker = "# Managed by Clade — do not edit by hand."
 
 // WriteManagedGitignore writes the canonical .gitignore to
 // <repoRoot>/.gitignore. Refuses to overwrite when the file exists
@@ -79,12 +84,13 @@ func WriteManagedGitattributes(repoRoot string) error {
 }
 
 // ErrUserEdited is returned when WriteManaged* refuses to clobber a
-// file that doesn't carry the Clade-managed marker.
+// file that doesn't carry the PrAImate-managed marker.
 var ErrUserEdited = errors.New("file is user-edited (no Clade-managed marker); refusing to overwrite")
 
 func writeManagedFile(path, content string) error {
 	if existing, err := os.ReadFile(path); err == nil {
-		if !strings.HasPrefix(strings.TrimSpace(string(existing)), cladeManagedMarker) {
+		head := strings.TrimSpace(string(existing))
+		if !strings.HasPrefix(head, praimateManagedMarker) && !strings.HasPrefix(head, legacyManagedMarker) {
 			return ErrUserEdited
 		}
 		// Cheap idempotence: skip the write when contents already match.
@@ -94,7 +100,7 @@ func writeManagedFile(path, content string) error {
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
-	tmp := path + ".clade-tmp"
+	tmp := path + ".praimate-tmp"
 	if err := os.WriteFile(tmp, []byte(content), 0o644); err != nil {
 		return err
 	}

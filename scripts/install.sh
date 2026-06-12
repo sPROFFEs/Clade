@@ -425,6 +425,86 @@ EOF
     ;;
 esac
 
+
+# ---------- desktop shortcuts (TUI + GUI) ----------
+create_shortcuts() {
+  local icon_src="$1"
+  case "$(uname -s)" in
+    Linux)
+      local apps="$HOME/.local/share/applications"
+      mkdir -p "$apps"
+      local icon_line=""
+      if [[ -n "$icon_src" && -f "$icon_src" ]]; then
+        mkdir -p "$HOME/.local/share/icons"
+        cp -f "$icon_src" "$HOME/.local/share/icons/praimate.png" 2>/dev/null \
+          && icon_line="Icon=$HOME/.local/share/icons/praimate.png"
+      fi
+      cat > "$apps/praimate.desktop" <<DESK
+[Desktop Entry]
+Type=Application
+Name=PrAImate
+Comment=Multi-CLI agent launcher (terminal UI)
+Exec=$DEST/praimate
+Terminal=true
+$icon_line
+Categories=Development;Utility;
+DESK
+      if [[ -x "$DEST/praimate-gui" ]]; then
+        cat > "$apps/praimate-gui.desktop" <<DESK
+[Desktop Entry]
+Type=Application
+Name=PrAImate GUI
+Comment=Multi-CLI agent launcher (desktop app)
+Exec=$DEST/praimate-gui
+Terminal=false
+$icon_line
+Categories=Development;Utility;
+DESK
+      fi
+      command -v update-desktop-database >/dev/null 2>&1 \
+        && update-desktop-database "$apps" 2>/dev/null || true
+      # Mirror onto the Desktop when one exists.
+      local desk_dir
+      desk_dir="$(command -v xdg-user-dir >/dev/null 2>&1 && xdg-user-dir DESKTOP || echo "$HOME/Desktop")"
+      if [[ -d "$desk_dir" ]]; then
+        cp -f "$apps/praimate.desktop" "$desk_dir/" 2>/dev/null || true
+        [[ -f "$apps/praimate-gui.desktop" ]] && cp -f "$apps/praimate-gui.desktop" "$desk_dir/" 2>/dev/null || true
+        command -v gio >/dev/null 2>&1 && gio set "$desk_dir/praimate.desktop" metadata::trusted true 2>/dev/null || true
+      fi
+      c_grn "  desktop shortcuts created (app menu + Desktop)"
+      ;;
+    Darwin)
+      mkdir -p "$HOME/Applications"
+      # TUI: a .command opens Terminal and runs praimate.
+      printf '#!/bin/bash\nexec "%s/praimate"\n' "$DEST" > "$HOME/Applications/PrAImate.command"
+      chmod +x "$HOME/Applications/PrAImate.command"
+      [[ -d "$HOME/Desktop" ]] && cp -f "$HOME/Applications/PrAImate.command" "$HOME/Desktop/" 2>/dev/null || true
+      # GUI: minimal .app wrapper (only when the binary is installed).
+      if [[ -x "$DEST/praimate-gui" ]]; then
+        local app="$HOME/Applications/PrAImate GUI.app"
+        mkdir -p "$app/Contents/MacOS"
+        printf '#!/bin/bash\nexec "%s/praimate-gui"\n' "$DEST" > "$app/Contents/MacOS/PrAImate-GUI"
+        chmod +x "$app/Contents/MacOS/PrAImate-GUI"
+        cat > "$app/Contents/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleName</key><string>PrAImate GUI</string>
+  <key>CFBundleExecutable</key><string>PrAImate-GUI</string>
+  <key>CFBundleIdentifier</key><string>dev.praimate.gui</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+</dict></plist>
+PLIST
+      fi
+      c_grn "  shortcuts created in ~/Applications (and Desktop)"
+      ;;
+  esac
+}
+ICON_SRC=""
+[[ -n "${extracted:-}" && -f "${extracted:-}/praimate.png" ]] && ICON_SRC="$extracted/praimate.png"
+[[ -z "$ICON_SRC" && -n "${LOCAL_BINS:-}" && -f "${LOCAL_BINS:-}/praimate.png" ]] && ICON_SRC="$LOCAL_BINS/praimate.png"
+create_shortcuts "$ICON_SRC" || true
+
 step "Done"
 printf 'Try it:    %s -version\n' "$DEST/praimate"
 printf '(after PATH update, just `praimate -version` from any new shell)\n'

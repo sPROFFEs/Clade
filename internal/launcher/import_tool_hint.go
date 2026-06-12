@@ -13,7 +13,7 @@ import (
 
 // missingImportedToolNotes surfaces a one-line hint when a workpath
 // imports a `_common/<bundle>` whose underlying tool isn't reachable
-// from PATH or the Clade-managed prefix. Each item in returned slice
+// from PATH or the PrAImate-managed prefix. Each item in returned slice
 // is rendered by the TUI's launching screen on the next launch so the
 // user sees the one command to fix it.
 //
@@ -77,7 +77,7 @@ func missingImportedToolNotes(wp *workpath.Workpath) []string {
 }
 
 // toolReachable reports whether the named tool is callable, by PATH
-// lookup OR by direct stat in the Clade-managed prefix bin dir.
+// lookup OR by direct stat in the PrAImate-managed prefix bin dir.
 func toolReachable(t installer.Tool) bool {
 	if _, err := exec.LookPath(t.Binary); err == nil {
 		return true

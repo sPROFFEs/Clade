@@ -207,7 +207,7 @@ func candidatePaths(id AgentID, binary string) []string {
 
 // knownInstallPaths returns common per-agent locations to probe when
 // exec.LookPath returns nothing. The official install scripts for these
-// agents update the user shell rc; a Windows-native Clade
+// agents update the user shell rc; a Windows-native PrAImate
 // process never sees that PATH change.
 func knownInstallPaths(id AgentID, binary string) []string {
 	home, err := os.UserHomeDir()
@@ -238,7 +238,7 @@ func knownInstallPaths(id AgentID, binary string) []string {
 			}
 		}
 	case AgentOpenClaude:
-		// OpenClaude installs into a Clade-managed prefix (hoisted
+		// OpenClaude installs into a PrAImate-managed prefix (hoisted
 		// node-linker) to dodge its phantom @aws-sdk dependency — its
 		// bin lives at <prefix>/node_modules/.bin/openclaude, NOT on
 		// the global pnpm path. Probe there first.

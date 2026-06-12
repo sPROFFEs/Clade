@@ -63,7 +63,7 @@ capability.
 - Each entry is resolved **relative to the parent of this workpath's
   source directory** (the "templates root"), so `_common/graphify`
   resolves to `<templates-root>/_common/graphify/`.
-- Nested templates (e.g. `templates/clade-dev/workpath/`) need an
+- Nested templates (e.g. `templates/praimate-dev/workpath/`) need an
   extra `..`: use `["../_common/graphify"]`.
 - On name/path/event-collision: **the consumer wins**. A template
   tool / agent / knowledge file / hook (keyed by `event+matcher`)

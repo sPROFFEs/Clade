@@ -110,7 +110,7 @@ func (a *App) InstallCLI(cli, methodID string) error {
 // a tool/CLI installed seconds ago resolves without restarting the app
 // (and is inherited by every CLI child the GUI spawns from now on).
 func refreshManagedPaths() {
-	installer.ImportClademToolsToPath()
+	installer.ImportManagedToolsToPath()
 	installer.ImportPraimateBinToPath()
 }
 

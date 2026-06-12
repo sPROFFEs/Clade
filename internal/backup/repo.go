@@ -567,7 +567,7 @@ func stageAndCommit(ctx context.Context, dir, extraSummary string) error {
 		// fall through to commit
 	}
 	ts := time.Now().UTC().Format(time.RFC3339)
-	msg := "clade backup " + ts
+	msg := "praimate backup " + ts
 	if extraSummary != "" {
 		msg += "\n\n" + extraSummary
 	}
@@ -575,7 +575,7 @@ func stageAndCommit(ctx context.Context, dir, extraSummary string) error {
 		msg += "\n\nMachine-ID: " + mid
 	}
 	args := []string{"commit", "-m", msg,
-		"--author=Clade <clade@local>"}
+		"--author=PrAImate <praimate@local>"}
 	if r := Run(ctx, dir, args...); r.Failed() {
 		return fmt.Errorf("git commit: %s", UserError(r))
 	}
@@ -585,9 +585,9 @@ func stageAndCommit(ctx context.Context, dir, extraSummary string) error {
 // registerMemoryMergeDriver wires the MEMORY.md custom merge driver
 // into the repo's local config so .gitattributes' `merge=clade-memory`
 // hint resolves to a working program. The driver shells back to
-// `clade --merge-memory %O %A %B` which we expose as a top-level flag.
+// `praimate --merge-memory %O %A %B` which we expose as a top-level flag.
 //
-// Best-effort: a missing `clade` on PATH doesn't fail the init; git
+// Best-effort: a missing `praimate` on PATH doesn't fail the init; git
 // just falls back to standard textual merge (which produces conflict
 // markers), and the conflict popup in the Backup screen takes over.
 func registerMemoryMergeDriver(ctx context.Context, dir string) error {
@@ -611,7 +611,7 @@ func registerMemoryMergeDriver(ctx context.Context, dir string) error {
 		return nil
 	}
 	for k, v := range map[string]string{
-		"merge.clade-memory.name":   "Clade MEMORY.md concatenation merge",
+		"merge.clade-memory.name":   "PrAImate MEMORY.md concatenation merge", // id kept for existing repos
 		"merge.clade-memory.driver": cladePath + " --merge-memory %O %A %B",
 	} {
 		if r := Run(ctx, dir, "config", "--local", k, v); r.Failed() {

@@ -660,8 +660,12 @@ const (
 	// approach matches what the bot scripts use for ~/.bashrc edits
 	// and is more forgiving than the codex stripTomlTable approach
 	// when the user has multiple [providers.*] blocks.
-	deepseekBlockStart = "# >>> clade ollama config"
-	deepseekBlockEnd   = "# <<< clade ollama config"
+	deepseekBlockStart = "# >>> praimate ollama config"
+	deepseekBlockEnd   = "# <<< praimate ollama config"
+	// Legacy markers written by pre-rebrand builds — still stripped so
+	// old config blocks don't duplicate when re-applying.
+	deepseekLegacyStart = "# >>> clade ollama config"
+	deepseekLegacyEnd   = "# <<< clade ollama config"
 )
 
 // ApplyDeepSeek writes the [providers.ollama] block + top-level
@@ -737,7 +741,8 @@ func DeepSeekConfigured() bool {
 	if err != nil {
 		return false
 	}
-	return strings.Contains(string(raw), deepseekBlockStart)
+	return strings.Contains(string(raw), deepseekBlockStart) ||
+		strings.Contains(string(raw), deepseekLegacyStart)
 }
 
 // stripDeepSeekBlock removes everything between our marker comments
@@ -749,11 +754,11 @@ func stripDeepSeekBlock(body string) string {
 	skip := false
 	for _, line := range lines {
 		trim := strings.TrimSpace(line)
-		if trim == deepseekBlockStart {
+		if trim == deepseekBlockStart || trim == deepseekLegacyStart {
 			skip = true
 			continue
 		}
-		if skip && trim == deepseekBlockEnd {
+		if skip && (trim == deepseekBlockEnd || trim == deepseekLegacyEnd) {
 			skip = false
 			continue
 		}

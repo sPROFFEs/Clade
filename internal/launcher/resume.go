@@ -14,7 +14,7 @@ package launcher
 //  2. Multi-session case: the user wants to PICK which session to
 //     resume. Both claude (--resume without UUID) and codex (resume
 //     without --last) already open native interactive pickers scoped
-//     to the current cwd — way better UX than a Clade-side picker.
+//     to the current cwd — way better UX than a PrAImate-side picker.
 //
 // So the real contract is:
 //
@@ -299,7 +299,7 @@ func resumeCodex(c Chat) ResumePlan {
 	if err := os.MkdirAll(dstDir, 0o755); err != nil {
 		return ResumePlan{Note: "codex resume: mkdir " + dstDir + ": " + err.Error()}
 	}
-	basename := "rollout-" + now.Format("20060102T150405") + "-" + safeStem(uuid, "clade-"+filepath.Base(c.Root)) + ".jsonl"
+	basename := "rollout-" + now.Format("20060102T150405") + "-" + safeStem(uuid, "praimate-"+filepath.Base(c.Root)) + ".jsonl"
 	dst := filepath.Join(dstDir, basename)
 	if err := writeFileAtomic(dst, raw, 0o644); err != nil {
 		return ResumePlan{Note: "codex resume: write " + dst + ": " + err.Error()}
@@ -519,7 +519,7 @@ func writeFileAtomic(path string, data []byte, mode os.FileMode) error {
 			return errors.New("refusing to overwrite existing file with empty data")
 		}
 	}
-	tmp := path + ".clade-tmp"
+	tmp := path + ".praimate-tmp"
 	if err := os.WriteFile(tmp, data, mode); err != nil {
 		return err
 	}

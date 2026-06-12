@@ -1,4 +1,4 @@
-# `clade` — launcher reference
+# `praimate` — launcher reference
 
 For an overview, see the [top-level README](../README.md). This page
 is the technical reference: the lifecycle, the on-disk layout, the

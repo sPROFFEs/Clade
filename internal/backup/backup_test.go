@@ -41,7 +41,7 @@ func TestWriteManagedGitignore_FirstWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	body, _ := os.ReadFile(filepath.Join(dir, ".gitignore"))
-	if !strings.Contains(string(body), "Managed by Clade") {
+	if !strings.Contains(string(body), "Managed by PrAImate") {
 		t.Errorf(".gitignore should carry the Clade-managed marker:\n%s", body)
 	}
 	for _, want := range []string{"/*", "!/chats/", "!/templates/"} {
@@ -108,8 +108,8 @@ func TestInit_CreatesRepoWithManagedFilesAndInitialCommit(t *testing.T) {
 	if r.Failed() {
 		t.Errorf("git log failed after init: %s", UserError(r))
 	}
-	if !strings.Contains(r.Stdout, "clade backup") {
-		t.Errorf("initial commit should start with 'clade backup'; got %q", r.Stdout)
+	if !strings.Contains(r.Stdout, "praimate backup") {
+		t.Errorf("initial commit should start with 'praimate backup'; got %q", r.Stdout)
 	}
 }
 
@@ -222,7 +222,7 @@ func TestGitignore_RootFileIgnored(t *testing.T) {
 	_ = os.MkdirAll(filepath.Join(dir, "chats", "abc"), 0o755)
 	_ = os.WriteFile(filepath.Join(dir, "chats", "abc", "chat.json"), []byte("{}"), 0o644)
 
-	// Stage everything Clade would stage.
+	// Stage everything PrAImate would stage.
 	if err := CommitLocalChanges(ctx, dir, ""); err != nil {
 		t.Fatal(err)
 	}
@@ -236,5 +236,23 @@ func TestGitignore_RootFileIgnored(t *testing.T) {
 	}
 	if strings.Contains(tracked, "scratch.txt") {
 		t.Errorf("scratch.txt at root should NOT be tracked; tracked files:\n%s", tracked)
+	}
+}
+
+// Files written by pre-rebrand builds carry the legacy Clade marker —
+// they are still OURS to refresh, never "user-edited".
+func TestWriteManagedGitignore_RefreshesLegacyCladeMarkedFile(t *testing.T) {
+	dir := t.TempDir()
+	legacy := "# Managed by Clade — do not edit by hand.\nold content\n"
+	path := filepath.Join(dir, ".gitignore")
+	if err := os.WriteFile(path, []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteManagedGitignore(dir); err != nil {
+		t.Fatalf("legacy-marked file must be refreshable: %v", err)
+	}
+	body, _ := os.ReadFile(path)
+	if !strings.Contains(string(body), "Managed by PrAImate") {
+		t.Errorf("file not upgraded to the new managed content:\n%s", body)
 	}
 }

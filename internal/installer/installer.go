@@ -70,7 +70,7 @@ type Method struct {
 	Prereqs     []string // names probed before running ("node", "pnpm")
 
 	// ManagedPrefix, when non-empty, switches Run from "execute Command
-	// as a shell line" to "install ManagedPrefixPkg into a Clade-owned
+	// as a shell line" to "install ManagedPrefixPkg into a PrAImate-owned
 	// prefix dir named <ManagedPrefix> with a hoisted node-linker."
 	// Command is still set for display but isn't executed verbatim.
 	// Used for agents (openclaude) whose upstream package has a phantom
@@ -645,8 +645,8 @@ func buildCmd(ctx context.Context, m Method) *exec.Cmd {
 	}
 }
 
-// ManagedAgentPrefix returns the Clade-owned directory where an agent
-// with a non-standard install layout lives, alongside Clade's own
+// ManagedAgentPrefix returns the PrAImate-owned directory where an agent
+// with a non-standard install layout lives, alongside PrAImate's own
 // config under os.UserConfigDir()/clade/agents/<name>/. The agent's
 // executable ends up at <prefix>/node_modules/.bin/<name>. Used for
 // agents (openclaude) whose upstream package can't be installed cleanly
@@ -671,7 +671,7 @@ func ManagedAgentBinDir(name string) (string, error) {
 }
 
 // installIntoManagedPrefix installs m.ManagedPrefixPkg into the
-// Clade-owned prefix dir named m.ManagedPrefix using a PROJECT-LOCAL
+// PrAImate-owned prefix dir named m.ManagedPrefix using a PROJECT-LOCAL
 // `pnpm add` (not `-g`). The prefix gets a private package.json (so
 // pnpm treats it as a standalone project and doesn't walk up to a
 // parent workspace) and a `.npmrc` carrying:
@@ -780,10 +780,10 @@ func installIntoManagedPrefix(ctx context.Context, m Method, extraEnv []string, 
 //  3. CI environments where the registry default was changed at the
 //     image level.
 //
-// Pinning here forces every pnpm command Clade emits through the
+// Pinning here forces every pnpm command PrAImate emits through the
 // canonical registry regardless of those config layers. Users who
 // LEGITIMATELY use a private registry (Verdaccio, JFrog) install the
-// agent themselves outside Clade; the installer's job is to make the
+// agent themselves outside PrAImate; the installer's job is to make the
 // default path safe, not to be configurable for proxied installs.
 //
 // Note: we do NOT add --ignore-scripts globally. Several of the CLIs
@@ -812,7 +812,7 @@ func allMethods(agent AgentID, action Action, current OS) []Method {
 	//   - Registry pinning (pnpmRegistryFlag) — defends against
 	//     ~/.npmrc / env redirection. Always on.
 	//   - Version pinning — would defend against post-compromise
-	//     patches, but requires the Clade maintainer to vet+bump the
+	//     patches, but requires the PrAImate maintainer to vet+bump the
 	//     pin on every release. Not done yet: pinning to a stale
 	//     version with no upgrade plan is a worse UX than @latest
 	//     because users miss real bug fixes; pinning a placeholder
@@ -820,7 +820,7 @@ func allMethods(agent AgentID, action Action, current OS) []Method {
 	//   - --ignore-scripts — would block the postinstall vector but
 	//     also breaks OpenClaude's native-binary download. Not done.
 	//
-	// Tracking item: once Clade has a documented "vet this agent's
+	// Tracking item: once PrAImate has a documented "vet this agent's
 	// release before bumping the pin" workflow, switch from @latest
 	// to a pin on install (keeping @latest on update for the
 	// opt-back-in case).
@@ -839,7 +839,7 @@ func allMethods(agent AgentID, action Action, current OS) []Method {
 	// npm_config_node_linker for global installs (verified empirically
 	// — the global layout stays strict regardless). What DOES honor a
 	// hoisted node-linker is a project-local install. So we install
-	// openclaude into a Clade-owned prefix dir (see ManagedAgentPrefix
+	// openclaude into a PrAImate-owned prefix dir (see ManagedAgentPrefix
 	// + installIntoManagedPrefix) with a `.npmrc` carrying
 	// `node-linker=hoisted`, which flat-hoists the transitive
 	// @aws-sdk/client-bedrock-runtime to where openclaude's import can
@@ -883,7 +883,7 @@ func allMethods(agent AgentID, action Action, current OS) []Method {
 		// no winget package, no curl|bash installer — npm/pnpm is
 		// upstream's only distribution channel. We pick pnpm
 		// exclusively (skipping npm) for the registry-pinning +
-		// lockfile benefits, and install into a Clade-managed prefix
+		// lockfile benefits, and install into a PrAImate-managed prefix
 		// with a hoisted .npmrc to work around the phantom aws-sdk
 		// dependency (see the openclaudePkg comment above).
 		return []Method{

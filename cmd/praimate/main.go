@@ -1,12 +1,12 @@
-// clade is the TUI launcher for agent CLIs (Claude Code, Codex CLI,
+// praimate is the TUI launcher for agent CLIs (Claude Code, Codex CLI,
 // OpenCode) layered on top of wpc workpaths.
 //
 // Usage:
 //
-//	clade                  (interactive)
-//	clade -version
-//	clade -check-update    (report whether a newer release exists)
-//	clade -update          (download + install the latest release)
+//	praimate               (interactive)
+//	praimate -version
+//	praimate -check-update (report whether a newer release exists)
+//	praimate -update       (download + install the latest release)
 //
 // The launcher detects first run (no config), walks the user through
 // picking a workspaces root, lists / creates workspaces, detects which
@@ -109,10 +109,10 @@ func main() {
 	// when it exists on disk so agent detection finds tools installed in
 	// past sessions.
 	installer.ImportPnpmPathIfPresent()
-	// Same idea for Clade-managed tool prefixes: prepend
-	// each <config>/clade/tools/<name>/bin to PATH so wpc-staged template
+	// Same idea for PrAImate-managed tool prefixes: prepend
+	// each managed tools <name>/bin dir to PATH so wpc-staged template
 	// scripts can call those binaries by name without knowing the prefix.
-	installer.ImportClademToolsToPath()
+	installer.ImportManagedToolsToPath()
 	// And the managed standalone bin dir (<config>/praimate/bin) so
 	// praimate-code is found by agent detection and `praimate code`.
 	installer.ImportPraimateBinToPath()
@@ -136,7 +136,7 @@ func main() {
 	// Backup auto-sync on startup. Gated on the master switch + the
 	// auto-sync sub-toggle + a configured remote. When the master
 	// switch is OFF the feature is fully dormant and this branch is
-	// a no-op — Clade behaves exactly as it did pre-0.1.11.
+	// a no-op — PrAImate behaves exactly as it did pre-0.1.11.
 	if cfg != nil && cfg.BackupEnabled && cfg.BackupAutoSync && cfg.BackupRemoteURL != "" {
 		runStartupAutoSync(cfg)
 	}
@@ -170,7 +170,7 @@ func main() {
 		runExitAutoSync(root.cfg)
 	}
 
-	// Stay-in-Clade model: agent runs are handled INSIDE the Bubbletea
+	// Stay-in-PrAImate model: agent runs are handled INSIDE the Bubbletea
 	// program via tea.ExecProcess (see rootModel.Update). main() only
 	// needs to bubble fatal errors back to the shell.
 	if root.fatal != nil {
@@ -326,7 +326,7 @@ func checkMachineGuard(ctx context.Context, cfg *launcher.Config, dir string) bo
 	return false
 }
 
-// rootModel keeps the active screen and Clade-global state (the loaded
+// rootModel keeps the active screen and PrAImate-global state (the loaded
 // config, last fatal error). Agent launches are handled inline via
 // tea.ExecProcess in Update — the program no longer quits on launch.
 type rootModel struct {
@@ -379,7 +379,7 @@ func (m *rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// tea.ExecProcess hands the TTY to the agent, runs it,
 			// then calls the callback. We return its result message
 			// (agentExitedMsg) which Update handles below — staying
-			// in Clade, redrawing the chat list.
+			// in PrAImate, redrawing the chat list.
 			return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
 				sessionEnd := time.Now().UTC()
 				if ws != nil {
@@ -411,7 +411,7 @@ func (m *rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case agentExitedMsg:
 		// Agent finished. Land back on the chat list so the user can
-		// keep working in Clade. Diagnostics on the chat list will
+		// keep working in PrAImate. Diagnostics on the chat list will
 		// pick up the just-captured session via LoadRecentSummaries.
 		cfg := msg.cfg
 		if cfg == nil {
@@ -530,7 +530,7 @@ func runCheckUpdate() int {
 }
 
 // runUpdate fetches the latest release, prompts the user (unless -y is
-// set), and swaps the clade binary in place. Exits 0 on success,
+// set), and swaps the praimate binary in place. Exits 0 on success,
 // non-zero on any failure or user decline.
 func runUpdate(autoYes bool) int {
 	rel, err := updater.FetchLatest()
@@ -573,7 +573,7 @@ func runUpdate(autoYes bool) int {
 	return 0
 }
 
-// runInstallTool installs a single Clade-managed tool (e.g. graphify)
+// runInstallTool installs a single PrAImate-managed tool (e.g. graphify)
 // via the same installer.Run path the TUI Tools tab uses.
 // Streams pnpm/uv progress to stdout so the user sees what's happening.
 // Returns 0 on success, non-zero on every failure path.
@@ -605,10 +605,10 @@ func runInstallTool(name string) int {
 	m := methods[0]
 	fmt.Printf("Installing %s\n  method: %s\n  command: %s\n\n", name, m.Label, m.Command)
 	if err := installer.Run(context.Background(), m, os.Stdout, os.Stderr); err != nil {
-		fmt.Fprintf(os.Stderr, "\nclade: install %s failed: %v\n", name, err)
+		fmt.Fprintf(os.Stderr, "\npraimate: install %s failed: %v\n", name, err)
 		return 1
 	}
 	fmt.Printf("\n✓ %s installed. New chats / sandboxes will pick it up automatically.\n", name)
-	fmt.Printf("  (current Clade processes already have the bin dir on PATH via ImportClademToolsToPath)\n")
+	fmt.Printf("  (current PrAImate processes already have the bin dir on PATH via ImportManagedToolsToPath)\n")
 	return 0
 }

@@ -24,7 +24,7 @@ param(
         "darwin-amd64",
         "darwin-arm64"
     ),
-    [string] $Version = "1.1.13",
+    [string] $Version = "1.1.14",
     [string] $LdFlags = "-s -w",
     [switch] $NoArchive
 )
@@ -61,8 +61,6 @@ function Build-One($triplet) {
     & go build -trimpath -ldflags $FullLdFlags -o (Join-Path $out "praimate$ext") "./cmd/praimate"
     if ($LASTEXITCODE -ne 0) { throw "praimate build failed for $triplet" }
     # Transitional shim through 1.0.x; removed in 1.1.
-    & go build -trimpath -ldflags $FullLdFlags -o (Join-Path $out "clade$ext") "./cmd/clade"
-    if ($LASTEXITCODE -ne 0) { throw "clade shim build failed for $triplet" }
 
     # Bundle samples + docs so the binary is self-sufficient at first run.
     Copy-Item -Recurse -Force "samples" (Join-Path $out "samples")
@@ -92,7 +90,7 @@ function Build-One($triplet) {
             # forward slashes, and Go's archive/zip reads raw, so a
             # backslash-laden zip makes path.Base() return the whole
             # path. The self-updater then fails with
-            # "clade.exe not found in archive" (the 0.1.14 regression).
+            # "praimate.exe not found in archive" (the 0.1.14 regression).
             #
             # The fix is to write entries one by one with explicitly
             # normalized "/" names. Same .NET API, no auto-conversion.

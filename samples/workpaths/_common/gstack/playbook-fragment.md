@@ -6,5 +6,5 @@ When gstack is relevant:
 
 - Prefer the native gstack slash commands inside Claude Code, Codex CLI, OpenCode, or Gemini CLI when those commands are visible in the host.
 - Treat DeepSeek-TUI as unsupported unless the user has explicitly installed separate DeepSeek integration.
-- If the command is unavailable, tell the user to install the tool from Clade's Tools tab or run `clade -install-tool gstack`.
+- If the command is unavailable, tell the user to install the tool from PrAImate's Tools tab or run `praimate -install-tool gstack`.
 - Do not assume `gstack` is a normal executable workflow runner; the `gstack` command on PATH is only Clade's detection/help wrapper.

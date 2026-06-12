@@ -8,7 +8,7 @@ package main
 // Init flow: main() calls initAppCore() after loading the legacy
 // launcher.Config; if it succeeds, panes can reach the live Core via
 // getAppCore(). Init failure does NOT prevent the TUI from starting —
-// the existing Clade-style flows keep working — but the new Recipes
+// the existing PrAImate-style flows keep working — but the new Recipes
 // pane will surface the error and refuse to operate.
 
 import (

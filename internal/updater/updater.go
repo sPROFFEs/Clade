@@ -1,4 +1,4 @@
-// Package updater checks GitHub Releases for a newer clade build,
+// Package updater checks GitHub Releases for a newer praimate build,
 // downloads the matching archive for the current OS/arch, extracts the
 // binary, and swaps it in place of the running executable.
 //
@@ -136,7 +136,7 @@ func AssetForHost(rel *Release) (*Asset, error) {
 	return nil, fmt.Errorf("no release asset for %s found in %s", triplet, rel.TagName)
 }
 
-// Apply downloads the asset, extracts the clade binary, and swaps it
+// Apply downloads the asset, extracts the praimate binary, and swaps it
 // in place of the currently-running executable. On success the caller
 // should print a "restart now" line and return — the next invocation
 // runs the new binary.
@@ -243,7 +243,7 @@ func downloadToTemp(asset *Asset) (string, error) {
 	return f.Name(), nil
 }
 
-// extractBinary pulls just the clade executable out of the archive,
+// extractBinary pulls just the praimate executable out of the archive,
 // writes it to a temp file marked executable, and returns the path.
 // Archive layout (from scripts/build.sh): <triplet>/<binName> at the
 // top level — we accept the binary at any depth though, in case the

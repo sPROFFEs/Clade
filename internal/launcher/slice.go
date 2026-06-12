@@ -129,7 +129,7 @@ func MirrorOutSliceWithHome(agent Agent, sandboxDir, sessionDir, homeOverride st
 //
 // IsNewerHome, when true, signals that we should compare mtimes and
 // preserve the home-dir version if it's newer than the slice (SIGKILL
-// recovery: agent ran, wrote new turns, clade got killed before mirror-
+// recovery: agent ran, wrote new turns, praimate got killed before mirror-
 // out completed → next launch should NOT clobber those turns).
 func MirrorInSlice(agent Agent, sandboxDir, sliceRoot string, preserveNewerHome bool) MirrorResult {
 	return MirrorInSliceWithHome(agent, sandboxDir, sliceRoot, preserveNewerHome, "")
@@ -543,7 +543,7 @@ func copyFileWithMtime(src, dst string) (int64, error) {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return 0, err
 	}
-	tmp := dst + ".clade-tmp"
+	tmp := dst + ".praimate-tmp"
 	out, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
 	if err != nil {
 		return 0, err

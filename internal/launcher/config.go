@@ -1,4 +1,4 @@
-// Package launcher holds the non-UI logic the Clade TUI calls into:
+// Package launcher holds the non-UI logic the PrAImate TUI calls into:
 // user config, workspace discovery, agent CLI detection, and the
 // compile-then-spawn sequence. The split exists so the logic is testable
 // and reusable without dragging in Bubble Tea.
@@ -41,7 +41,7 @@ type Config struct {
 	// BackupRemoteURL is the configured remote when the workspaces root
 	// is being managed as a git repo. Empty = no remote configured.
 	BackupRemoteURL string `json:"backupRemoteUrl,omitempty"`
-	// BackupAutoSync, when true, fires a sync on startup and on Clade
+	// BackupAutoSync, when true, fires a sync on startup and on PrAImate
 	// exit. Off by default. Sync is a fast-forward / commit-and-push
 	// operation; divergence opens the resolution popup unless
 	// BackupForceAlwaysLocal is also true.

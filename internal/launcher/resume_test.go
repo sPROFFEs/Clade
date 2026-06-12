@@ -220,7 +220,7 @@ func TestResumeCodex_MultiNativeOpensPicker(t *testing.T) {
 
 // TestResumeCodex_SingleNativeUsesExplicitUUID: one native rollout
 // → `codex resume <uuid>`. Removes the --last race with concurrent
-// codex sessions outside Clade.
+// codex sessions outside PrAImate.
 func TestResumeCodex_SingleNativeUsesExplicitUUID(t *testing.T) {
 	tmpHome := t.TempDir()
 	withHome(t, tmpHome)

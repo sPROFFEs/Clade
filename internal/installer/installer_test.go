@@ -73,11 +73,11 @@ func TestCatalog_PnpmMethodsCarryNodePrereq(t *testing.T) {
 }
 
 // TestCatalog_PnpmMethodsPinRegistry is the supply-chain regression
-// guard: every pnpm command Clade emits must include the explicit
+// guard: every pnpm command PrAImate emits must include the explicit
 // --registry= flag pointing at registry.npmjs.org. Without it, a
 // poisoned ~/.npmrc / npm_config_registry env / project .npmrc could
 // silently redirect global installs to a malicious mirror. The flag
-// makes the registry choice non-configurable from outside Clade.
+// makes the registry choice non-configurable from outside PrAImate.
 func TestCatalog_PnpmMethodsPinRegistry(t *testing.T) {
 	wantFlag := "--registry=https://registry.npmjs.org/"
 	for _, a := range []AgentID{AgentClaude, AgentOpenClaude, AgentCodex, AgentOpenCode, AgentGemini, AgentDeepSeek} {
@@ -118,7 +118,7 @@ func TestCatalog_OpenClaudeIsPnpmOnly(t *testing.T) {
 }
 
 // TestCatalog_OpenClaudeUsesManagedPrefix locks in the phantom-dep
-// workaround: openclaude installs into a Clade-managed prefix (hoisted
+// workaround: openclaude installs into a PrAImate-managed prefix (hoisted
 // node-linker) rather than `pnpm add -g`. If a contributor "simplifies"
 // it back to a global install, openclaude crashes on launch under
 // strict pnpm — this test fails first so the reason gets re-checked.

@@ -12,4 +12,4 @@ scrapegraph-search --mode oss --prompt "Extract the pricing tiers from https://e
 
 Use API mode when `SGAI_API_KEY` is configured. Use OSS mode for local models by setting `SCRAPEGRAPH_LLM_MODEL`, `SCRAPEGRAPH_MODEL_TOKENS`, and any search-engine key such as `SERPER_API_KEY`.
 
-If `scrapegraph-search` is missing, ask the user to install ScrapeGraphAI from Clade's Tools tab or run `clade -install-tool scrapegraph`.
+If `scrapegraph-search` is missing, ask the user to install ScrapeGraphAI from PrAImate's Tools tab or run `praimate -install-tool scrapegraph`.

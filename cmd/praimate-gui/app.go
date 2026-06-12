@@ -80,7 +80,7 @@ func (a *App) startup(ctx context.Context) {
 	// (praimate-code). Without it the GUI — and every CLI child it
 	// spawns — can't resolve tools installed into the managed dirs:
 	// "graphify installs but isn't detected".
-	installer.ImportClademToolsToPath()
+	installer.ImportManagedToolsToPath()
 	installer.ImportPraimateBinToPath()
 
 	dbPath, err := store.DefaultDBPath()

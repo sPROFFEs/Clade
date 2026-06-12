@@ -84,7 +84,7 @@ func (claudeTarget) Compile(wp *workpath.Workpath, outDir string) error {
 	return nil
 }
 
-// claudeHookEvent maps the portable Clade event name to claude code's
+// claudeHookEvent maps the portable PrAImate event name to claude code's
 // own event vocabulary. Returns ("", false) when no mapping exists —
 // caller drops the hook for this target and emits a note.
 func claudeHookEvent(e workpath.HookEvent) (string, bool) {
@@ -121,7 +121,7 @@ func claudeHookEvent(e workpath.HookEvent) (string, bool) {
 //	  }
 //	}
 //
-// No-op when wp has no hooks. Always overwrites — Clade owns the file
+// No-op when wp has no hooks. Always overwrites — PrAImate owns the file
 // (no target stages anything else into it today; if a future feature
 // needs to coexist we'll add a merge step).
 func writeClaudeHooks(wp *workpath.Workpath, outDir string) error {

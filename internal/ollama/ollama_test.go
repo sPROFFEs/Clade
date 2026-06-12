@@ -631,12 +631,12 @@ func TestApplyDeepSeek_WritesManagedBlock(t *testing.T) {
 	}
 	body, _ := os.ReadFile(path)
 	for _, want := range []string{
-		"# >>> clade ollama config",
+		"# >>> praimate ollama config",
 		`provider = "ollama"`,
 		`model = "deepseek-coder:1.3b"`,
 		"[providers.ollama]",
 		`base_url = "http://192.168.1.10:11434/v1"`,
-		"# <<< clade ollama config",
+		"# <<< praimate ollama config",
 	} {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("config missing %q\n%s", want, body)
@@ -651,7 +651,7 @@ func TestApplyDeepSeek_WritesManagedBlock(t *testing.T) {
 		t.Fatal(err)
 	}
 	body2, _ := os.ReadFile(path)
-	if got := strings.Count(string(body2), "# >>> clade ollama config"); got != 1 {
+	if got := strings.Count(string(body2), "# >>> praimate ollama config"); got != 1 {
 		t.Errorf("expected exactly one managed block after re-apply, got %d:\n%s", got, body2)
 	}
 }
@@ -679,7 +679,7 @@ api_key_env = "OPENAI_API_KEY"
 		`theme = "dark"`,
 		"[providers.openai]",
 		`api_key_env = "OPENAI_API_KEY"`,
-		"# >>> clade ollama config",
+		"# >>> praimate ollama config",
 		`[providers.ollama]`,
 	} {
 		if !strings.Contains(string(body), want) {
@@ -745,3 +745,35 @@ func TestCopyTo(t *testing.T) {
 }
 
 var _ = io.Discard // keep import even if dropped in edits
+
+// A config carrying the PRE-REBRAND managed block must be replaced (not
+// duplicated) when re-applying — legacy markers are still stripped.
+func TestApplyDeepSeek_ReplacesLegacyCladeBlock(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+	path, err := DeepSeekConfigPath()
+	if err != nil {
+		t.Skipf("no deepseek config path on this platform: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	legacy := "keep_me = true\n# >>> clade ollama config\nold = \"block\"\n# <<< clade ollama config\n"
+	if err := os.WriteFile(path, []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ApplyDeepSeek(Settings{Endpoint: "127.0.0.1:11434", Model: "m"}); err != nil {
+		t.Fatal(err)
+	}
+	body, _ := os.ReadFile(path)
+	if strings.Contains(string(body), ">>> clade ollama config") {
+		t.Errorf("legacy block survived re-apply:\n%s", body)
+	}
+	if !strings.Contains(string(body), ">>> praimate ollama config") {
+		t.Errorf("new managed block missing:\n%s", body)
+	}
+	if !strings.Contains(string(body), "keep_me = true") {
+		t.Errorf("surrounding config lost:\n%s", body)
+	}
+}

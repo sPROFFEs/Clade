@@ -1,8 +1,8 @@
 package main
 
-// Tools tab — Clade-managed companion CLIs. Browser
+// Tools tab — PrAImate-managed companion CLIs. Browser
 // shape mirrors the Agents picker, but each row is an installer.Tool
-// instead of an Agent: detection probes PATH + the Clade-managed
+// instead of an Agent: detection probes PATH + the PrAImate-managed
 // prefix, Enter / 'i' routes to the per-tool install screen, which
 // streams uv / git output the same way the Agents install screen does.
 //

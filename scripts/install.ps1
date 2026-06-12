@@ -314,5 +314,33 @@ if ($parts -notcontains $Dest) {
     Info "(already on $scope PATH)"
 }
 
+
+Step "Desktop shortcuts"
+try {
+    $ws = New-Object -ComObject WScript.Shell
+    $desk = [Environment]::GetFolderPath("Desktop")
+    $startMenu = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
+    $targets = @(
+        @{ Name = "PrAImate";     Exe = (Join-Path $Dest "praimate.exe") },
+        @{ Name = "PrAImate GUI"; Exe = (Join-Path $Dest "praimate-gui.exe") }
+    )
+    foreach ($t in $targets) {
+        if (Test-Path $t.Exe) {
+            foreach ($dir in @($desk, $startMenu)) {
+                if (Test-Path $dir) {
+                    $lnk = $ws.CreateShortcut((Join-Path $dir ("{0}.lnk" -f $t.Name)))
+                    $lnk.TargetPath = $t.Exe
+                    $lnk.WorkingDirectory = $Dest
+                    $lnk.IconLocation = "$($t.Exe),0"
+                    $lnk.Save()
+                }
+            }
+            Write-Host ("  v {0} shortcut (Desktop + Start Menu)" -f $t.Name) -ForegroundColor Green
+        }
+    }
+} catch {
+    Warn "couldn't create shortcuts: $($_.Exception.Message)"
+}
+
 Step "Done"
 Write-Host "Open a new terminal, then try:    praimate -version"

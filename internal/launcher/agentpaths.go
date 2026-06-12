@@ -7,7 +7,7 @@ package launcher
 // Linux, macOS, and Windows without per-OS branching at every call
 // site.
 //
-// The store paths are *agent stores*, not Clade's own config dir.
+// The store paths are *agent stores*, not PrAImate's own config dir.
 // Every supported agent installs its own session store under the user's
 // home dir using its own conventions:
 //

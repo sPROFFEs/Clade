@@ -36,7 +36,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-VERSION="${VERSION:-1.1.13}"
+VERSION="${VERSION:-1.1.14}"
 EXTRA_LDFLAGS="${LDFLAGS:--s -w}"  # strip symbols by default — tiny binaries
 ARCHIVE=1
 WITH_GUI=0
@@ -92,10 +92,6 @@ build_one() {
     go build -trimpath -ldflags "$LDFLAGS" -o "$out/wpc$ext" ./cmd/wpc
   GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 \
     go build -trimpath -ldflags "$LDFLAGS" -o "$out/praimate$ext" ./cmd/praimate
-  # Transitional shim: `clade` execs `praimate` with a deprecation
-  # note. Ships through the 1.0.x series, removed in 1.1.
-  GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 \
-    go build -trimpath -ldflags "$LDFLAGS" -o "$out/clade$ext" ./cmd/clade
 
   # GUI: native target (full cgo) + windows-amd64 (pure-Go cross).
   if [ "$WITH_GUI" = "1" ]; then
@@ -133,6 +129,9 @@ build_one() {
   # Ship samples + activation docs next to the binaries so the bundle is
   # self-contained — first-run can seed from the same directory.
   cp -R samples "$out/"
+  # App icon at the bundle root — install.sh uses it for the Linux
+  # .desktop shortcuts (Windows/macOS get icons from the binaries).
+  cp cmd/praimate-gui/frontend/src/assets/praimate.png "$out/praimate.png" 2>/dev/null || true
   mkdir -p "$out/docs"
   cp docs/ACTIVATION.md docs/TARGETS.md docs/SCHEMA.md docs/QUICKSTART.md "$out/docs/"
   cp README.md LICENSE "$out/"

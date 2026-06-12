@@ -32,11 +32,11 @@ func TestAssetForHost(t *testing.T) {
 	rel := &Release{
 		TagName: "v0.2.0",
 		Assets: []Asset{
-			{Name: "clade-0.2.0-linux-amd64.tar.gz", BrowserDownloadURL: "u1"},
-			{Name: "clade-0.2.0-linux-arm64.tar.gz", BrowserDownloadURL: "u2"},
-			{Name: "clade-0.2.0-darwin-amd64.tar.gz", BrowserDownloadURL: "u3"},
-			{Name: "clade-0.2.0-darwin-arm64.tar.gz", BrowserDownloadURL: "u4"},
-			{Name: "clade-0.2.0-windows-amd64.zip", BrowserDownloadURL: "u5"},
+			{Name: "praimate-0.2.0-linux-amd64.tar.gz", BrowserDownloadURL: "u1"},
+			{Name: "praimate-0.2.0-linux-arm64.tar.gz", BrowserDownloadURL: "u2"},
+			{Name: "praimate-0.2.0-darwin-amd64.tar.gz", BrowserDownloadURL: "u3"},
+			{Name: "praimate-0.2.0-darwin-arm64.tar.gz", BrowserDownloadURL: "u4"},
+			{Name: "praimate-0.2.0-windows-amd64.zip", BrowserDownloadURL: "u5"},
 		},
 	}
 	a, err := AssetForHost(rel)
@@ -52,7 +52,7 @@ func TestAssetForHost(t *testing.T) {
 func TestAssetForHost_NoMatch(t *testing.T) {
 	rel := &Release{
 		TagName: "v0.2.0",
-		Assets:  []Asset{{Name: "clade-0.2.0-plan9-mips.tar.gz"}},
+		Assets:  []Asset{{Name: "praimate-0.2.0-plan9-mips.tar.gz"}},
 	}
 	if _, err := AssetForHost(rel); err == nil {
 		t.Fatalf("expected error when no asset matches host")
