@@ -362,6 +362,12 @@
     return String(p).split(/[\\/]/).pop()
   }
 
+  // Studio sends append a focused-file context block for the model —
+  // hide it when showing the transcript to the human.
+  function cleanMsg(s) {
+    return String(s).replace(/\n*\[The user is looking at:[^\]]*\]\s*$/, '')
+  }
+
   function isImg(p) {
     return /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(String(p))
   }
@@ -465,6 +471,7 @@
       {:else}
         <div class="msg {m.Role === 'user' ? 'user' : 'assistant'}" class:pending={m._pending}>
           <div class="who">{m.Role}{m.TS ? ' · ' + fmtDate(m.TS) : ''}{m.Meta?.interrupted ? ' · interrupted' : ''}</div>
+          <!-- content rendered below; studio context block stripped -->
           {#if m.Meta?.activity?.length}
             <div class="tool-feed">
               {#each m.Meta.activity as t}
@@ -476,7 +483,7 @@
               {/each}
             </div>
           {/if}
-          {m.Content}
+          {cleanMsg(m.Content)}
           {#if m.Meta?.attachments}
             <div class="att-row">
               {#each m.Meta.attachments as path}

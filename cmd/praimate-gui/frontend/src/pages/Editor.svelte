@@ -172,6 +172,15 @@
 
   // --- right-click → ask the agent about the selection ----------------------
 
+  // portal: render the node as a direct child of <body>. CodeMirror
+  // builds its own stacking contexts inside the grid; a popup that
+  // stays nested can lose the z-order war in WebKit no matter its
+  // z-index. From <body> there is no war.
+  function portal(node) {
+    document.body.appendChild(node)
+    return { destroy() { node.remove() } }
+  }
+
   let ask = null // {text, fromLine, toLine, x, y, custom}
   const ASK_ACTIONS = [
     'Improve the writing',
@@ -306,6 +315,16 @@
     try { return new Date(s).toLocaleTimeString() } catch { return s }
   }
 
+  // The focused-file context suffix is for the model, not the human —
+  // hide it in the transcript.
+  function cleanMsg(s) {
+    return String(s).replace(/\n*\[The user is looking at:[^\]]*\]\s*$/, '')
+  }
+
+  function onWindowKey(e) {
+    if (e.key === 'Escape' && ask) ask = null
+  }
+
   let unsubFs = () => {}
   onMount(async () => {
     unsubStream = onChatStream(handleStreamEvent)
@@ -325,6 +344,8 @@
 
   $: activeTab = tabs.find((t) => t.path === active)
 </script>
+
+<svelte:window on:keydown={onWindowKey} />
 
 <div class="studio" style="grid-template-columns: {gridCols}">
   {#if !treeOpen}
@@ -403,21 +424,28 @@
   </section>
 
   {#if ask}
-    <div class="ask-popup" style="left:{ask.x}px; top:{ask.y}px">
-      <div class="ask-head">Ask the agent — lines {ask.fromLine}–{ask.toLine}</div>
-      {#each ASK_ACTIONS as act}
-        <button class="ask-act" on:click={() => askAgent(act)} disabled={sending}>{act}</button>
-      {/each}
-      <div class="row" style="gap:4px; margin-top:6px">
-        <input
-          class="field grow"
-          style="font-size:12px; padding:4px 6px"
-          placeholder="Or tell it what to do…"
-          bind:value={ask.custom}
-          on:keydown={(e) => e.key === 'Enter' && askAgent(ask.custom)} />
-        <button class="btn sm primary" on:click={() => askAgent(ask.custom)} disabled={!ask.custom.trim()}>Go</button>
+    <div use:portal>
+      <div
+        class="ask-backdrop"
+        role="presentation"
+        on:click={() => (ask = null)}
+        on:contextmenu|preventDefault={() => (ask = null)}></div>
+      <div class="ask-popup" style="left:{ask.x}px; top:{ask.y}px" role="menu">
+        <div class="ask-head">Ask the agent — lines {ask.fromLine}–{ask.toLine}</div>
+        {#each ASK_ACTIONS as act}
+          <button class="ask-act" on:click={() => askAgent(act)} disabled={sending}>{act}</button>
+        {/each}
+        <div class="ask-free">
+          <input
+            class="field grow"
+            style="font-size:12px; padding:4px 6px"
+            placeholder="Or tell it what to do…"
+            bind:value={ask.custom}
+            on:keydown={(e) => e.key === 'Enter' && askAgent(ask.custom)} />
+          <button class="btn sm primary" on:click={() => askAgent(ask.custom)} disabled={!ask.custom.trim()}>Go</button>
+        </div>
+        <button class="ask-close" on:click={() => (ask = null)}>×</button>
       </div>
-      <button class="ask-close" on:click={() => (ask = null)}>×</button>
     </div>
   {/if}
 
@@ -434,7 +462,7 @@
       {#each messages as m}
         <div class="msg {m.Role === 'user' ? 'user' : 'assistant'}" class:pending={m._pending}>
           <div class="who">{m.Role}{m.TS ? ' · ' + fmtDate(m.TS) : ''}</div>
-          {m.Content}
+          {cleanMsg(m.Content)}
         </div>
       {/each}
       {#if sending}
@@ -636,9 +664,14 @@
     vertical-align: -1px;
     accent-color: var(--accent, #7c6cf2);
   }
+  .ask-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    background: transparent;
+  }
   .ask-popup {
     position: fixed;
-    /* Above CodeMirror's internal layers (tooltips/panels go to ~300). */
     z-index: 10000;
     width: 300px;
     background: var(--panel);
@@ -646,8 +679,9 @@
     border-radius: var(--radius);
     box-shadow: 0 8px 30px rgba(0,0,0,0.45);
     padding: 10px;
+    isolation: isolate;
   }
-  .ask-head { font-size: 12px; color: var(--text-dim); margin-bottom: 6px; }
+  .ask-head { font-size: 12px; color: var(--text-dim); margin-bottom: 6px; padding-right: 18px; }
   .ask-act {
     display: block;
     width: 100%;
@@ -656,11 +690,13 @@
     border: none;
     color: var(--text);
     font-size: 13px;
-    padding: 5px 6px;
+    padding: 6px 8px;
     border-radius: 6px;
     cursor: pointer;
+    line-height: 1.3;
   }
-  .ask-act:hover { background: var(--raised, rgba(255,255,255,0.08)); }
+  .ask-act:hover { background: var(--raised, rgba(127,127,127,0.15)); }
+  .ask-free { display: flex; gap: 4px; margin-top: 8px; align-items: center; }
   .ask-close {
     position: absolute;
     top: 6px;
