@@ -171,17 +171,13 @@
   $: previewHTML = preview && activeTab ? renderMD(activeTab.content) : ''
 
   // --- right-click → ask the agent about the selection ----------------------
+  //
+  // Rendered as a DOCKED CARD at the top of the chat pane, not a
+  // floating popup over the document: WebKit's compositor on broken
+  // GPU drivers paints editor layers over overlays regardless of
+  // z-index, so the only artifact-proof place is outside the editor.
 
-  // portal: render the node as a direct child of <body>. CodeMirror
-  // builds its own stacking contexts inside the grid; a popup that
-  // stays nested can lose the z-order war in WebKit no matter its
-  // z-index. From <body> there is no war.
-  function portal(node) {
-    document.body.appendChild(node)
-    return { destroy() { node.remove() } }
-  }
-
-  let ask = null // {text, fromLine, toLine, x, y, custom}
+  let ask = null // {text, fromLine, toLine, custom}
   const ASK_ACTIONS = [
     'Improve the writing',
     'Fix grammar and spelling',
@@ -192,14 +188,9 @@
   ]
 
   function onAskCtx(e) {
-    const d = e.detail
-    // Clamp the popup inside the window.
-    ask = {
-      ...d,
-      x: Math.min(d.x, window.innerWidth - 320),
-      y: Math.min(d.y, window.innerHeight - 280),
-      custom: '',
-    }
+    ask = { ...e.detail, custom: '' }
+    // The card lives in the chat pane — make sure it's visible.
+    chatOpen = true
   }
 
   async function askAgent(instruction) {
@@ -423,31 +414,6 @@
     {/if}
   </section>
 
-  {#if ask}
-    <div use:portal>
-      <div
-        class="ask-backdrop"
-        role="presentation"
-        on:click={() => (ask = null)}
-        on:contextmenu|preventDefault={() => (ask = null)}></div>
-      <div class="ask-popup" style="left:{ask.x}px; top:{ask.y}px" role="menu">
-        <div class="ask-head">Ask the agent — lines {ask.fromLine}–{ask.toLine}</div>
-        {#each ASK_ACTIONS as act}
-          <button class="ask-act" on:click={() => askAgent(act)} disabled={sending}>{act}</button>
-        {/each}
-        <div class="ask-free">
-          <input
-            class="field grow"
-            style="font-size:12px; padding:4px 6px"
-            placeholder="Or tell it what to do…"
-            bind:value={ask.custom}
-            on:keydown={(e) => e.key === 'Enter' && askAgent(ask.custom)} />
-          <button class="btn sm primary" on:click={() => askAgent(ask.custom)} disabled={!ask.custom.trim()}>Go</button>
-        </div>
-        <button class="ask-close" on:click={() => (ask = null)}>×</button>
-      </div>
-    </div>
-  {/if}
 
   {#if !chatOpen}
     <button class="rail" title="Show agent chat" on:click={() => (chatOpen = true)}>◂<span class="rail-label">Chat</span></button>
@@ -458,6 +424,29 @@
       <span class="pill">{chat?.CLIAgent || ''}</span>
       <button class="btn sm" title="Hide chat" on:click={() => (chatOpen = false)}>▸</button>
     </div>
+    {#if ask}
+      <div class="ask-card">
+        <div class="ask-head">
+          Selection — lines {ask.fromLine}–{ask.toLine}
+          <button class="ask-close" on:click={() => (ask = null)}>×</button>
+        </div>
+        <div class="ask-snippet mono">{ask.text.length > 120 ? ask.text.slice(0, 120) + '…' : ask.text}</div>
+        <div class="ask-actions">
+          {#each ASK_ACTIONS as act}
+            <button class="ask-act" on:click={() => askAgent(act)} disabled={sending}>{act}</button>
+          {/each}
+        </div>
+        <div class="ask-free">
+          <input
+            class="field grow"
+            style="font-size:12px; padding:4px 6px"
+            placeholder="Or tell it what to do…"
+            bind:value={ask.custom}
+            on:keydown={(e) => e.key === 'Enter' && askAgent(ask.custom)} />
+          <button class="btn sm primary" on:click={() => askAgent(ask.custom)} disabled={!ask.custom.trim()}>Go</button>
+        </div>
+      </div>
+    {/if}
     <div class="thread" bind:this={threadEl}>
       {#each messages as m}
         <div class="msg {m.Role === 'user' ? 'user' : 'assistant'}" class:pending={m._pending}>
@@ -664,43 +653,45 @@
     vertical-align: -1px;
     accent-color: var(--accent, #7c6cf2);
   }
-  .ask-backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 9999;
-    background: transparent;
+  .ask-card {
+    border: 1px solid var(--accent, #7c6cf2);
+    border-radius: var(--radius);
+    background: var(--bg);
+    padding: 8px 10px;
+    margin-bottom: 8px;
   }
-  .ask-popup {
-    position: fixed;
-    z-index: 10000;
-    width: 300px;
+  .ask-head {
+    font-size: 12px;
+    color: var(--text-dim);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .ask-snippet {
+    font-size: 11px;
+    color: var(--text-dim);
+    border-left: 2px solid var(--border);
+    padding-left: 8px;
+    margin: 6px 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 56px;
+    overflow: hidden;
+  }
+  .ask-actions { display: flex; flex-wrap: wrap; gap: 4px; }
+  .ask-act {
     background: var(--panel);
     border: 1px solid var(--border);
-    border-radius: var(--radius);
-    box-shadow: 0 8px 30px rgba(0,0,0,0.45);
-    padding: 10px;
-    isolation: isolate;
-  }
-  .ask-head { font-size: 12px; color: var(--text-dim); margin-bottom: 6px; padding-right: 18px; }
-  .ask-act {
-    display: block;
-    width: 100%;
-    text-align: left;
-    background: none;
-    border: none;
+    border-radius: 999px;
     color: var(--text);
-    font-size: 13px;
-    padding: 6px 8px;
-    border-radius: 6px;
+    font-size: 12px;
+    padding: 3px 10px;
     cursor: pointer;
     line-height: 1.3;
   }
   .ask-act:hover { background: var(--raised, rgba(127,127,127,0.15)); }
   .ask-free { display: flex; gap: 4px; margin-top: 8px; align-items: center; }
   .ask-close {
-    position: absolute;
-    top: 6px;
-    right: 8px;
     background: none;
     border: none;
     color: var(--text-dim);

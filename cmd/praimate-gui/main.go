@@ -13,6 +13,7 @@ package main
 import (
 	"embed"
 	"os"
+	"runtime"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -45,6 +46,15 @@ func main() {
 			}
 		}
 		os.Exit(runApprovalShim(os.Stdin, os.Stdout, endpoint, token))
+	}
+
+	// WebKitGTK's accelerated compositing misorders layers on machines
+	// with broken GPU drivers (VMs especially): composited editor
+	// content paints OVER fixed overlays regardless of z-index. CPU
+	// rendering is plenty for this UI — disable compositing outright.
+	// No-op on Windows/macOS (different webviews).
+	if runtime.GOOS == "linux" && os.Getenv("WEBKIT_DISABLE_COMPOSITING_MODE") == "" {
+		_ = os.Setenv("WEBKIT_DISABLE_COMPOSITING_MODE", "1")
 	}
 
 	// Studio mode: `praimate-gui -editor <folder> -editor-chat <id>`
