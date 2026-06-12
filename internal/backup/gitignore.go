@@ -38,9 +38,12 @@ const managedGitignoreContent = `# Managed by Clade — do not edit by hand.
 # Ignore everything at the root.
 /*
 
-# Un-ignore the two tracked dirs and these managed metadata files.
+# Un-ignore the tracked dirs and these managed metadata files.
+# .praimate-state/ carries the DB snapshot + shareable config so other
+# machines can import the same chats/agents/settings.
 !/chats/
 !/templates/
+!/.praimate-state/
 !/.gitignore
 !/.gitattributes
 `
@@ -51,6 +54,11 @@ const managedGitattributesContent = `# Managed by Clade — do not edit by hand.
 
 chats/*/MEMORY.md merge=clade-memory
 templates/*/workpath/MEMORY.md merge=clade-memory
+
+# State snapshots: take the remote side on merge conflicts (binary
+# db.sqlite can't textual-merge); the importer row-merges the remote
+# snapshot into the live DB so local rows are never lost.
+.praimate-state/** merge=praimate-theirs
 `
 
 const cladeManagedMarker = "# Managed by Clade — do not edit by hand."

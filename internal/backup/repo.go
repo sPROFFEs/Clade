@@ -124,6 +124,10 @@ func Clone(ctx context.Context, url, dir string) error {
 	if err := registerMemoryMergeDriver(ctx, dir); err != nil {
 		return err
 	}
+	// First-clone onboarding: merge the remote's state snapshot into
+	// this machine's live DB so chats/agents/settings show up
+	// immediately. Best-effort.
+	_ = importState(ctx, dir)
 	return nil
 }
 
@@ -309,13 +313,14 @@ func Sync(ctx context.Context, dir string) (SyncAction, Status, error) {
 	if !st.HasRemote {
 		return SyncActionNoRemote, st, nil
 	}
-	// Commit any local changes first.
-	if !st.Clean {
-		if err := stageAndCommit(ctx, dir, ""); err != nil {
-			return "", st, err
-		}
-		st, _ = CurrentStatus(ctx, dir)
+	// Commit any local changes first. Always run the stage step — even
+	// on a clean working tree the DB may have changed since the last
+	// snapshot, and stageAndCommit re-exports state before staging
+	// (it's a no-op commit-wise when nothing actually changed).
+	if err := stageAndCommit(ctx, dir, ""); err != nil {
+		return "", st, err
 	}
+	st, _ = CurrentStatus(ctx, dir)
 	// Detect "remote branch doesn't exist yet" (initial push case).
 	// `git rev-list HEAD...origin/<branch>` fails with unknown ref →
 	// CurrentStatus reports Ahead/Behind both 0, which would make us
@@ -410,6 +415,9 @@ func Pull(ctx context.Context, dir string, ffOnly bool) error {
 	if r.Failed() {
 		return fmt.Errorf("git pull failed: %s", UserError(r))
 	}
+	// Remote content just landed — merge its state snapshot into the
+	// live DB / config. Best-effort.
+	_ = importState(ctx, dir)
 	return nil
 }
 
@@ -429,6 +437,7 @@ func MergeFromRemote(ctx context.Context, dir string) error {
 		}
 		return fmt.Errorf("git merge failed: %s", UserError(r))
 	}
+	_ = importState(ctx, dir)
 	return nil
 }
 
@@ -446,6 +455,7 @@ func RebaseOntoRemote(ctx context.Context, dir string) error {
 		}
 		return fmt.Errorf("git rebase failed: %s", UserError(r))
 	}
+	_ = importState(ctx, dir)
 	return nil
 }
 
@@ -473,6 +483,10 @@ func ResetHardToRemote(ctx context.Context, dir string) error {
 	if r.Failed() {
 		return fmt.Errorf("git reset --hard failed: %s", UserError(r))
 	}
+	// The git history was reset to remote, but the live DB still holds
+	// this machine's rows — the import row-merges the remote snapshot
+	// on top, so "reset" loses git history without losing local chats.
+	_ = importState(ctx, dir)
 	return nil
 }
 
@@ -530,13 +544,17 @@ func stageAndCommit(ctx context.Context, dir, extraSummary string) error {
 	// case where the user manually deleted .gitignore.
 	_ = WriteManagedGitignore(dir)
 	_ = WriteManagedGitattributes(dir)
-	// Make sure the two tracked subdirs exist so git add doesn't
+	// Make sure the tracked subdirs exist so git add doesn't
 	// error on first-init repos that haven't created anything yet.
-	for _, sub := range []string{"chats", "templates"} {
+	for _, sub := range []string{"chats", "templates", ".praimate-state"} {
 		_ = os.MkdirAll(filepath.Join(dir, sub), 0o755)
 	}
+	// Snapshot the live DB + shareable config into .praimate-state/ so
+	// the commit carries them. Best-effort: a failed export must not
+	// block syncing the on-disk sandboxes.
+	_ = exportState(ctx, dir)
 	// Stage. `--all` flag picks up deletions too.
-	r := Run(ctx, dir, "add", "--all", ".gitignore", ".gitattributes", "chats", "templates")
+	r := Run(ctx, dir, "add", "--all", ".gitignore", ".gitattributes", "chats", "templates", ".praimate-state")
 	if r.Failed() {
 		return fmt.Errorf("git add: %s", UserError(r))
 	}
@@ -573,9 +591,23 @@ func stageAndCommit(ctx context.Context, dir, extraSummary string) error {
 // just falls back to standard textual merge (which produces conflict
 // markers), and the conflict popup in the Backup screen takes over.
 func registerMemoryMergeDriver(ctx context.Context, dir string) error {
+	// The state-snapshot driver needs no external binary — register it
+	// unconditionally. "Theirs" (remote wins in the working tree) is
+	// correct for .praimate-state/: the remote snapshot gets row-merged
+	// into the live DB by importState, so local rows survive in the DB
+	// and the next export re-commits the union. Without this driver a
+	// binary db.sqlite conflict would wedge every two-host merge.
+	for k, v := range map[string]string{
+		"merge.praimate-theirs.name":   "PrAImate state snapshot (remote wins; DB row-merge follows)",
+		"merge.praimate-theirs.driver": "cp %B %A",
+	} {
+		if r := Run(ctx, dir, "config", "--local", k, v); r.Failed() {
+			return fmt.Errorf("git config %s: %s", k, UserError(r))
+		}
+	}
 	cladePath, err := exec.LookPath("praimate")
 	if err != nil {
-		// Best-effort. Skip the merge driver but don't fail init.
+		// Best-effort. Skip the memory merge driver but don't fail init.
 		return nil
 	}
 	for k, v := range map[string]string{

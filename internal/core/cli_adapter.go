@@ -34,6 +34,46 @@ type SingleShotOpts struct {
 	// Env extends the parent process environment for the child run.
 	// Used for per-launch routing (e.g. local-LLM endpoint overrides).
 	Env map[string]string
+
+	// Tools selects how much the CLI's agent may DO during the turn:
+	//   ""      — the CLI's default (headless modes typically deny
+	//             file edits and shell commands without approval).
+	//   "ask"   — route each permission request to the user mid-turn.
+	//             Only claude/openclaude support this headlessly (via
+	//             --permission-prompt-tool + the approval shim in
+	//             Approval); other CLIs treat it as "".
+	//   "edits" — auto-approve file edits in the working directory
+	//             (claude --permission-mode acceptEdits,
+	//             codex --sandbox workspace-write).
+	//   "full"  — skip approvals entirely (claude --permission-mode
+	//             bypassPermissions, codex
+	//             --dangerously-bypass-approvals-and-sandbox). The user
+	//             opts in per chat; never default to this.
+	// Adapters whose CLI has no such flags (opencode, deepseek) ignore
+	// it; gemini already runs --approval-mode yolo in headless mode.
+	Tools string
+
+	// Approval wires the "ask" level: how to spawn the MCP approval
+	// shim that forwards permission requests to the UI. Nil = "ask"
+	// degrades to "".
+	Approval *ApprovalConfig
+}
+
+// ResumeOpts groups the per-turn parameters for CLIAdapter.Resume.
+// Mirrors the SingleShotOpts fields that must be re-sent every turn
+// (resumed sessions don't remember flags from earlier invocations).
+type ResumeOpts struct {
+	// Message is the new user turn.
+	Message string
+	// Model re-pins the model ("" = CLI default). Same semantics as
+	// SingleShotOpts.Model.
+	Model string
+	// Tools re-pins the permission level. Same semantics as
+	// SingleShotOpts.Tools.
+	Tools string
+	// Approval re-pins the "ask" wiring. Same semantics as
+	// SingleShotOpts.Approval.
+	Approval *ApprovalConfig
 }
 
 // Reply is what a CLI adapter returns after one turn. Fields beyond
@@ -78,10 +118,10 @@ type CLIAdapter interface {
 	SupportsResume() bool
 
 	// Resume continues a session started by a prior SingleShot/Resume
-	// call. model, if non-empty, re-pins the model for this turn (same
-	// semantics as SingleShotOpts.Model). Returns an error if
-	// SupportsResume() is false.
-	Resume(ctx context.Context, sessionID, message, model string) (*Reply, error)
+	// call. opts re-pins the per-turn parameters (model, tools) —
+	// resumed sessions fall back to CLI defaults unless told otherwise.
+	// Returns an error if SupportsResume() is false.
+	Resume(ctx context.Context, sessionID string, opts ResumeOpts) (*Reply, error)
 }
 
 // adapterRegistry holds the live set of adapters keyed by Name(). Use

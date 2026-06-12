@@ -70,6 +70,7 @@ func Run(ctx context.Context, dir string, args ...string) Result {
 		return Result{Err: ErrGitNotInstalled}
 	}
 	cmd := exec.CommandContext(ctx, "git", args...)
+	hideConsole(cmd)
 	if dir != "" {
 		cmd.Dir = dir
 	}

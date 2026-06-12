@@ -11,14 +11,21 @@ package core
 //   db.sqlite        consistent VACUUM INTO snapshot of the live DB
 //   agents/<id>.yaml exported agent definitions (portable, human-readable)
 //
-// Importing this back (after a restore/clone) is a follow-up; the
-// snapshot alone makes the backup complete and recoverable.
+// ImportBackupState is the other direction: after a clone/pull brings a
+// remote machine's snapshot into the repo, it row-merges that snapshot
+// into the live DB (newer-updated_at wins for keyed rows; append-only
+// tables dedupe on a natural key). Together the pair gives multi-host
+// sharing: git moves the snapshot, the importer merges it.
 
 import (
+	"bytes"
 	"context"
+	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 )
 
 // BackupStateDir is the conventional subdir name inside the backup repo.
@@ -35,9 +42,19 @@ func (c *Core) ExportBackupState(ctx context.Context, repoDir string) error {
 		return fmt.Errorf("export backup state: mkdir: %w", err)
 	}
 
-	// 1. Consistent DB snapshot (WAL-safe via VACUUM INTO).
-	if err := c.store.Snapshot(ctx, filepath.Join(stateDir, "db.sqlite")); err != nil {
+	// 1. Consistent DB snapshot (WAL-safe via VACUUM INTO). Snapshot to
+	// a sidecar first and only replace the committed file when the bytes
+	// actually changed — otherwise every sync would commit a fresh
+	// binary blob and two idle machines would ping-pong commits forever.
+	dbDest := filepath.Join(stateDir, "db.sqlite")
+	dbTmp := dbDest + ".tmp"
+	if err := c.store.Snapshot(ctx, dbTmp); err != nil {
 		return fmt.Errorf("export backup state: db snapshot: %w", err)
+	}
+	if same, _ := filesEqual(dbDest, dbTmp); same {
+		_ = os.Remove(dbTmp)
+	} else if err := os.Rename(dbTmp, dbDest); err != nil {
+		return fmt.Errorf("export backup state: replace snapshot: %w", err)
 	}
 
 	// 2. Agents as portable YAML. Rewritten each time; stale files for
@@ -70,4 +87,243 @@ func (c *Core) ExportBackupState(ctx context.Context, repoDir string) error {
 		}
 	}
 	return nil
+}
+
+// mergeTableSpec describes how one table's rows from a remote snapshot
+// merge into the live DB. Two strategies:
+//   - updatedAt set: keyed upsert — insert when the key is absent,
+//     overwrite when the remote row's updated_at is strictly newer.
+//   - updatedAt empty: append-only — insert when the natural key is
+//     absent, never touch existing rows.
+//
+// skipCols lists columns that must not travel across hosts (sqlite
+// AUTOINCREMENT ids would collide).
+//
+// Deliberately absent: schedules and watchers (they reference
+// host-local filesystem paths), and any deletion propagation — a row
+// deleted on one host can reappear after importing another host's
+// snapshot. Tombstones are a follow-up if that bites.
+type mergeTableSpec struct {
+	name      string
+	key       []string
+	updatedAt string
+	skipCols  []string
+}
+
+// mergeTables lists the synced tables in FK-safe insert order (chats
+// before messages / memory_episodes).
+var mergeTables = []mergeTableSpec{
+	{name: "agents", key: []string{"id"}, updatedAt: "updated_at"},
+	{name: "chats", key: []string{"id"}, updatedAt: "updated_at"},
+	{name: "messages", key: []string{"chat_id", "ts", "role", "content"}, skipCols: []string{"id"}},
+	{name: "mcp_servers", key: []string{"id"}},
+	{name: "settings_cli", key: []string{"key"}, updatedAt: "updated_at"},
+	{name: "settings_gui", key: []string{"key"}, updatedAt: "updated_at"},
+	{name: "memory_identity", key: []string{"key"}, updatedAt: "updated_at"},
+	{name: "memory_pinned", key: []string{"text", "created_at"}, skipCols: []string{"id"}},
+	{name: "memory_episodes", key: []string{"summary", "created_at"}, skipCols: []string{"id"}},
+}
+
+// ImportBackupState row-merges the snapshot at
+// <repoDir>/.praimate-state/db.sqlite into the live DB. Missing
+// snapshot = nil (nothing to import — e.g. the remote predates this
+// feature). Per-row failures (FK violations on chats deleted locally,
+// schema drift) are tolerated and counted; the import keeps going so
+// one bad row can't block a whole machine's chats from arriving.
+func (c *Core) ImportBackupState(ctx context.Context, repoDir string) error {
+	if c.store == nil {
+		return nil
+	}
+	snapPath := filepath.Join(repoDir, BackupStateDir, "db.sqlite")
+	if _, err := os.Stat(snapPath); err != nil {
+		return nil
+	}
+	snap, err := sql.Open("sqlite", "file:"+snapPath+"?mode=ro&_pragma=busy_timeout(5000)")
+	if err != nil {
+		return fmt.Errorf("import backup state: open snapshot: %w", err)
+	}
+	defer snap.Close()
+
+	live := c.store.DB()
+	var firstErr error
+	for _, spec := range mergeTables {
+		if err := mergeTable(ctx, live, snap, spec); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("import backup state: %s: %w", spec.name, err)
+		}
+	}
+	return firstErr
+}
+
+// mergeTable applies one table's merge strategy. Columns are read from
+// the snapshot and intersected with the live table's columns, so a
+// snapshot written by a newer or older PrAImate version degrades to the
+// shared column set instead of failing.
+func mergeTable(ctx context.Context, live, snap *sql.DB, spec mergeTableSpec) error {
+	snapCols, err := tableColumns(ctx, snap, spec.name)
+	if err != nil {
+		return nil // table absent in snapshot — older remote version
+	}
+	liveCols, err := tableColumns(ctx, live, spec.name)
+	if err != nil {
+		return fmt.Errorf("live table columns: %w", err)
+	}
+	skip := map[string]bool{}
+	for _, c := range spec.skipCols {
+		skip[c] = true
+	}
+	var cols []string
+	for col := range snapCols {
+		if liveCols[col] && !skip[col] {
+			cols = append(cols, col)
+		}
+	}
+	sort.Strings(cols)
+	for _, k := range spec.key {
+		if !containsStr(cols, k) {
+			return nil // key column missing — can't merge safely
+		}
+	}
+
+	rows, err := snap.QueryContext(ctx, "SELECT "+quoteCols(cols)+" FROM "+spec.name)
+	if err != nil {
+		return fmt.Errorf("read snapshot rows: %w", err)
+	}
+	defer rows.Close()
+
+	insertSQL := "INSERT INTO " + spec.name + " (" + quoteCols(cols) + ") VALUES (" +
+		strings.TrimSuffix(strings.Repeat("?,", len(cols)), ",") + ")"
+	whereSQL, keyIdx := buildKeyWhere(cols, spec.key)
+
+	for rows.Next() {
+		vals := make([]any, len(cols))
+		ptrs := make([]any, len(cols))
+		for i := range vals {
+			ptrs[i] = &vals[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			return fmt.Errorf("scan snapshot row: %w", err)
+		}
+		keyVals := make([]any, len(keyIdx))
+		for i, idx := range keyIdx {
+			keyVals[i] = vals[idx]
+		}
+
+		if spec.updatedAt == "" {
+			var one int
+			err := live.QueryRowContext(ctx, "SELECT 1 FROM "+spec.name+" WHERE "+whereSQL, keyVals...).Scan(&one)
+			if err == sql.ErrNoRows {
+				_, _ = live.ExecContext(ctx, insertSQL, vals...) // per-row best-effort
+			}
+			continue
+		}
+
+		var localUpdated sql.NullString
+		err := live.QueryRowContext(ctx,
+			"SELECT "+quoteCol(spec.updatedAt)+" FROM "+spec.name+" WHERE "+whereSQL, keyVals...).Scan(&localUpdated)
+		switch {
+		case err == sql.ErrNoRows:
+			_, _ = live.ExecContext(ctx, insertSQL, vals...)
+		case err != nil:
+			return fmt.Errorf("probe local row: %w", err)
+		default:
+			remoteUpdated, _ := vals[indexOf(cols, spec.updatedAt)].(string)
+			// RFC3339 timestamps compare correctly as strings.
+			if remoteUpdated > localUpdated.String {
+				setSQL, setVals := buildUpdateSet(cols, keyIdx, vals)
+				if setSQL != "" {
+					_, _ = live.ExecContext(ctx,
+						"UPDATE "+spec.name+" SET "+setSQL+" WHERE "+whereSQL,
+						append(setVals, keyVals...)...)
+				}
+			}
+		}
+	}
+	return rows.Err()
+}
+
+// tableColumns returns the column set of a table (error when the table
+// doesn't exist).
+func tableColumns(ctx context.Context, db *sql.DB, table string) (map[string]bool, error) {
+	rows, err := db.QueryContext(ctx, "SELECT name FROM pragma_table_info(?)", table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	cols := map[string]bool{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		cols[name] = true
+	}
+	if len(cols) == 0 {
+		return nil, fmt.Errorf("table %s not found", table)
+	}
+	return cols, rows.Err()
+}
+
+func quoteCol(c string) string      { return `"` + c + `"` }
+func quoteCols(cs []string) string {
+	q := make([]string, len(cs))
+	for i, c := range cs {
+		q[i] = quoteCol(c)
+	}
+	return strings.Join(q, ", ")
+}
+
+func containsStr(ss []string, want string) bool { return indexOf(ss, want) >= 0 }
+
+func indexOf(ss []string, want string) int {
+	for i, s := range ss {
+		if s == want {
+			return i
+		}
+	}
+	return -1
+}
+
+// buildKeyWhere returns "k1 = ? AND k2 = ?" plus the positions of the
+// key columns inside cols.
+func buildKeyWhere(cols, key []string) (string, []int) {
+	parts := make([]string, len(key))
+	idx := make([]int, len(key))
+	for i, k := range key {
+		parts[i] = quoteCol(k) + " = ?"
+		idx[i] = indexOf(cols, k)
+	}
+	return strings.Join(parts, " AND "), idx
+}
+
+// buildUpdateSet returns "c1 = ?, c2 = ?" for every non-key column and
+// the matching values.
+func buildUpdateSet(cols []string, keyIdx []int, vals []any) (string, []any) {
+	isKey := map[int]bool{}
+	for _, i := range keyIdx {
+		isKey[i] = true
+	}
+	var parts []string
+	var out []any
+	for i, c := range cols {
+		if isKey[i] {
+			continue
+		}
+		parts = append(parts, quoteCol(c)+" = ?")
+		out = append(out, vals[i])
+	}
+	return strings.Join(parts, ", "), out
+}
+
+// filesEqual reports whether two files have identical contents. Either
+// file missing = not equal.
+func filesEqual(a, b string) (bool, error) {
+	ra, err := os.ReadFile(a)
+	if err != nil {
+		return false, err
+	}
+	rb, err := os.ReadFile(b)
+	if err != nil {
+		return false, err
+	}
+	return bytes.Equal(ra, rb), nil
 }

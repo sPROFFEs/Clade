@@ -14,8 +14,10 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -40,6 +42,27 @@ func (c *Core) SetChatSessionID(ctx context.Context, chatID, sessionID string) e
 	return err
 }
 
+// UpdateChatSettings mutates a chat's persisted settings through fn and
+// writes them back. Used by the GUI's per-chat model/tools controls.
+func (c *Core) UpdateChatSettings(ctx context.Context, chatID string, fn func(*ChatSettings)) error {
+	if c.store == nil {
+		return errors.New("UpdateChatSettings: no store configured")
+	}
+	chat, err := c.GetChat(ctx, chatID)
+	if err != nil {
+		return err
+	}
+	fn(&chat.Settings)
+	raw, err := json.Marshal(chat.Settings)
+	if err != nil {
+		return fmt.Errorf("UpdateChatSettings: marshal: %w", err)
+	}
+	_, err = c.store.DB().ExecContext(ctx,
+		`UPDATE chats SET settings_json = ?, updated_at = ? WHERE id = ?`,
+		string(raw), time.Now().UTC().Format(time.RFC3339Nano), chatID)
+	return err
+}
+
 // ContinueChat sends userMessage to the chat's CLI and returns the
 // reply. cwd is the working directory the CLI runs in (use the chat's
 // workspace_path, or the app cwd). The first call on a fresh chat
@@ -49,10 +72,36 @@ func (c *Core) SetChatSessionID(ctx context.Context, chatID, sessionID string) e
 // (when the chat has no session id yet) so the agent's instructions
 // frame the conversation without being repeated every turn.
 func (c *Core) ContinueChat(ctx context.Context, chatID, userMessage, cwd, systemPrompt string) (*ChatTurn, error) {
+	return c.ContinueChatWithAttachments(ctx, chatID, userMessage, cwd, systemPrompt, nil)
+}
+
+// ContinueChatWithAttachments is ContinueChat plus file ingestion:
+// attachments is a list of absolute paths (images, PDFs, docs, …) the
+// user attached to this turn. The paths are appended to the outbound
+// message so file-tool-capable CLIs (claude, codex, gemini, opencode)
+// read them from disk; the stored user message records them in Meta so
+// the GUI can render previews.
+func (c *Core) ContinueChatWithAttachments(ctx context.Context, chatID, userMessage, cwd, systemPrompt string, attachments []string) (*ChatTurn, error) {
+	return c.ContinueChatStream(ctx, chatID, userMessage, cwd, systemPrompt, attachments, nil)
+}
+
+// ContinueChatStream is the live variant: when onEvent is non-nil and
+// the chat's CLI supports streaming (claude/openclaude stream-json,
+// codex exec --json), text deltas and tool-call activity are emitted as
+// they happen and the turn can be interrupted by cancelling ctx — an
+// interrupted turn persists whatever text already streamed (flagged
+// interrupted in the message meta) instead of erroring. CLIs without a
+// stream fall back to the buffered path; onEvent then just never fires
+// before the final reply.
+//
+// Note on privacy: streamed deltas show the REDACTED outbound form;
+// placeholder reveal happens only on the persisted final message (same
+// trade Claude/Codex desktop make — you watch the wire format live).
+func (c *Core) ContinueChatStream(ctx context.Context, chatID, userMessage, cwd, systemPrompt string, attachments []string, onEvent StreamHandler) (*ChatTurn, error) {
 	if c.store == nil {
 		return nil, errors.New("ContinueChat: no store configured")
 	}
-	if userMessage == "" {
+	if userMessage == "" && len(attachments) == 0 {
 		return nil, errors.New("ContinueChat: empty message")
 	}
 	chat, err := c.GetChat(ctx, chatID)
@@ -73,22 +122,116 @@ func (c *Core) ContinueChat(ctx context.Context, chatID, userMessage, cwd, syste
 	// Redact outbound; the stored user message keeps the original text.
 	privacy := c.PrivacyScanner()
 	outbound, matches := privacy.Redact(userMessage)
+	if len(attachments) > 0 {
+		var b strings.Builder
+		b.WriteString(outbound)
+		b.WriteString("\n\nThe user attached these files — read them from disk with your file tools:\n")
+		for _, p := range attachments {
+			b.WriteString("- " + p + "\n")
+		}
+		outbound = b.String()
+	}
 
-	if _, err := c.AddMessage(ctx, chatID, "user", userMessage, nil); err != nil {
+	var meta map[string]any
+	if len(attachments) > 0 {
+		meta = map[string]any{"attachments": attachments}
+	}
+	if _, err := c.AddMessage(ctx, chatID, "user", userMessage, meta); err != nil {
 		return nil, fmt.Errorf("persist user message: %w", err)
 	}
 
+	// Wrap the caller's handler to also collect a compact activity log
+	// that persists on the assistant message, so reopened chats still
+	// show what the agent did.
+	var activity []map[string]any
+	collect := onEvent
+	if onEvent != nil {
+		collect = func(ev StreamEvent) {
+			switch ev.Type {
+			case "tool_start":
+				if len(activity) < 100 {
+					activity = append(activity, map[string]any{"tool": ev.Tool, "detail": ev.Detail, "ok": true})
+				}
+			case "tool_end":
+				if !ev.OK {
+					for i := len(activity) - 1; i >= 0; i-- {
+						if activity[i]["ok"] == true {
+							activity[i]["ok"] = false
+							break
+						}
+					}
+				}
+			}
+			onEvent(ev)
+		}
+	}
+
+	// Ask level: wire the approval shim when a provider is registered
+	// (GUI). Without one — TUI, tests — "ask" degrades to the safe
+	// default inside the adapters.
+	var approval *ApprovalConfig
+	if chat.Settings.Tools == "ask" && c.approvalProvider != nil {
+		approval = c.approvalProvider(chatID)
+	}
+	resumeOpts := ResumeOpts{Message: outbound, Model: chat.Settings.Model, Tools: chat.Settings.Tools, Approval: approval}
+	shotOpts := SingleShotOpts{
+		Cwd:          cwd,
+		Message:      outbound,
+		SystemPrompt: privacyRedactPlain(privacy, systemPrompt),
+		Model:        chat.Settings.Model,
+		Tools:        chat.Settings.Tools,
+		Approval:     approval,
+	}
+	resuming := chat.SessionID != "" && adapter.SupportsResume()
+
 	start := time.Now()
 	var reply *Reply
-	if chat.SessionID != "" && adapter.SupportsResume() {
-		reply, err = adapter.Resume(ctx, chat.SessionID, outbound, chat.Settings.Model)
-	} else {
-		reply, err = adapter.SingleShot(ctx, SingleShotOpts{
-			Cwd:          cwd,
-			Message:      outbound,
-			SystemPrompt: privacyRedactPlain(privacy, systemPrompt),
-			Model:        chat.Settings.Model,
-		})
+	streamed := false
+	if sc, ok := adapter.(streamingAdapter); ok && collect != nil {
+		if resuming {
+			reply, err = sc.ResumeStream(ctx, chat.SessionID, resumeOpts, collect)
+		} else {
+			reply, err = sc.SingleShotStream(ctx, shotOpts, collect)
+		}
+		if errors.Is(err, ErrStreamUnsupported) {
+			reply, err = nil, nil
+		} else {
+			streamed = true
+		}
+	}
+	if !streamed {
+		if resuming {
+			reply, err = adapter.Resume(ctx, chat.SessionID, resumeOpts)
+		} else {
+			reply, err = adapter.SingleShot(ctx, shotOpts)
+		}
+	}
+
+	var assistantMeta map[string]any
+	if len(activity) > 0 {
+		assistantMeta = map[string]any{"activity": activity}
+	}
+
+	// Interrupted turn: keep whatever streamed instead of erroring —
+	// that's the desktop-app stop-button contract.
+	if err != nil && errors.Is(err, context.Canceled) && reply != nil && reply.Text != "" {
+		if assistantMeta == nil {
+			assistantMeta = map[string]any{}
+		}
+		assistantMeta["interrupted"] = true
+		revealed := privacy.Reveal(reply.Text, matches)
+		// ctx is dead — persist with a fresh background context.
+		pctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, perr := c.AddMessage(pctx, chatID, "assistant", revealed, assistantMeta); perr != nil {
+			return nil, fmt.Errorf("persist interrupted reply: %w", perr)
+		}
+		return &ChatTurn{
+			UserMessage: userMessage,
+			Reply:       revealed,
+			SessionID:   reply.SessionID,
+			DurationMs:  time.Since(start).Milliseconds(),
+		}, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", adapter.Name(), err)
@@ -98,7 +241,7 @@ func (c *Core) ContinueChat(ctx context.Context, chatID, userMessage, cwd, syste
 	}
 
 	revealed := privacy.Reveal(reply.Text, matches)
-	if _, err := c.AddMessage(ctx, chatID, "assistant", revealed, nil); err != nil {
+	if _, err := c.AddMessage(ctx, chatID, "assistant", revealed, assistantMeta); err != nil {
 		return nil, fmt.Errorf("persist reply: %w", err)
 	}
 	if reply.SessionID != "" && reply.SessionID != chat.SessionID {

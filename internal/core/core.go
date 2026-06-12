@@ -33,6 +33,29 @@ type Core struct {
 	// TUI keeps working unchanged; Phase 2+ will route writes through
 	// the DB and leave only transcript slices on disk.
 	workspacesRoot string
+
+	// approvalProvider, when set (GUI only), supplies the per-chat
+	// approval shim wiring for the "ask" Tools level. Nil = "ask"
+	// degrades to the safe default. See SetApprovalProvider.
+	approvalProvider func(chatID string) *ApprovalConfig
+}
+
+// ApprovalConfig tells a CLI adapter how to spawn the approval shim —
+// the tiny MCP server that forwards the CLI's mid-turn permission
+// requests to the GUI's Allow/Deny dialog. Command+Args typically point
+// back at the calling binary with a hidden flag (the endpoint URL and
+// auth token ride in Args).
+type ApprovalConfig struct {
+	Command string
+	Args    []string
+}
+
+// SetApprovalProvider registers the factory the chat layer calls when a
+// chat with Tools=="ask" runs a turn. The GUI registers one at startup;
+// the TUI leaves it nil ("ask" then behaves as safe — terminal chats
+// already get the CLI's own native prompts).
+func (c *Core) SetApprovalProvider(fn func(chatID string) *ApprovalConfig) {
+	c.approvalProvider = fn
 }
 
 // Options bundles the inputs Core needs at construction time. Each is

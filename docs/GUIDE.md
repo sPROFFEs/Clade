@@ -793,12 +793,24 @@ the local `.git` directory stays so re-enabling later is cheap.
 ### What gets tracked
 
 PrAImate's managed `.gitignore` excludes every file at the workspaces
-root **except** `chats/` and `templates/`. Inside those two
-directories, **everything is tracked** — sandbox, captured
+root **except** `chats/`, `templates/` and `.praimate-state/`. Inside
+the first two, **everything is tracked** — sandbox, captured
 transcripts, native session slices, the full per-chat
 `MEMORY.md` — so a fresh clone on another machine restores not just
 the workpaths but the actual conversation state. Stray files at the
 root (scratch notes, environment overrides, etc.) never propagate.
+
+`.praimate-state/` is how the **database travels too**: before every
+backup commit, PrAImate snapshots its SQLite DB (DB chats, messages,
+agents, MCP servers, settings, memory) plus the shareable slice of
+your config (local-LLM endpoint defaults) into that directory. After
+every pull / merge / reset / first clone, the remote machine's
+snapshot is **row-merged** into the live local DB — newer edits win on
+keyed rows, messages dedupe on content, and local-only rows are never
+lost. That's what lets multiple hosts share the same chats: git moves
+the snapshot, PrAImate merges it. (Deletions don't propagate yet — a
+chat deleted on one host can reappear after syncing with a host that
+still has it.)
 
 If you hand-edit `.gitignore`, the absence of the PrAImate-managed
 marker line tells the launcher to leave it alone on the next sync.

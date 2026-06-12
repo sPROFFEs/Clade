@@ -35,18 +35,27 @@ import (
 	"strings"
 )
 
+// buildIn carries the per-turn inputs to an execAdapter's build func.
+type buildIn struct {
+	Message string
+	Model   string
+	Tools   string // "", "edits", "full" — see SingleShotOpts.Tools
+	TmpDir  string
+}
+
 type execAdapter struct {
 	name string
 	bin  string
 	// versionArgs probes installation (usually {"--version"}).
 	versionArgs []string
 	// build returns the argv (after the binary) for a one-shot run of
-	// message. If replyFile is non-empty the reply is read from that
+	// in.Message. If replyFile is non-empty the reply is read from that
 	// file (the CLI writes it there); otherwise trimmed stdout is the
-	// reply. tmpDir is a per-call scratch dir the adapter may use.
-	// model is the per-turn model override ("" = CLI default); CLIs
-	// without a model flag ignore it.
-	build func(message, model, tmpDir string) (args []string, replyFile string)
+	// reply. in.TmpDir is a per-call scratch dir the adapter may use.
+	// in.Model is the per-turn model override ("" = CLI default) and
+	// in.Tools the permission level — CLIs without matching flags
+	// ignore them.
+	build func(in buildIn) (args []string, replyFile string)
 	// stdinMsg pipes the message to the child's stdin instead of argv;
 	// build then must NOT embed the message in args. Required for
 	// newline-safety through Windows .CMD shims (see file comment).
@@ -87,7 +96,7 @@ func (a *execAdapter) Name() string { return a.name }
 
 func (a *execAdapter) SupportsResume() bool { return false }
 
-func (a *execAdapter) Resume(ctx context.Context, sessionID, message, model string) (*Reply, error) {
+func (a *execAdapter) Resume(ctx context.Context, sessionID string, opts ResumeOpts) (*Reply, error) {
 	return nil, fmt.Errorf("%s adapter does not support resume", a.name)
 }
 
@@ -125,7 +134,7 @@ func (a *execAdapter) SingleShot(ctx context.Context, opts SingleShotOpts) (*Rep
 	}
 	defer os.RemoveAll(tmpDir)
 
-	args, replyFile := a.build(msg, opts.Model, tmpDir)
+	args, replyFile := a.build(buildIn{Message: msg, Model: opts.Model, Tools: opts.Tools, TmpDir: tmpDir})
 	cmd := exec.CommandContext(ctx, path, args...)
 	hideConsole(cmd)
 	if a.stdinMsg {
@@ -179,11 +188,17 @@ func (a *execAdapter) SingleShot(ctx context.Context, opts SingleShotOpts) (*Rep
 func NewCodexAdapter() *execAdapter {
 	return &execAdapter{
 		name: "codex", bin: "codex", stdinMsg: true,
-		build: func(_, model, tmpDir string) ([]string, string) {
-			out := filepath.Join(tmpDir, "reply.txt")
+		build: func(in buildIn) ([]string, string) {
+			out := filepath.Join(in.TmpDir, "reply.txt")
 			args := []string{"exec", "--skip-git-repo-check", "--output-last-message", out}
-			if model != "" {
-				args = append(args, "-m", model)
+			if in.Model != "" {
+				args = append(args, "-m", in.Model)
+			}
+			switch in.Tools {
+			case "edits":
+				args = append(args, "--sandbox", "workspace-write")
+			case "full":
+				args = append(args, "--dangerously-bypass-approvals-and-sandbox")
 			}
 			return append(args, "-"), out
 		},
@@ -196,12 +211,12 @@ func NewCodexAdapter() *execAdapter {
 func NewOpenCodeAdapter() *execAdapter {
 	return &execAdapter{
 		name: "opencode", bin: "opencode", stdinMsg: true,
-		build: func(_, model, _ string) ([]string, string) {
+		build: func(in buildIn) ([]string, string) {
 			args := []string{"run"}
-			if model != "" {
+			if in.Model != "" {
 				// opencode expects provider/model, e.g.
 				// anthropic/claude-sonnet-4-5.
-				args = append(args, "--model", model)
+				args = append(args, "--model", in.Model)
 			}
 			return args, ""
 		},
@@ -214,10 +229,10 @@ func NewPraimateCodeAdapter() *execAdapter {
 	return &execAdapter{
 		name: "praimate-code", bin: "praimate-code", stdinMsg: true,
 		extraDirs: []string{praimateManagedBinDir()},
-		build: func(_, model, _ string) ([]string, string) {
+		build: func(in buildIn) ([]string, string) {
 			args := []string{"run"}
-			if model != "" {
-				args = append(args, "--model", model)
+			if in.Model != "" {
+				args = append(args, "--model", in.Model)
 			}
 			return args, ""
 		},
@@ -230,10 +245,10 @@ func NewPraimateCodeAdapter() *execAdapter {
 func NewGeminiAdapter() *execAdapter {
 	return &execAdapter{
 		name: "gemini", bin: "gemini", stdinMsg: true,
-		build: func(_, model, _ string) ([]string, string) {
+		build: func(in buildIn) ([]string, string) {
 			args := []string{"-o", "text", "--approval-mode", "yolo"}
-			if model != "" {
-				args = append(args, "-m", model)
+			if in.Model != "" {
+				args = append(args, "-m", in.Model)
 			}
 			return args, ""
 		},
@@ -249,8 +264,8 @@ func NewDeepSeekAdapter() *execAdapter {
 		name: "deepseek", bin: "deepseek",
 		// No documented model flag — model is ignored (the TUI's config
 		// file picks the model for deepseek).
-		build: func(message, _, _ string) ([]string, string) {
-			return []string{"exec", "--output-format", "text", message}, ""
+		build: func(in buildIn) ([]string, string) {
+			return []string{"exec", "--output-format", "text", in.Message}, ""
 		},
 	}
 }

@@ -1,0 +1,230 @@
+package main
+
+// Approval broker — the GUI-side half of mid-turn approvals. A loopback
+// HTTP server (127.0.0.1, random port, bearer token) that the MCP shim
+// posts permission requests to. Each request surfaces as an
+// "praimate:approval" event; the frontend's Allow/Deny card answers via
+// the ResolveApproval binding, which unblocks the waiting HTTP response
+// (and therefore the claude turn).
+//
+// Decisions:
+//   allow once      — this request only
+//   allow always    — auto-allow this tool name for this chat until the
+//                     GUI restarts (kept in-process, never persisted)
+//   deny / timeout  — fail-closed; 10 minutes of silence is a deny
+//
+// Started lazily on the first "ask"-level turn; one broker serves all
+// chats (the chat id rides in the URL path).
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"net"
+	"net/http"
+	"os"
+	"strings"
+	"sync"
+	"time"
+
+	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
+
+	"github.com/sPROFFEs/PrAImate/internal/core"
+)
+
+const approvalTimeout = 10 * time.Minute
+
+// ApprovalRequest is what the frontend receives on "praimate:approval".
+type ApprovalRequest struct {
+	ID     string `json:"id"`
+	ChatID string `json:"chatId"`
+	Tool   string `json:"tool"`
+	Detail string `json:"detail"`
+}
+
+type approvalDecision struct {
+	allow  bool
+	always bool
+}
+
+type approvalBroker struct {
+	addr  string
+	token string
+
+	mu      sync.Mutex
+	pending map[string]chan approvalDecision
+	always  map[string]map[string]bool // chatID → tool name → allowed
+	seq     int
+
+	emit func(ApprovalRequest)
+}
+
+func newApprovalBroker(emit func(ApprovalRequest)) (*approvalBroker, error) {
+	tok := make([]byte, 24)
+	if _, err := rand.Read(tok); err != nil {
+		return nil, err
+	}
+	b := &approvalBroker{
+		token:   hex.EncodeToString(tok),
+		pending: map[string]chan approvalDecision{},
+		always:  map[string]map[string]bool{},
+		emit:    emit,
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return nil, err
+	}
+	b.addr = ln.Addr().String()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/approve/", b.handleApprove)
+	srv := &http.Server{Handler: mux}
+	go func() { _ = srv.Serve(ln) }()
+	return b, nil
+}
+
+func (b *approvalBroker) handleApprove(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost || r.Header.Get("X-Praimate-Token") != b.token {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	chatID := strings.TrimPrefix(r.URL.Path, "/approve/")
+	var req struct {
+		ToolName string         `json:"tool_name"`
+		Input    map[string]any `json:"input"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+
+	respond := func(allow bool, msg string) {
+		w.Header().Set("Content-Type", "application/json")
+		behavior := "deny"
+		if allow {
+			behavior = "allow"
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"behavior": behavior, "message": msg})
+	}
+
+	b.mu.Lock()
+	if b.always[chatID][req.ToolName] {
+		b.mu.Unlock()
+		respond(true, "")
+		return
+	}
+	b.seq++
+	id := fmt.Sprintf("ap-%d", b.seq)
+	ch := make(chan approvalDecision, 1)
+	b.pending[id] = ch
+	b.mu.Unlock()
+	defer func() {
+		b.mu.Lock()
+		delete(b.pending, id)
+		b.mu.Unlock()
+	}()
+
+	b.emit(ApprovalRequest{ID: id, ChatID: chatID, Tool: req.ToolName, Detail: summarizeApprovalInput(req.Input)})
+
+	select {
+	case d := <-ch:
+		if d.allow && d.always {
+			b.mu.Lock()
+			if b.always[chatID] == nil {
+				b.always[chatID] = map[string]bool{}
+			}
+			b.always[chatID][req.ToolName] = true
+			b.mu.Unlock()
+		}
+		respond(d.allow, "")
+	case <-time.After(approvalTimeout):
+		respond(false, "approval timed out in PrAImate GUI")
+	case <-r.Context().Done():
+		// shim/CLI went away — nothing to answer
+	}
+}
+
+func (b *approvalBroker) resolve(id string, allow, always bool) {
+	b.mu.Lock()
+	ch, ok := b.pending[id]
+	b.mu.Unlock()
+	if ok {
+		select {
+		case ch <- approvalDecision{allow: allow, always: always}:
+		default:
+		}
+	}
+}
+
+// summarizeApprovalInput mirrors core's tool-input summary for the
+// approval card (command / file path first, compact JSON fallback).
+func summarizeApprovalInput(input map[string]any) string {
+	for _, key := range []string{"command", "file_path", "path", "pattern", "url", "query", "description"} {
+		if s, ok := input[key].(string); ok && strings.TrimSpace(s) != "" {
+			if len(s) > 200 {
+				s = s[:200] + "…"
+			}
+			return s
+		}
+	}
+	if len(input) == 0 {
+		return ""
+	}
+	raw, _ := json.Marshal(input)
+	s := string(raw)
+	if len(s) > 200 {
+		s = s[:200] + "…"
+	}
+	return s
+}
+
+// --- App wiring --------------------------------------------------------------
+
+// ensureApprovalBroker lazily starts the broker (first "ask" turn).
+func (a *App) ensureApprovalBroker() (*approvalBroker, error) {
+	a.approvalMu.Lock()
+	defer a.approvalMu.Unlock()
+	if a.approval != nil {
+		return a.approval, nil
+	}
+	b, err := newApprovalBroker(func(req ApprovalRequest) {
+		wruntime.EventsEmit(a.ctx, "praimate:approval", req)
+	})
+	if err != nil {
+		return nil, err
+	}
+	a.approval = b
+	return b, nil
+}
+
+// approvalProvider is registered on Core at startup: it hands the chat
+// layer the shim command line for an "ask"-level turn. Errors degrade
+// to nil (the turn runs safe instead of wedging).
+func (a *App) approvalProvider(chatID string) *core.ApprovalConfig {
+	b, err := a.ensureApprovalBroker()
+	if err != nil {
+		return nil
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return nil
+	}
+	return &core.ApprovalConfig{
+		Command: exe,
+		Args: []string{
+			"-mcp-approve", "http://" + b.addr + "/approve/" + chatID,
+			"-mcp-token", b.token,
+		},
+	}
+}
+
+// ResolveApproval answers a pending approval card. always=true
+// remembers "allow" for this tool in this chat until the GUI exits.
+func (a *App) ResolveApproval(id string, allow, always bool) {
+	a.approvalMu.Lock()
+	b := a.approval
+	a.approvalMu.Unlock()
+	if b != nil {
+		b.resolve(id, allow, always)
+	}
+}

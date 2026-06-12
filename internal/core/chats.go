@@ -60,10 +60,18 @@ type ChatSettings struct {
 	// --model provider/model, gemini -m). Empty means the CLI's own
 	// default. CLIs without a model flag (deepseek) ignore it.
 	Model string `json:"model,omitempty"`
+
+	// Tools pins the CLI's permission level for every turn: "" (safe
+	// default — read/answer only), "ask" (mid-turn Allow/Deny dialog;
+	// claude/openclaude only, others degrade to safe), "edits"
+	// (auto-approve file edits), "full" (skip approvals entirely). See
+	// SingleShotOpts.Tools for the per-CLI flag mapping.
+	Tools string `json:"tools,omitempty"`
 }
 
 // Message is one stored turn. Role is "user" | "assistant" | "tool" |
-// "system". Meta carries adapter-specific metadata that doesn't fit
+// "system" | "command" (a "!" shell turn from the GUI composer; its
+// Content is the command output). Meta carries adapter-specific metadata that doesn't fit
 // the role/content shape (tool name, exit codes, etc.) — opaque to
 // the rest of the system.
 type Message struct {

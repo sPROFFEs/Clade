@@ -210,7 +210,6 @@ func runStartupAutoSync(cfg *launcher.Config) {
 		_ = os.Setenv("PRAIMATE_BACKUP_MACHINE_ID", cfg.BackupMachineID)
 		defer os.Unsetenv("PRAIMATE_BACKUP_MACHINE_ID")
 	}
-	exportBackupState(ctx, dir)
 	action, st, err := backup.Sync(ctx, dir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[backup] sync error: %v (continuing)\n", err)
@@ -253,21 +252,6 @@ func runStartupAutoSync(cfg *launcher.Config) {
 // runExitAutoSync mirrors runStartupAutoSync for the exit path. Same
 // rules; we just bias toward "commit and push" since exit time is
 // almost always when the user expects their work to be saved.
-// exportBackupState snapshots the PrAImate DB + agents into the backup
-// repo before a sync, so the git-based backup captures the 1.1 state
-// (chats, agents, memory, MCP) that lives in ~/.praimate, not just the
-// on-disk chat sandboxes. Best-effort: a failure is logged and the sync
-// proceeds (better to back up the sandboxes than nothing).
-func exportBackupState(ctx context.Context, repoDir string) {
-	c := getAppCore()
-	if c == nil {
-		return
-	}
-	if err := c.ExportBackupState(ctx, repoDir); err != nil {
-		fmt.Fprintf(os.Stderr, "[backup] state export failed: %v (continuing)\n", err)
-	}
-}
-
 func runExitAutoSync(cfg *launcher.Config) {
 	dir := cfg.WorkspacesRoot
 	if !backup.IsGitRepo(dir) {
@@ -280,7 +264,6 @@ func runExitAutoSync(cfg *launcher.Config) {
 		_ = os.Setenv("PRAIMATE_BACKUP_MACHINE_ID", cfg.BackupMachineID)
 		defer os.Unsetenv("PRAIMATE_BACKUP_MACHINE_ID")
 	}
-	exportBackupState(ctx, dir)
 	action, _, err := backup.Sync(ctx, dir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "[backup] sync error: %v\n", err)

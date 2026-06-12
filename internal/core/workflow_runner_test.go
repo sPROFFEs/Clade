@@ -35,11 +35,11 @@ func (m *mockAdapter) SingleShot(_ context.Context, opts SingleShotOpts) (*Reply
 	return m.nextReply()
 }
 
-func (m *mockAdapter) Resume(_ context.Context, sid, msg, _ string) (*Reply, error) {
+func (m *mockAdapter) Resume(_ context.Context, sid string, opts ResumeOpts) (*Reply, error) {
 	m.resumes = append(m.resumes, struct {
 		SessionID string
 		Message   string
-	}{sid, msg})
+	}{sid, opts.Message})
 	return m.nextReply()
 }
 

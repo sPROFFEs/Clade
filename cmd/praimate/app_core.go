@@ -15,6 +15,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/sPROFFEs/PrAImate/internal/backup"
 	"github.com/sPROFFEs/PrAImate/internal/core"
 	"github.com/sPROFFEs/PrAImate/internal/store"
 )
@@ -58,6 +59,10 @@ func initAppCore() {
 			return
 		}
 		core.RegisterAllCLIAdapters()
+		// From here on, every backup commit snapshots the DB + shareable
+		// config, and every pull/merge/reset row-merges the remote's
+		// snapshot back in. Must happen before runStartupAutoSync.
+		backup.SetStateSyncer(coreStateSyncer{core: c})
 		watchers, _ := c.StartWatcherDaemon(context.Background(), core.WatcherDaemonOptions{
 			WatcherDispatchOptions: core.WatcherDispatchOptions{CLI: "claude"},
 		})

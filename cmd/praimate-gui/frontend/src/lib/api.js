@@ -27,6 +27,16 @@ export const api = {
   startChat: (agentID, cli, cwd) => call('StartChat', agentID, cli, cwd),
   startCleanChat: (cli, model, cwd) => call('StartCleanChat', cli, model, cwd),
   sendChat: (chatID, message) => call('SendChat', chatID, message),
+  sendChatWithAttachments: (chatID, message, paths) =>
+    call('SendChatWithAttachments', chatID, message, paths),
+  sendChatStream: (chatID, message, paths) =>
+    call('SendChatStream', chatID, message, paths || []),
+  cancelChatTurn: (chatID) => call('CancelChatTurn', chatID),
+  resolveApproval: (id, allow, always) => call('ResolveApproval', id, allow, always),
+  runChatCommand: (chatID, command) => call('RunChatCommand', chatID, command),
+  setChatTools: (chatID, tools) => call('SetChatTools', chatID, tools),
+  pickChatAttachments: (chatID) => call('PickChatAttachments', chatID),
+  attachmentDataURL: (path) => call('AttachmentDataURL', path),
 
   listCLIs: () => call('ListCLIs'),
   listCLIModels: (cli) => call('ListCLIModels', cli),
@@ -99,6 +109,28 @@ export function onTurn(handler) {
   if (typeof window !== 'undefined' && window.runtime?.EventsOn) {
     window.runtime.EventsOn('praimate:turn', handler)
     return () => window.runtime.EventsOff('praimate:turn')
+  }
+  return () => {}
+}
+
+// onChatStream subscribes to live chat turn events (text deltas, tool
+// activity) emitted while SendChatStream runs. Returns an unsubscribe
+// function. No-op outside Wails.
+export function onChatStream(handler) {
+  if (typeof window !== 'undefined' && window.runtime?.EventsOn) {
+    window.runtime.EventsOn('praimate:chat-stream', handler)
+    return () => window.runtime.EventsOff('praimate:chat-stream')
+  }
+  return () => {}
+}
+
+// onApproval subscribes to mid-turn permission requests ("ask" Tools
+// level). Answer with api.resolveApproval(id, allow, always). Returns
+// an unsubscribe function. No-op outside Wails.
+export function onApproval(handler) {
+  if (typeof window !== 'undefined' && window.runtime?.EventsOn) {
+    window.runtime.EventsOn('praimate:approval', handler)
+    return () => window.runtime.EventsOff('praimate:approval')
   }
   return () => {}
 }

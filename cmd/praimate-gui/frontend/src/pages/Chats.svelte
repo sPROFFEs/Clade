@@ -1,6 +1,6 @@
 <script>
-  import { onMount, tick } from 'svelte'
-  import { api } from '../lib/api.js'
+  import { onMount, onDestroy, tick } from 'svelte'
+  import { api, onChatStream, onApproval } from '../lib/api.js'
   import { activePage, openChatId, pendingTerm } from '../lib/stores.js'
 
   let chats = []
@@ -11,6 +11,26 @@
   let draft = ''
   let sending = false
   let threadEl
+  let toolsLevel = ''
+  let attachments = [] // staged for the next send: {name, path, image}
+  // Live turn state (claude/openclaude/codex stream events; other CLIs
+  // resolve in one shot and this stays empty until the reply lands).
+  let stream = null // { text, tools: [{id, tool, detail, done, ok}] }
+  let unsubStream = () => {}
+  let unsubApproval = () => {}
+  let approvals = [] // pending mid-turn permission requests for this chat
+  const TOOL_LEVELS = [
+    { id: '', label: 'Safe', hint: 'read & answer only — edits/commands denied' },
+    { id: 'ask', label: 'Ask', hint: 'ask you before each edit/command (claude & openclaude; other CLIs run safe)' },
+    { id: 'edits', label: 'Edits', hint: 'auto-approve file edits in the chat folder' },
+    { id: 'full', label: 'Full', hint: 'skip all approvals — edits AND commands' },
+  ]
+
+  // Escalation hint: when the last reply shows denied/failed tool calls
+  // and the chat isn't already at Full, offer a one-click level bump —
+  // the "approve and retry" affordance for CLIs without mid-turn asks.
+  $: lastAssistant = [...messages].reverse().find((m) => m.Role === 'assistant')
+  $: deniedTools = (lastAssistant?.Meta?.activity || []).some((t) => !t.ok)
 
   // New clean chat (CLI + model, no agent)
   let creating = false
@@ -96,6 +116,9 @@
 
   async function open(chat) {
     selected = chat
+    toolsLevel = chat.Settings?.tools || ''
+    attachments = []
+    approvals = []
     try {
       messages = (await api.chatMessages(chat.ID)) || []
       await scrollToBottom()
@@ -105,31 +128,113 @@
   }
 
   function back() {
+    // Deny anything still pending — leaving the chat must not strand
+    // the CLI waiting on an answer.
+    for (const ap of approvals) api.resolveApproval(ap.id, false, false).catch(() => {})
+    approvals = []
     selected = null
     messages = []
     draft = ''
+    attachments = []
     openChatId.set(null)
+  }
+
+  async function setTools(level) {
+    if (!selected) return
+    try {
+      await api.setChatTools(selected.ID, level)
+      toolsLevel = level
+      if (selected.Settings) selected.Settings.tools = level
+    } catch (e) {
+      error = String(e)
+    }
+  }
+
+  async function attach() {
+    if (!selected) return
+    try {
+      const picked = (await api.pickChatAttachments(selected.ID)) || []
+      attachments = [...attachments, ...picked]
+    } catch (e) {
+      error = String(e)
+    }
+  }
+
+  function unattach(path) {
+    attachments = attachments.filter((a) => a.path !== path)
+  }
+
+  function handleStreamEvent(ev) {
+    if (!sending || !selected || ev.chatId !== selected.ID) return
+    if (!stream) stream = { text: '', tools: [] }
+    if (ev.type === 'text') {
+      stream.text += ev.text
+    } else if (ev.type === 'tool_start') {
+      stream.tools = [...stream.tools, { id: ev.id || '', tool: ev.tool, detail: ev.detail, done: false, ok: true }]
+    } else if (ev.type === 'tool_end') {
+      const t = [...stream.tools]
+      let idx = ev.id ? t.findIndex((x) => x.id === ev.id && !x.done) : -1
+      if (idx < 0) idx = t.findIndex((x) => !x.done)
+      if (idx >= 0) t[idx] = { ...t[idx], done: true, ok: ev.ok }
+      stream.tools = t
+    }
+    stream = stream
+    scrollToBottom()
+  }
+
+  async function stop() {
+    if (!selected) return
+    try { await api.cancelChatTurn(selected.ID) } catch {}
+  }
+
+  function handleApproval(req) {
+    if (!selected || req.chatId !== selected.ID) {
+      // Approval for a chat that isn't open — fail closed immediately
+      // rather than letting it hang until the broker timeout.
+      api.resolveApproval(req.id, false, false).catch(() => {})
+      return
+    }
+    approvals = [...approvals, req]
+    scrollToBottom()
+  }
+
+  async function answerApproval(req, allow, always) {
+    approvals = approvals.filter((a) => a.id !== req.id)
+    try { await api.resolveApproval(req.id, allow, always) } catch (e) { error = String(e) }
   }
 
   async function send() {
     const text = draft.trim()
-    if (!text || sending || !selected) return
+    if ((!text && attachments.length === 0) || sending || !selected) return
     sending = true
     error = ''
+    stream = null
+    const isCommand = text.startsWith('!')
+    const staged = attachments
     // Optimistically show the user's message.
     messages = [...messages, { Role: 'user', Content: text, TS: new Date().toISOString(), _pending: true }]
     draft = ''
+    attachments = []
     await scrollToBottom()
     try {
-      const turn = await api.sendChat(selected.ID, text)
+      if (isCommand) {
+        // "!cmd" runs locally in the chat folder — never sent to the model.
+        await api.runChatCommand(selected.ID, text.slice(1))
+      } else {
+        // Streams live events for CLIs that support it; others resolve
+        // in one shot. Interrupting (Stop) resolves with the partial.
+        await api.sendChatStream(selected.ID, text, staged.map((a) => a.path))
+      }
       // Replace the optimistic copy with the persisted pair.
       messages = (await api.chatMessages(selected.ID)) || messages
-      void turn
     } catch (e) {
       error = String(e)
       messages = messages.filter((m) => !m._pending)
+      attachments = staged
     } finally {
       sending = false
+      stream = null
+      approvals = [] // turn is over; anything unanswered was denied/cancelled
       await scrollToBottom()
     }
   }
@@ -162,7 +267,17 @@
     try { return new Date(s).toLocaleString() } catch { return s }
   }
 
+  function baseName(p) {
+    return String(p).split(/[\\/]/).pop()
+  }
+
+  function isImg(p) {
+    return /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(String(p))
+  }
+
   onMount(async () => {
+    unsubStream = onChatStream(handleStreamEvent)
+    unsubApproval = onApproval(handleApproval)
     await load()
     // If Agents started a chat and routed us here, open it.
     const id = $openChatId
@@ -170,6 +285,11 @@
       const c = chats.find((x) => x.ID === id)
       if (c) await open(c)
     }
+  })
+
+  onDestroy(() => {
+    unsubStream()
+    unsubApproval()
   })
 </script>
 
@@ -179,7 +299,18 @@
     <div class="grow">
       <strong>{selected.Title}</strong>
       <span class="pill">{selected.CLIAgent}</span>
+      {#if selected.Settings?.model}<span class="pill">{selected.Settings.model}</span>{/if}
       {#if selected.ExitKind}<span class="pill" class:ok={selected.ExitKind === 'completed'}>{selected.ExitKind}</span>{/if}
+    </div>
+    <div class="toolpick" title="How much the CLI agent may do: edit files, run commands">
+      <span class="lbl-inline">Tools</span>
+      {#each TOOL_LEVELS as lvl}
+        <button
+          class="btn sm"
+          class:primary={toolsLevel === lvl.id}
+          title={lvl.hint}
+          on:click={() => setTools(lvl.id)}>{lvl.label}</button>
+      {/each}
     </div>
     <button class="btn danger" on:click={() => remove(selected)}>Delete</button>
   </div>
@@ -191,25 +322,114 @@
       <div class="empty">No messages yet — say something below to begin.</div>
     {/if}
     {#each messages as m}
-      <div class="msg {m.Role === 'user' ? 'user' : 'assistant'}" class:pending={m._pending}>
-        <div class="who">{m.Role}{m.TS ? ' · ' + fmtDate(m.TS) : ''}</div>
-        {m.Content}
-      </div>
+      {#if m.Role === 'command'}
+        <div class="msg command" class:pending={m._pending}>
+          <div class="who">shell{m.TS ? ' · ' + fmtDate(m.TS) : ''}</div>
+          <pre class="cmd-out">{m.Content}</pre>
+        </div>
+      {:else}
+        <div class="msg {m.Role === 'user' ? 'user' : 'assistant'}" class:pending={m._pending}>
+          <div class="who">{m.Role}{m.TS ? ' · ' + fmtDate(m.TS) : ''}{m.Meta?.interrupted ? ' · interrupted' : ''}</div>
+          {#if m.Meta?.activity?.length}
+            <div class="tool-feed">
+              {#each m.Meta.activity as t}
+                <div class="tool-row" class:err={!t.ok}>
+                  <span class="tool-status">{t.ok ? '✓' : '✗'}</span>
+                  <span class="tool-name">{t.tool}</span>
+                  {#if t.detail}<span class="tool-detail mono">{t.detail}</span>{/if}
+                </div>
+              {/each}
+            </div>
+          {/if}
+          {m.Content}
+          {#if m.Meta?.attachments}
+            <div class="att-row">
+              {#each m.Meta.attachments as path}
+                {#if isImg(path)}
+                  {#await api.attachmentDataURL(path) then url}
+                    <img class="att-img" src={url} alt={baseName(path)} title={path} />
+                  {:catch}
+                    <span class="pill" title={path}>🖼 {baseName(path)}</span>
+                  {/await}
+                {:else}
+                  <span class="pill" title={path}>📄 {baseName(path)}</span>
+                {/if}
+              {/each}
+            </div>
+          {/if}
+        </div>
+      {/if}
     {/each}
     {#if sending}
-      <div class="msg assistant"><div class="who">assistant</div><span class="typing">…thinking</span></div>
+      <div class="msg assistant">
+        <div class="who">assistant</div>
+        {#if stream?.tools?.length}
+          <div class="tool-feed">
+            {#each stream.tools as t}
+              <div class="tool-row" class:err={t.done && !t.ok}>
+                <span class="tool-status">{t.done ? (t.ok ? '✓' : '✗') : '◌'}</span>
+                <span class="tool-name">{t.tool}</span>
+                {#if t.detail}<span class="tool-detail mono">{t.detail}</span>{/if}
+              </div>
+            {/each}
+          </div>
+        {/if}
+        {#if stream?.text}
+          <span>{stream.text}</span><span class="cursor">▍</span>
+        {:else}
+          <span class="typing">…thinking</span>
+        {/if}
+      </div>
     {/if}
+    {#each approvals as ap (ap.id)}
+      <div class="approval-card">
+        <div class="approval-head">⚠ The agent asks permission to use <strong>{ap.tool}</strong></div>
+        {#if ap.detail}<div class="approval-detail mono">{ap.detail}</div>{/if}
+        <div class="row" style="margin-top:8px">
+          <button class="btn primary" on:click={() => answerApproval(ap, true, false)}>Allow once</button>
+          <button class="btn" on:click={() => answerApproval(ap, true, true)}>Always allow “{ap.tool}” here</button>
+          <button class="btn danger" on:click={() => answerApproval(ap, false, false)}>Deny</button>
+        </div>
+      </div>
+    {/each}
   </div>
 
+  {#if deniedTools && !sending && toolsLevel !== 'full'}
+    <div class="escalate">
+      Some tool calls were denied or failed on the last reply.
+      {#if selected.CLIAgent === 'claude' || selected.CLIAgent === 'openclaude'}
+        Switch to <button class="btn sm" on:click={() => setTools('ask')}>Ask</button> to approve them live, or
+      {/if}
+      raise the level and ask again:
+      <button class="btn sm" on:click={() => setTools('edits')}>Allow edits</button>
+      <button class="btn sm" on:click={() => setTools('full')}>Full access</button>
+    </div>
+  {/if}
+
+  {#if attachments.length > 0}
+    <div class="att-row" style="margin-bottom: 8px">
+      {#each attachments as a}
+        <span class="pill" title={a.path}>
+          {a.image ? '🖼' : '📄'} {a.name}
+          <button class="chip-x" on:click={() => unattach(a.path)} title="Remove">×</button>
+        </span>
+      {/each}
+    </div>
+  {/if}
   <div class="composer">
+    <button class="btn" on:click={attach} disabled={sending} title="Attach images, PDFs or documents — the agent reads them from disk">📎</button>
     <textarea
       class="field"
       rows="2"
-      placeholder="Message the agent…  (Enter to send, Shift+Enter for newline)"
+      placeholder="Message the agent…  (Enter sends · Shift+Enter newline · !cmd runs a shell command in the chat folder)"
       bind:value={draft}
       on:keydown={onKey}
       disabled={sending}></textarea>
-    <button class="btn primary" on:click={send} disabled={sending || !draft.trim()}>Send</button>
+    {#if sending}
+      <button class="btn danger" on:click={stop} title="Interrupt the turn — text streamed so far is kept">■ Stop</button>
+    {:else}
+      <button class="btn primary" on:click={send} disabled={!draft.trim() && attachments.length === 0}>Send</button>
+    {/if}
   </div>
 {:else}
   <div class="row" style="margin-bottom: 4px">
@@ -306,4 +526,80 @@
   .composer textarea { resize: none; }
   .msg.pending { opacity: 0.6; }
   .typing { color: var(--text-dim); font-style: italic; }
+  .toolpick { display: flex; align-items: center; gap: 4px; }
+  .lbl-inline { color: var(--text-dim); font-size: 12px; margin-right: 2px; }
+  .btn.sm { padding: 3px 10px; font-size: 12px; }
+  .msg.command { background: var(--bg); border: 1px dashed var(--border); }
+  .cmd-out {
+    margin: 0;
+    font-family: var(--mono, ui-monospace, monospace);
+    font-size: 12px;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .att-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .att-img {
+    max-width: 260px;
+    max-height: 180px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    display: block;
+  }
+  .chip-x {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 13px;
+    padding: 0 0 0 4px;
+  }
+  .chip-x:hover { color: var(--text); }
+  .tool-feed {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 4px 0 8px;
+    padding: 6px 8px;
+    border-left: 2px solid var(--border);
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  .tool-row { display: flex; gap: 6px; align-items: baseline; min-width: 0; }
+  .tool-row.err .tool-status { color: var(--danger, #e5484d); }
+  .tool-status { width: 1em; flex: none; }
+  .tool-name { font-weight: 600; flex: none; }
+  .tool-detail {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 11px;
+  }
+  .cursor { animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .approval-card {
+    border: 1px solid var(--warning, #d4a72c);
+    border-radius: var(--radius);
+    background: var(--panel);
+    padding: 10px 12px;
+    margin: 8px 0;
+  }
+  .approval-head { font-size: 13px; }
+  .approval-detail {
+    margin-top: 6px;
+    font-size: 12px;
+    color: var(--text-dim);
+    word-break: break-all;
+  }
+  .escalate {
+    border: 1px dashed var(--border);
+    border-radius: var(--radius);
+    padding: 8px 10px;
+    margin-bottom: 8px;
+    font-size: 12px;
+    color: var(--text-dim);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+  }
 </style>

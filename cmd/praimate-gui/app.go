@@ -23,6 +23,7 @@ import (
 
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
+	"github.com/sPROFFEs/PrAImate/internal/backup"
 	"github.com/sPROFFEs/PrAImate/internal/core"
 	"github.com/sPROFFEs/PrAImate/internal/installer"
 	"github.com/sPROFFEs/PrAImate/internal/launcher"
@@ -46,9 +47,22 @@ type App struct {
 	schedules *core.ScheduleDaemon
 
 	terms *termManager
+
+	// chatCancels maps chatID → cancel func for the in-flight streamed
+	// turn, so the Stop button can interrupt it. Guarded by chatCancelMu
+	// (binding calls run on independent goroutines).
+	chatCancelMu sync.Mutex
+	chatCancels  map[string]context.CancelFunc
+
+	// approval is the lazily-started mid-turn approval broker ("ask"
+	// Tools level). Guarded by approvalMu.
+	approvalMu sync.Mutex
+	approval   *approvalBroker
 }
 
-func NewApp() *App { return &App{terms: newTermManager()} }
+func NewApp() *App {
+	return &App{terms: newTermManager(), chatCancels: map[string]context.CancelFunc{}}
+}
 
 // startup opens the shared DB and seeds builtins. Mirrors the TUI's
 // initAppCore: failures are recorded, not fatal — the frontend shows
@@ -86,6 +100,14 @@ func (a *App) startup(ctx context.Context) {
 		return
 	}
 	core.RegisterAllCLIAdapters()
+	// From here on, every backup commit snapshots the DB + shareable
+	// config, and every pull/merge/reset row-merges the remote's
+	// snapshot back in. Must precede any Backup-tab binding call.
+	backup.SetStateSyncer(coreStateSyncer{core: c})
+	// "Ask" Tools level: chats route mid-turn permission requests to
+	// the GUI's Allow/Deny card (claude/openclaude only; see
+	// approval_broker.go).
+	c.SetApprovalProvider(a.approvalProvider)
 
 	// Same automation daemons the TUI runs — watchers and schedules
 	// fire regardless of which surface is open.

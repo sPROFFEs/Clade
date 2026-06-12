@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -112,7 +113,7 @@ func TestExecAdapter_StdinAdaptersKeepMessageOutOfArgv(t *testing.T) {
 		if !a.stdinMsg {
 			t.Errorf("%s: expected stdinMsg=true", a.name)
 		}
-		args, _ := a.build(msg, "", t.TempDir())
+		args, _ := a.build(buildIn{Message: msg, TmpDir: t.TempDir()})
 		for _, arg := range args {
 			if strings.Contains(arg, "multi") {
 				t.Errorf("%s: message leaked into argv: %q", a.name, args)
@@ -122,7 +123,7 @@ func TestExecAdapter_StdinAdaptersKeepMessageOutOfArgv(t *testing.T) {
 }
 
 func TestCodexAdapter_UsesStdinSentinel(t *testing.T) {
-	args, _ := NewCodexAdapter().build("ignored", "", t.TempDir())
+	args, _ := NewCodexAdapter().build(buildIn{Message: "ignored", TmpDir: t.TempDir()})
 	if args[len(args)-1] != "-" {
 		t.Fatalf("codex argv must end with '-' (read prompt from stdin), got %v", args)
 	}
@@ -146,16 +147,115 @@ func TestExecAdapter_ModelFlagShapes(t *testing.T) {
 		if model == "-" {
 			model = tc.want[len(tc.want)-2]
 		}
-		args, _ := tc.adapter.build("msg", model, t.TempDir())
+		args, _ := tc.adapter.build(buildIn{Message: "msg", Model: model, TmpDir: t.TempDir()})
 		got := strings.Join(args, " ")
 		if !strings.Contains(got, strings.Join(tc.want, " ")) {
 			t.Errorf("%s: argv %q does not contain %q", tc.adapter.name, got, strings.Join(tc.want, " "))
 		}
 	}
 	// deepseek has no model flag — model must NOT leak into argv.
-	args, _ := NewDeepSeekAdapter().build("msg", "some-model", t.TempDir())
+	args, _ := NewDeepSeekAdapter().build(buildIn{Message: "msg", Model: "some-model", TmpDir: t.TempDir()})
 	if strings.Contains(strings.Join(args, " "), "some-model") {
 		t.Errorf("deepseek: model leaked into argv: %v", args)
+	}
+}
+
+// Pins the per-CLI tools (permission level) flag shapes, and that the
+// codex stdin sentinel still stays LAST with tools flags present.
+func TestExecAdapter_ToolsFlagShapes(t *testing.T) {
+	edits, _ := NewCodexAdapter().build(buildIn{Message: "msg", Tools: "edits", TmpDir: t.TempDir()})
+	if got := strings.Join(edits, " "); !strings.Contains(got, "--sandbox workspace-write") {
+		t.Errorf("codex edits: argv %q lacks --sandbox workspace-write", got)
+	}
+	full, _ := NewCodexAdapter().build(buildIn{Message: "msg", Tools: "full", TmpDir: t.TempDir()})
+	if got := strings.Join(full, " "); !strings.Contains(got, "--dangerously-bypass-approvals-and-sandbox") {
+		t.Errorf("codex full: argv %q lacks bypass flag", got)
+	}
+	if full[len(full)-1] != "-" {
+		t.Errorf("codex full: stdin sentinel must stay last, got %v", full)
+	}
+	// Safe default adds NO sandbox flag.
+	safe, _ := NewCodexAdapter().build(buildIn{Message: "msg", TmpDir: t.TempDir()})
+	if got := strings.Join(safe, " "); strings.Contains(got, "sandbox") {
+		t.Errorf("codex safe: unexpected sandbox flag in %q", got)
+	}
+	// CLIs without permission flags must not leak the level into argv.
+	for _, a := range []*execAdapter{NewOpenCodeAdapter(), NewPraimateCodeAdapter(), NewGeminiAdapter(), NewDeepSeekAdapter()} {
+		args, _ := a.build(buildIn{Message: "msg", Tools: "full", TmpDir: t.TempDir()})
+		for _, arg := range args {
+			if arg == "full" || strings.Contains(arg, "dangerously") {
+				t.Errorf("%s: tools level leaked into argv: %v", a.name, args)
+			}
+		}
+	}
+}
+
+// Pins claude's permission-mode mapping (shared by openclaude).
+func TestClaudeToolsArgs(t *testing.T) {
+	if got := strings.Join(claudeToolsArgs("edits"), " "); got != "--permission-mode acceptEdits" {
+		t.Errorf("edits → %q", got)
+	}
+	if got := strings.Join(claudeToolsArgs("full"), " "); got != "--permission-mode bypassPermissions" {
+		t.Errorf("full → %q", got)
+	}
+	if got := claudeToolsArgs(""); got != nil {
+		t.Errorf("safe default must add no flags, got %v", got)
+	}
+	// "ask" adds no permission-mode flag — the prompt tool governs.
+	if got := claudeToolsArgs("ask"); got != nil {
+		t.Errorf("ask must add no permission-mode flag, got %v", got)
+	}
+}
+
+// Pins the "ask" wiring: a temp --mcp-config registering the shim plus
+// --permission-prompt-tool, and nothing at other levels / without a
+// provider.
+func TestApprovalArgs(t *testing.T) {
+	ap := &ApprovalConfig{Command: "/usr/bin/praimate-gui", Args: []string{"-mcp-approve", "http://127.0.0.1:9/approve/c1", "-mcp-token", "tok"}}
+
+	args, cleanup, err := approvalArgs("ask", ap)
+	if err != nil {
+		t.Fatalf("approvalArgs: %v", err)
+	}
+	defer cleanup()
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "--permission-prompt-tool mcp__praimate__approve") {
+		t.Errorf("missing prompt tool flag: %q", joined)
+	}
+	if len(args) < 2 || args[0] != "--mcp-config" {
+		t.Fatalf("missing --mcp-config: %v", args)
+	}
+	raw, err := os.ReadFile(args[1])
+	if err != nil {
+		t.Fatalf("mcp config unreadable: %v", err)
+	}
+	var cfg struct {
+		MCPServers map[string]struct {
+			Command string   `json:"command"`
+			Args    []string `json:"args"`
+		} `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		t.Fatalf("mcp config invalid json: %v", err)
+	}
+	srv, ok := cfg.MCPServers["praimate"]
+	if !ok || srv.Command != ap.Command || len(srv.Args) != len(ap.Args) {
+		t.Fatalf("mcp config = %+v", cfg)
+	}
+	cleanup()
+	if _, err := os.Stat(args[1]); !os.IsNotExist(err) {
+		t.Error("cleanup did not remove the temp mcp config")
+	}
+
+	for _, tc := range []struct {
+		tools string
+		ap    *ApprovalConfig
+	}{{"", ap}, {"edits", ap}, {"full", ap}, {"ask", nil}} {
+		args, cleanup, err := approvalArgs(tc.tools, tc.ap)
+		if err != nil || len(args) != 0 {
+			t.Errorf("tools=%q ap=%v: want no args, got %v err=%v", tc.tools, tc.ap != nil, args, err)
+		}
+		cleanup()
 	}
 }
 

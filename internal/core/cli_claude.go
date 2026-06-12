@@ -100,11 +100,25 @@ func (a *ClaudeAdapter) SingleShot(ctx context.Context, opts SingleShotOpts) (*R
 	if err != nil {
 		return nil, err
 	}
-	args := []string{"--print", "--output-format", "json"}
+	args, message := a.singleShotArgs(path, "json", opts)
+	extra, cleanup, err := approvalArgs(opts.Tools, opts.Approval)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+	return a.runAt(ctx, path, opts.Cwd, opts.Env, append(args, extra...), message)
+}
+
+// singleShotArgs builds the argv (after the binary) + stdin message for
+// one fresh turn. format is the --output-format value ("json" for the
+// buffered path, "stream-json" for the streaming path).
+func (a *ClaudeAdapter) singleShotArgs(path, format string, opts SingleShotOpts) (args []string, message string) {
+	args = []string{"--print", "--output-format", format}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
 	}
-	message := opts.Message
+	args = append(args, claudeToolsArgs(opts.Tools)...)
+	message = opts.Message
 	if opts.SystemPrompt != "" {
 		if isBatchShim(path) {
 			// pnpm/npm install the CLI as a .CMD batch shim on Windows,
@@ -117,20 +131,88 @@ func (a *ClaudeAdapter) SingleShot(ctx context.Context, opts SingleShotOpts) (*R
 			args = append(args, "--append-system-prompt", opts.SystemPrompt)
 		}
 	}
-	return a.runAt(ctx, path, opts.Cwd, opts.Env, args, message)
+	return args, message
 }
 
-func (a *ClaudeAdapter) Resume(ctx context.Context, sessionID, message, model string) (*Reply, error) {
+func (a *ClaudeAdapter) Resume(ctx context.Context, sessionID string, opts ResumeOpts) (*Reply, error) {
 	if sessionID == "" {
 		return nil, errors.New("claude.Resume: empty sessionID")
 	}
-	args := []string{"--print", "--output-format", "json", "--resume", sessionID}
-	if model != "" {
+	args := resumeArgs("json", sessionID, opts)
+	extra, cleanup, err := approvalArgs(opts.Tools, opts.Approval)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+	return a.run(ctx, "", nil, append(args, extra...), opts.Message)
+}
+
+// resumeArgs builds the argv for a resumed turn. format as in
+// singleShotArgs.
+func resumeArgs(format, sessionID string, opts ResumeOpts) []string {
+	args := []string{"--print", "--output-format", format, "--resume", sessionID}
+	if opts.Model != "" {
 		// Re-pin on every turn: --resume continues the conversation but
 		// falls back to the default model unless told otherwise.
-		args = append(args, "--model", model)
+		args = append(args, "--model", opts.Model)
 	}
-	return a.run(ctx, "", nil, args, message)
+	// Permission mode is per-invocation too — re-pin it as well.
+	return append(args, claudeToolsArgs(opts.Tools)...)
+}
+
+// claudeToolsArgs maps the per-chat Tools level onto claude's
+// --permission-mode flag. "" = no flag (headless default: tools that
+// need approval are denied). "ask" also adds no mode flag — the
+// approval prompt tool (see approvalArgs) takes over instead.
+func claudeToolsArgs(tools string) []string {
+	switch tools {
+	case "edits":
+		return []string{"--permission-mode", "acceptEdits"}
+	case "full":
+		return []string{"--permission-mode", "bypassPermissions"}
+	}
+	return nil
+}
+
+// approvalArgs wires the "ask" Tools level: writes a temp --mcp-config
+// registering the PrAImate approval shim as MCP server "praimate" and
+// points --permission-prompt-tool at its "approve" tool. Claude then
+// calls that tool for EVERY permission decision; the shim forwards each
+// to the GUI dialog and blocks until the user answers (fail-closed on
+// any error). Returns no args when the level isn't "ask" or no shim
+// wiring was provided. cleanup removes the temp config after the run.
+func approvalArgs(tools string, ap *ApprovalConfig) (args []string, cleanup func(), err error) {
+	cleanup = func() {}
+	if tools != "ask" || ap == nil || ap.Command == "" {
+		return nil, cleanup, nil
+	}
+	cfg := map[string]any{
+		"mcpServers": map[string]any{
+			"praimate": map[string]any{
+				"command": ap.Command,
+				"args":    ap.Args,
+			},
+		},
+	}
+	raw, err := json.Marshal(cfg)
+	if err != nil {
+		return nil, cleanup, fmt.Errorf("approval mcp config: %w", err)
+	}
+	f, err := os.CreateTemp("", "praimate-approve-*.json")
+	if err != nil {
+		return nil, cleanup, fmt.Errorf("approval mcp config: %w", err)
+	}
+	if _, err := f.Write(raw); err != nil {
+		_ = f.Close()
+		_ = os.Remove(f.Name())
+		return nil, cleanup, fmt.Errorf("approval mcp config: %w", err)
+	}
+	_ = f.Close()
+	cleanup = func() { _ = os.Remove(f.Name()) }
+	return []string{
+		"--mcp-config", f.Name(),
+		"--permission-prompt-tool", "mcp__praimate__approve",
+	}, cleanup, nil
 }
 
 // run is the common path: locate the binary, build the command, write

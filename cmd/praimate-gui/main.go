@@ -12,6 +12,7 @@ package main
 
 import (
 	"embed"
+	"os"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -31,6 +32,21 @@ var assets embed.FS
 var appIcon []byte
 
 func main() {
+	// Hidden mode: when claude spawns this same binary as the MCP
+	// approval shim (`praimate-gui -mcp-approve <url> -mcp-token <tok>`),
+	// run the stdio server and exit WITHOUT touching Wails — no window,
+	// no webview, just stdin/stdout JSON-RPC.
+	if len(os.Args) >= 3 && os.Args[1] == "-mcp-approve" {
+		endpoint := os.Args[2]
+		token := ""
+		for i := 3; i+1 < len(os.Args); i++ {
+			if os.Args[i] == "-mcp-token" {
+				token = os.Args[i+1]
+			}
+		}
+		os.Exit(runApprovalShim(os.Stdin, os.Stdout, endpoint, token))
+	}
+
 	app := NewApp()
 
 	err := wails.Run(&options.App{
