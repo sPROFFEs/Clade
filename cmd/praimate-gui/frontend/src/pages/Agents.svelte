@@ -356,11 +356,12 @@
   </div>
   {#if error}<div class="banner">{error}</div>{/if}
   {#if notice}<div class="card card-sub">{notice}</div>{/if}
+  <div class="edit-stack">
   <div class="agent-editor">
     <CodeEditor bind:this={editorRef} value={yamlText} lang="yaml" />
   </div>
 
-  <div class="card" style="margin-top:12px">
+  <div class="card">
     <div class="card-title">Knowledge base</div>
     {#if !editing?.id}
       <div class="card-sub">Save the agent first — then you can attach documents here.</div>
@@ -387,8 +388,8 @@
         </div>
       {/if}
       {#if know.mode !== ''}
-        <label class="lbl">Documents ({know.files.length})</label>
-        {#each know.files as f}
+        <label class="lbl">Documents ({(know.files || []).length})</label>
+        {#each know.files || [] as f}
           <div class="row" style="padding:2px 0">
             <span class="grow mono" style="font-size:12px">{f}</span>
             <button class="chip-x" title="Remove" on:click={() => rmKnowFile(f)}>×</button>
@@ -399,7 +400,7 @@
           <button class="btn" on:click={() => addKnowFiles(true)}>Add folder…</button>
           {#if know.mode === 'rag'}
             <button class="btn primary" on:click={buildRAG}
-              disabled={knowBusy || !know.graphifyInstalled || know.files.length === 0}>
+              disabled={knowBusy || !know.graphifyInstalled || ((know.files || []).length === 0)}>
               {knowBusy ? 'Indexing…' : know.hasIndex ? 'Rebuild RAG index' : 'Build RAG index'}
             </button>
             {#if know.hasIndex}<span class="pill ok">index ready</span>{/if}
@@ -407,6 +408,7 @@
         </div>
       {/if}
     {/if}
+  </div>
   </div>
 {:else if view === 'run' && runAgent}
   {#if running}
@@ -550,7 +552,9 @@
 {/if}
 
 <style>
-  .agent-editor { height: 52vh; }
+  .agent-editor { flex: 1; min-height: 240px; }
+  .edit-stack { display: flex; flex-direction: column; gap: 12px; height: calc(100vh - 120px); }
+  .edit-stack .card { flex: none; max-height: 42vh; overflow-y: auto; margin-top: 0; }
   .btn.sm { padding: 3px 10px; font-size: 12px; }
   .chip-x {
     background: none;

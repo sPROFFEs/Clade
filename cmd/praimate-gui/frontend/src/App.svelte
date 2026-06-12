@@ -13,6 +13,7 @@
   import MCP from './pages/MCP.svelte'
   import Settings from './pages/Settings.svelte'
   import Editor from './pages/Editor.svelte'
+  import Setup from './pages/Setup.svelte'
 
   // Lucide-style outline icon paths (24x24 viewBox, stroke-based).
   const icons = {
@@ -46,6 +47,8 @@
   // Studio mode: this process was spawned as a document-editor window —
   // render the Editor shell instead of the main app.
   let editorMode = null
+  // First-run setup (no launcher config yet) — same flow as the TUI.
+  let firstRun = null
 
   onMount(async () => {
     initTheme()
@@ -55,11 +58,20 @@
       editorMode = { active: false }
     }
     try {
+      firstRun = await api.firstRun()
+    } catch {
+      firstRun = { needed: false }
+    }
+    try {
       health = await api.health()
     } catch (e) {
       health = { ok: false, error: String(e) }
     }
   })
+
+  function setupDone() {
+    firstRun = { ...firstRun, needed: false }
+  }
 
   // Quick theme cycle in the sidebar footer: dark → light → system.
   const modeOrder = ['dark', 'light', 'system']
@@ -77,6 +89,8 @@
 
 {#if editorMode?.active}
   <Editor folder={editorMode.folder} chatId={editorMode.chatId} />
+{:else if editorMode && firstRun?.needed}
+  <Setup defaultRoot={firstRun.defaultRoot} on:done={setupDone} />
 {:else if editorMode}
 <div class="shell">
   <nav class="sidebar">

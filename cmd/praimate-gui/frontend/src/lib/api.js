@@ -20,6 +20,9 @@ function call(method, ...args) {
 
 export const api = {
   health: () => call('Health'),
+  firstRun: () => call('FirstRun'),
+  completeFirstRun: (root, samples, cloneURL) =>
+    call('CompleteFirstRun', root, samples, cloneURL || ''),
 
   listChats: () => call('ListChats'),
   chatMessages: (id) => call('ChatMessages', id),

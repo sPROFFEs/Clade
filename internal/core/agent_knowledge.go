@@ -49,7 +49,9 @@ func ListAgentKnowledge(id string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	var out []string
+	// Never nil: a nil slice serialises to JSON null and crashes list
+	// renderers in the GUI (the "frozen knowledge panel" bug).
+	out := []string{}
 	err = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
