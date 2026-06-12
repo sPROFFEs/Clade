@@ -36,33 +36,48 @@
   let dlg = null
   let allClis = []
 
-  async function openLaunch(agent, surface) {
+  function cliOptionsFor(agent) {
+    if (!agent) return allClis
+    return (agent.supports || []).map((s) => {
+      const info = allClis.find((c) => c.id === s)
+      return { id: s, label: info?.label || s, available: info ? info.available : true }
+    })
+  }
+
+  function openLaunch(agent, surface) {
     error = ''
-    try {
-      if (allClis.length === 0) allClis = (await api.listCLIs()) || []
-      let cliOptions
-      if (agent) {
-        cliOptions = (agent.supports || []).map((s) => {
-          const info = allClis.find((c) => c.id === s)
-          return { id: s, label: info?.label || s, available: info ? info.available : true }
-        })
-      } else {
-        cliOptions = allClis
+    // Open INSTANTLY; availability + model suggestions stream in (the
+    // CLI probe takes seconds and a frozen button reads as broken).
+    const cliOptions = agent
+      ? (agent.supports || []).map((s) => ({ id: s, label: s, available: true }))
+      : allClis.length
+        ? allClis
+        : [{ id: 'claude', label: 'claude', available: true }]
+    dlg = {
+      agent,
+      surface,
+      cli: cliOptions[0]?.id || 'claude',
+      model: '',
+      cliOptions,
+      suggestions: [],
+      folder: '',
+      busy: false,
+    }
+    const fill = () => {
+      if (!dlg) return
+      dlg.cliOptions = cliOptionsFor(agent)
+      const cur = dlg.cliOptions.find((c) => c.id === dlg.cli)
+      if (!cur || !cur.available) {
+        const first = dlg.cliOptions.find((c) => c.available) || dlg.cliOptions[0]
+        if (first) dlg.cli = first.id
       }
-      const first = cliOptions.find((c) => c.available) || cliOptions[0]
-      dlg = {
-        agent,
-        surface,
-        cli: first?.id || 'claude',
-        model: '',
-        cliOptions,
-        suggestions: [],
-        folder: '',
-        busy: false,
-      }
-      await dlgCliChanged()
-    } catch (e) {
-      error = String(e)
+      dlg = dlg
+      dlgCliChanged()
+    }
+    if (allClis.length === 0) {
+      api.listCLIs().then((r) => { allClis = r || []; fill() }).catch(() => {})
+    } else {
+      fill()
     }
   }
 

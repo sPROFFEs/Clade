@@ -440,3 +440,41 @@ surfaces: [browser]
 		t.Error("unknown surface must fail validation")
 	}
 }
+
+// A builtin the user edited (source_path cleared by the YAML-editor
+// save) must survive re-seeding — startup must not clobber user tweaks.
+func TestSeedBuiltins_PreservesUserEditedBuiltin(t *testing.T) {
+	c, _ := New(Options{Store: openTempStore(t)})
+	ctx := context.Background()
+	if _, err := c.SeedBuiltins(ctx); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	a, err := c.GetAgent(ctx, "agent-builder")
+	if err != nil {
+		t.Fatalf("get builtin: %v", err)
+	}
+	// User edits it via the GUI editor (import with empty source path).
+	a.Description = "my customized builder"
+	raw, _ := MarshalAgentYAML(a)
+	if _, err := c.ImportAgentYAML(ctx, raw, ""); err != nil {
+		t.Fatalf("user edit: %v", err)
+	}
+	// Next startup re-seeds — the tweak must survive.
+	if _, err := c.SeedBuiltins(ctx); err != nil {
+		t.Fatalf("re-seed: %v", err)
+	}
+	got, _ := c.GetAgent(ctx, "agent-builder")
+	if got.Description != "my customized builder" {
+		t.Fatalf("re-seed clobbered the user's edit; description = %q", got.Description)
+	}
+	// Deleting brings the pristine builtin back on the next seed.
+	if err := c.DeleteAgent(ctx, "agent-builder"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if _, err := c.SeedBuiltins(ctx); err != nil {
+		t.Fatalf("seed after delete: %v", err)
+	}
+	if _, err := c.GetAgent(ctx, "agent-builder"); err != nil {
+		t.Fatalf("pristine builtin did not come back: %v", err)
+	}
+}

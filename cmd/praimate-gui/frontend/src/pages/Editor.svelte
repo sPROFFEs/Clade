@@ -8,6 +8,17 @@
   // the agent's next turn reads what's on screen.
   import { onMount, onDestroy, tick } from 'svelte'
   import { marked } from 'marked'
+  marked.use({ gfm: true, breaks: true })
+
+  // Render markdown for the preview pane. marked handles GFM task
+  // lists only in some shapes — normalize any leftover literal [ ]/[x]
+  // at the start of a list item into a real (disabled) checkbox.
+  function renderMD(src) {
+    let html = marked.parse(src || '')
+    html = html.replace(/<li>\s*\[(\s|x|X)\]\s?/g, (m, c) =>
+      `<li class="task-item"><input type="checkbox" disabled${c.trim() ? ' checked' : ''}> `)
+    return html
+  }
   import { api, onChatStream, onApproval } from '../lib/api.js'
   import CodeEditor from '../lib/CodeEditor.svelte'
 
@@ -157,7 +168,7 @@
     const t = tabs.find((x) => x.path === active)
     if (t?.ref) item.act(t.ref)
   }
-  $: previewHTML = preview && activeTab ? marked.parse(activeTab.content) : ''
+  $: previewHTML = preview && activeTab ? renderMD(activeTab.content) : ''
 
   // --- right-click → ask the agent about the selection ----------------------
 
@@ -501,6 +512,20 @@
     padding: 6px;
   }
   .tree-head { display: flex; align-items: center; gap: 6px; padding: 4px 6px 8px; font-size: 12px; color: var(--text-dim); }
+  /* Identical square buttons so the hide/new controls line up with the
+     folder label instead of floating at mismatched heights. */
+  .tree-head :global(.btn.sm),
+  .tree-head .btn.sm {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    flex: none;
+  }
+  .tree-head .grow { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tree-item {
     display: block;
     width: 100%;
@@ -603,6 +628,14 @@
   .preview-pane :global(blockquote) { border-left: 3px solid var(--border); margin: 0.5em 0; padding-left: 10px; color: var(--text-dim); }
   .preview-pane :global(table) { border-collapse: collapse; }
   .preview-pane :global(td), .preview-pane :global(th) { border: 1px solid var(--border); padding: 4px 8px; }
+  .preview-pane :global(img) { max-width: 100%; }
+  .preview-pane :global(li.task-item),
+  .preview-pane :global(li:has(> input[type='checkbox'])) { list-style: none; margin-left: -1.2em; }
+  .preview-pane :global(input[type='checkbox']) {
+    margin-right: 6px;
+    vertical-align: -1px;
+    accent-color: var(--accent, #7c6cf2);
+  }
   .ask-popup {
     position: fixed;
     /* Above CodeMirror's internal layers (tooltips/panels go to ~300). */

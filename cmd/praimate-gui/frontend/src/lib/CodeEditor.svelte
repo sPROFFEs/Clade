@@ -105,33 +105,40 @@
   // --- formatting helpers for the studio toolbar ----------------------
 
   // wrapSelection surrounds the selection with prefix/suffix (toggling
-  // off when already wrapped); with no selection inserts placeholder.
+  // off when already wrapped). With no selection it inserts the
+  // placeholder and SELECTS it, so the user just types over it; with a
+  // selection the cursor lands after the wrapped text.
   export function wrapSelection(prefix, suffix, placeholder = 'text') {
     if (!view) return
     const sel = view.state.selection.main
     const selected = view.state.sliceDoc(sel.from, sel.to)
     let insert
+    let selection
     if (!selected) {
       insert = prefix + placeholder + suffix
+      selection = { anchor: sel.from + prefix.length, head: sel.from + prefix.length + placeholder.length }
     } else if (selected.startsWith(prefix) && selected.endsWith(suffix) && selected.length >= prefix.length + suffix.length) {
       insert = selected.slice(prefix.length, selected.length - suffix.length)
+      selection = { anchor: sel.from + insert.length }
     } else {
       insert = prefix + selected + suffix
+      selection = { anchor: sel.from + insert.length }
     }
-    view.dispatch({
-      changes: { from: sel.from, to: sel.to, insert },
-      selection: { anchor: sel.from, head: sel.from + insert.length },
-    })
+    view.dispatch({ changes: { from: sel.from, to: sel.to, insert }, selection })
     view.focus()
   }
 
   // toggleLinePrefix adds/removes a prefix on every selected line
-  // (headings, lists, quotes).
+  // (headings, lists, quotes). The cursor ends at the END of its line
+  // — CodeMirror's default mapping leaves it BEFORE a prefix inserted
+  // at the cursor position (the empty-line heading case), which forced
+  // users to reposition by hand.
   export function toggleLinePrefix(prefix) {
     if (!view) return
     const sel = view.state.selection.main
     const startLine = view.state.doc.lineAt(sel.from).number
     const endLine = view.state.doc.lineAt(sel.to).number
+    const headLineNo = view.state.doc.lineAt(sel.head).number
     const changes = []
     let allHave = true
     for (let n = startLine; n <= endLine; n++) {
@@ -145,15 +152,22 @@
         changes.push({ from: line.from, insert: prefix })
       }
     }
-    if (changes.length) view.dispatch({ changes })
+    if (changes.length) {
+      view.dispatch({ changes })
+      const line = view.state.doc.line(Math.min(headLineNo, view.state.doc.lines))
+      view.dispatch({ selection: { anchor: line.to } })
+    }
     view.focus()
   }
 
-  // insertSnippet drops text at the cursor (tables, links, rules).
+  // insertSnippet drops text at the cursor, leaving the cursor after it.
   export function insertSnippet(snippet) {
     if (!view) return
     const sel = view.state.selection.main
-    view.dispatch({ changes: { from: sel.from, to: sel.to, insert: snippet } })
+    view.dispatch({
+      changes: { from: sel.from, to: sel.to, insert: snippet },
+      selection: { anchor: sel.from + snippet.length },
+    })
     view.focus()
   }
 </script>

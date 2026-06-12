@@ -2,7 +2,9 @@ package core
 
 import (
 	"context"
+	"database/sql"
 	"embed"
+	"errors"
 	"fmt"
 	"io/fs"
 	"path"
@@ -49,10 +51,13 @@ func BuiltinAgents() ([]*Agent, error) {
 
 // SeedBuiltins upserts every built-in agent into the user's DB and
 // removes stale builtins (rows whose source_path is "builtin:..." but
-// which no longer ship in the binary). Safe to run on every startup:
-// existing ids are updated in place, so editing a built-in YAML and
-// rebuilding picks up the change; user-imported agents are never
-// touched because their source_path is not "builtin:...".
+// which no longer ship in the binary).
+//
+// Ownership rule: a builtin row is refreshed on startup ONLY while its
+// source_path still says "builtin:<id>". The moment the user edits it
+// (the YAML editor / import save with an empty source path), the row
+// is theirs — re-seeding must NOT clobber their tweaks on the next
+// launch. Deleting the row brings the pristine builtin back.
 //
 // Returns the number of agents seeded.
 func (c *Core) SeedBuiltins(ctx context.Context) (int, error) {
@@ -66,6 +71,17 @@ func (c *Core) SeedBuiltins(ctx context.Context) (int, error) {
 	current := make(map[string]bool, len(agents))
 	for _, a := range agents {
 		current[a.ID] = true
+		var src sql.NullString
+		err := c.store.DB().QueryRowContext(ctx,
+			`SELECT source_path FROM agents WHERE id = ?`, a.ID).Scan(&src)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			// absent — seed it
+		case err != nil:
+			return 0, fmt.Errorf("probe builtin %s: %w", a.ID, err)
+		case !src.Valid || !strings.HasPrefix(src.String, "builtin:"):
+			continue // user-owned now — hands off
+		}
 		if _, err := c.upsertAgent(ctx, a); err != nil {
 			return 0, fmt.Errorf("seed %s: %w", a.ID, err)
 		}

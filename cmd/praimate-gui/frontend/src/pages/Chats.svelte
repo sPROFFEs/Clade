@@ -91,23 +91,27 @@
     }
   }
 
-  async function openConfig(chat) {
+  function openConfig(chat) {
     error = ''
-    try {
-      if (clis.length === 0) clis = (await api.listCLIs()) || []
-      cfg = {
-        chat,
-        cli: chat.CLIAgent,
-        model: chat.Settings?.model || '',
-        tools: chat.Settings?.tools || '',
-        localEndpoint: chat.Settings?.local?.endpoint || '',
-        localApiKey: chat.Settings?.local?.api_key || '',
-        localModel: chat.Settings?.local?.model || '',
-        suggestions: (await api.listCLIModels(chat.CLIAgent).catch(() => [])) || [],
-      }
-    } catch (e) {
-      error = String(e)
+    // Open INSTANTLY with what we already know; the CLI availability
+    // probe and model suggestions fill in asynchronously (probing 7
+    // CLIs takes seconds — a dialog that waits for it reads as broken).
+    cfg = {
+      chat,
+      cli: chat.CLIAgent,
+      model: chat.Settings?.model || '',
+      tools: chat.Settings?.tools || '',
+      localEndpoint: chat.Settings?.local?.endpoint || '',
+      localApiKey: chat.Settings?.local?.api_key || '',
+      localModel: chat.Settings?.local?.model || '',
+      suggestions: [],
     }
+    if (clis.length === 0) {
+      api.listCLIs().then((r) => { clis = r || [] }).catch(() => {})
+    }
+    api.listCLIModels(chat.CLIAgent)
+      .then((r) => { if (cfg && cfg.chat.ID === chat.ID) { cfg.suggestions = r || []; cfg = cfg } })
+      .catch(() => {})
   }
 
   async function cfgCliChanged() {
@@ -386,6 +390,9 @@
     <div class="card-sub">Same controls as the TUI's per-chat settings. Switching the CLI starts a fresh session on the next message; the history stays.</div>
     <label class="lbl">CLI</label>
     <select class="field" style="max-width:320px" bind:value={cfg.cli} on:change={cfgCliChanged}>
+      {#if clis.length === 0}
+        <option value={cfg.cli}>{cfg.cli} (probing CLIs…)</option>
+      {/if}
       {#each clis as c}
         <option value={c.id} disabled={!c.available && c.id !== cfg.chat.CLIAgent}>
           {c.label}{c.available ? '' : ' — not installed'}
@@ -584,6 +591,9 @@
       <div class="card-sub">A plain conversation with the CLI — no agent persona. Pick the CLI and (optionally) pin the model it should use.</div>
       <label class="lbl">CLI</label>
       <select class="field" style="max-width:320px" bind:value={newCli} on:change={refreshModels}>
+        {#if clis.length === 0}
+          <option value="">probing installed CLIs…</option>
+        {/if}
         {#each clis as c}
           <option value={c.id} disabled={!c.available}>
             {c.label}{c.available ? '' : ' — not installed'}
