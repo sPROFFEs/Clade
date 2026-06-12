@@ -140,12 +140,81 @@
   let editorRef
   let saving = false
 
+  // --- knowledge panel (inside the edit view) --------------------------------
+
+  let know = null // AgentKnowledgeInfo for the agent being edited
+  let knowBusy = false
+  let ragLog = []
+  let unsubRag = () => {}
+
+  async function loadKnowledge(id) {
+    know = null
+    if (!id) return
+    try {
+      know = await api.getAgentKnowledge(id)
+    } catch (e) {
+      error = String(e)
+    }
+  }
+
+  async function setKnowMode(mode) {
+    if (!editing?.id) return
+    try {
+      await api.setAgentKnowledgeMode(editing.id, mode)
+      // The YAML changed (knowledge: field) — refresh the editor too.
+      yamlText = await api.agentYAML(editing.id)
+      editorRef?.setExternal(yamlText)
+      await loadKnowledge(editing.id)
+      await load()
+    } catch (e) {
+      error = String(e)
+    }
+  }
+
+  async function addKnowFiles(folder) {
+    if (!editing?.id) return
+    try {
+      const files = folder
+        ? await api.pickAgentKnowledgeFolder(editing.id)
+        : await api.pickAgentKnowledgeFiles(editing.id)
+      if (know) { know.files = files || []; know = know }
+    } catch (e) {
+      error = String(e)
+    }
+  }
+
+  async function rmKnowFile(rel) {
+    try {
+      const files = await api.deleteAgentKnowledgeFile(editing.id, rel)
+      if (know) { know.files = files || []; know = know }
+    } catch (e) {
+      error = String(e)
+    }
+  }
+
+  async function buildRAG() {
+    if (!editing?.id || knowBusy) return
+    knowBusy = true
+    ragLog = []
+    error = ''
+    try {
+      await api.buildAgentRAG(editing.id)
+      notice = 'RAG index built.'
+      await loadKnowledge(editing.id)
+    } catch (e) {
+      error = String(e)
+    } finally {
+      knowBusy = false
+    }
+  }
+
   async function edit(a) {
     error = ''
     try {
       yamlText = await api.agentYAML(a.id)
       editing = a
       view = 'edit'
+      loadKnowledge(a.id)
     } catch (e) {
       error = String(e)
     }
@@ -156,6 +225,7 @@
     try {
       yamlText = await api.newAgentTemplateYAML()
       editing = { id: '', name: 'new agent' }
+      know = null
       view = 'edit'
     } catch (e) {
       error = String(e)
@@ -169,7 +239,10 @@
       const body = editorRef?.getValue() ?? yamlText
       const saved = await api.saveAgentYAML(body)
       notice = `Saved ${saved.name}`
-      view = 'list'
+      // Stay in the editor (now bound to the saved id) so the knowledge
+      // step is available right after creating an agent.
+      editing = saved
+      await loadKnowledge(saved.id)
       await load()
     } catch (e) {
       error = String(e)
@@ -187,7 +260,9 @@
 
   async function exportYAML(a) {
     try {
-      const path = await api.exportAgentDialog(a.id)
+      // Pack-aware: .praimate-agent (yaml + knowledge) by default,
+      // bare YAML when the user picks that extension in the dialog.
+      const path = await api.exportAgentPackDialog(a.id)
       if (path) notice = `Exported to ${path}`
     } catch (e) { error = String(e) }
   }
@@ -264,6 +339,7 @@
     view = 'list'
     runAgent = null; workflow = null; inputs = {}; turns = []; result = null; privacyCounts = null
     editing = null
+    know = null
   }
 
   onMount(load)
@@ -279,8 +355,58 @@
     <button class="btn primary" on:click={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
   </div>
   {#if error}<div class="banner">{error}</div>{/if}
+  {#if notice}<div class="card card-sub">{notice}</div>{/if}
   <div class="agent-editor">
     <CodeEditor bind:this={editorRef} value={yamlText} lang="yaml" />
+  </div>
+
+  <div class="card" style="margin-top:12px">
+    <div class="card-title">Knowledge base</div>
+    {#if !editing?.id}
+      <div class="card-sub">Save the agent first — then you can attach documents here.</div>
+    {:else if !know}
+      <div class="card-sub">Loading…</div>
+    {:else}
+      <div class="card-sub">
+        Documents live in <span class="mono">{know.dir}</span> and travel inside the agent's
+        <span class="mono">.praimate-agent</span> pack on export. The folder is the same for both
+        formats — you can switch later without breaking the agent.
+      </div>
+      <label class="lbl">Format</label>
+      <div class="row">
+        <button class="btn sm" class:primary={know.mode === ''} on:click={() => setKnowMode('')}>None</button>
+        <button class="btn sm" class:primary={know.mode === 'raw'} on:click={() => setKnowMode('raw')}
+          title="The agent reads the documents directly with its file tools — best under a few MB.">Raw documents</button>
+        <button class="btn sm" class:primary={know.mode === 'rag'} on:click={() => setKnowMode('rag')}
+          title="A graphify knowledge-graph index over the same folder; the agent queries it for retrieval.">RAG (graphify)</button>
+      </div>
+      {#if know.mode === 'rag' && !know.graphifyInstalled}
+        <div class="banner" style="margin-top:8px">
+          RAG mode needs <strong>graphify</strong> — install it from the CLIs tab (Managed tools).
+          Until then the agent falls back to reading the files directly.
+        </div>
+      {/if}
+      {#if know.mode !== ''}
+        <label class="lbl">Documents ({know.files.length})</label>
+        {#each know.files as f}
+          <div class="row" style="padding:2px 0">
+            <span class="grow mono" style="font-size:12px">{f}</span>
+            <button class="chip-x" title="Remove" on:click={() => rmKnowFile(f)}>×</button>
+          </div>
+        {/each}
+        <div class="row" style="margin-top:8px">
+          <button class="btn" on:click={() => addKnowFiles(false)}>Add files…</button>
+          <button class="btn" on:click={() => addKnowFiles(true)}>Add folder…</button>
+          {#if know.mode === 'rag'}
+            <button class="btn primary" on:click={buildRAG}
+              disabled={knowBusy || !know.graphifyInstalled || know.files.length === 0}>
+              {knowBusy ? 'Indexing…' : know.hasIndex ? 'Rebuild RAG index' : 'Build RAG index'}
+            </button>
+            {#if know.hasIndex}<span class="pill ok">index ready</span>{/if}
+          {/if}
+        </div>
+      {/if}
+    {/if}
   </div>
 {:else if view === 'run' && runAgent}
   {#if running}
@@ -424,5 +550,14 @@
 {/if}
 
 <style>
-  .agent-editor { height: calc(100vh - 140px); }
+  .agent-editor { height: 52vh; }
+  .btn.sm { padding: 3px 10px; font-size: 12px; }
+  .chip-x {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .chip-x:hover { color: var(--text); }
 </style>

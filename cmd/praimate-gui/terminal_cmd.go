@@ -81,6 +81,8 @@ func exportAgentContext(cwd, cli string, agent *core.Agent) error {
 			return nil
 		}
 	}
-	body := fmt.Sprintf("%s\n# %s\n\n%s\n", marker, agent.Name, strings.TrimSpace(agent.Instructions))
+	// AgentSystemPrompt = instructions + the knowledge-base pointer, so
+	// terminal sessions get the same context as chats and the studio.
+	body := fmt.Sprintf("%s\n# %s\n\n%s\n", marker, agent.Name, strings.TrimSpace(core.AgentSystemPrompt(agent)))
 	return os.WriteFile(path, []byte(body), 0o644)
 }

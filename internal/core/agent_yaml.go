@@ -30,6 +30,7 @@ type agentYAML struct {
 	Workflows       []workflowYAML `yaml:"workflows,omitempty"`
 	DefaultWorkflow string         `yaml:"default_workflow,omitempty"`
 	Surfaces        []string       `yaml:"surfaces,omitempty"`
+	Knowledge       string         `yaml:"knowledge,omitempty"`
 }
 
 type workflowYAML struct {
@@ -104,6 +105,7 @@ func MarshalAgentYAML(a *Agent) ([]byte, error) {
 		MCPServers:      a.MCPServers,
 		DefaultWorkflow: a.DefaultWorkflow,
 		Surfaces:        a.Surfaces,
+		Knowledge:       a.Knowledge,
 	}
 	for _, w := range a.Workflows {
 		wy := workflowYAML{Name: w.Name, Description: w.Description}
@@ -141,6 +143,7 @@ func (raw *agentYAML) toAgent() (*Agent, error) {
 		MCPServers:      raw.MCPServers,
 		DefaultWorkflow: raw.DefaultWorkflow,
 		Surfaces:        raw.Surfaces,
+		Knowledge:       raw.Knowledge,
 	}
 	for _, wy := range raw.Workflows {
 		w := Workflow{Name: wy.Name, Description: wy.Description}
@@ -213,6 +216,11 @@ func (a *Agent) Validate() error {
 		if !ok {
 			return fmt.Errorf("agent %q: unknown surface %q (want chat, terminal or editor)", a.ID, s)
 		}
+	}
+	switch a.Knowledge {
+	case "", "raw", "rag":
+	default:
+		return fmt.Errorf("agent %q: unknown knowledge mode %q (want raw or rag)", a.ID, a.Knowledge)
 	}
 	return nil
 }

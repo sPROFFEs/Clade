@@ -44,7 +44,7 @@ func (a *App) SendChatStream(chatID, message string, attachments []string) (*cor
 	systemPrompt := ""
 	if chat.AgentID != "" {
 		if agent, err := c.GetAgent(a.ctx, chat.AgentID); err == nil {
-			systemPrompt = agent.Instructions
+			systemPrompt = core.AgentSystemPrompt(agent)
 		}
 	}
 

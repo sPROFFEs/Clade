@@ -67,6 +67,12 @@ surfaces:
   - terminal
   - editor
 
+# Optional knowledge base: "raw" (a folder of documents the agent reads
+# directly) or "rag" (the same folder indexed with graphify for
+# retrieval). After saving, attach the documents in the Knowledge panel
+# below the editor — they ship inside the exported .praimate-agent pack.
+# knowledge: raw
+
 # Optional: MCP servers (by id from the MCP tab) and scripted workflows.
 mcp_servers: []
 workflows: []

@@ -38,10 +38,15 @@ instructions: |
     coding agent on [terminal, chat]; a pure advisor on [chat].
 
   Knowledge: an agent's durable know-how belongs in its instructions
-  when short. When the user has reference documents, tell them to keep
-  a knowledge folder in the project the agent runs in (the agent reads
-  the files with its own tools) and to name those files explicitly in
-  the instructions ("Read knowledge/style-guide.md before writing").
+  when short. For reference documents, PrAImate agents have a built-in
+  knowledge base: set `knowledge: raw` (a folder of documents the agent
+  reads directly — best under a few MB) or `knowledge: rag` (the same
+  folder indexed with graphify; the agent retrieves with
+  `graphify query`). The user attaches the documents in the GUI's
+  Knowledge panel after saving; they travel inside the exported
+  .praimate-agent pack. Ask whether the agent needs reference documents
+  and which mode fits (raw for small/precise corpora, rag for large
+  ones), and set the knowledge field accordingly.
 
   Your process:
   1. Ask what the agent should do, who it's for, and which CLI(s) it

@@ -142,7 +142,7 @@ func (c *Core) RunWorkflow(ctx context.Context, opts RunOptions) *RunResult {
 		return res
 	}
 	privacy := c.PrivacyScanner().NewRedactionSession()
-	systemPrompt, _ := privacy.Redact(opts.Agent.Instructions)
+	systemPrompt, _ := privacy.Redact(AgentSystemPrompt(opts.Agent))
 
 	// Optional DB-backed chat persistence. Failures here are logged
 	// via res.Err only if no other path sets it later; they do NOT

@@ -26,6 +26,15 @@ type Agent struct {
 	// the backward-compatible default.
 	Surfaces []string `json:"surfaces"`
 
+	// Knowledge is the agent's knowledge-base mode: "" (none), "raw"
+	// (a folder of documents under the agent's managed dir that the
+	// agent reads with its own file tools), "rag" (the same folder
+	// plus a graphify knowledge-graph index built into
+	// knowledge/.graphify, queried with `graphify query`). The folder
+	// path is identical for both modes, so the format can change after
+	// the agent exists without breaking anything.
+	Knowledge string `json:"knowledge,omitempty"`
+
 	// SourcePath is the YAML file the agent was last imported from, if
 	// any. Empty for agents created in-place via the TUI/GUI.
 	SourcePath string `json:"source_path,omitempty"`

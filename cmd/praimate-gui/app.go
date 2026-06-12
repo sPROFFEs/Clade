@@ -315,7 +315,7 @@ func (a *App) SendChat(chatID, message string) (*core.ChatTurn, error) {
 	systemPrompt := ""
 	if chat.AgentID != "" {
 		if agent, err := c.GetAgent(a.ctx, chat.AgentID); err == nil {
-			systemPrompt = agent.Instructions
+			systemPrompt = core.AgentSystemPrompt(agent)
 		}
 	}
 	return c.ContinueChat(a.ctx, chatID, message, chat.WorkspacePath, systemPrompt)
@@ -548,22 +548,29 @@ func (a *App) ListAgents() ([]core.Agent, error) {
 }
 
 // ImportAgentDialog opens a native file picker and imports the chosen
-// YAML. Returns the imported agent, or nil if the user cancelled.
+// agent — bare YAML or a .praimate-agent knowledge pack. Returns the
+// imported agent, or nil if the user cancelled.
 func (a *App) ImportAgentDialog() (*core.Agent, error) {
 	c, err := a.requireCore()
 	if err != nil {
 		return nil, err
 	}
 	path, err := wruntime.OpenFileDialog(a.ctx, wruntime.OpenDialogOptions{
-		Title: "Import agent YAML",
+		Title: "Import agent (YAML or pack)",
 		Filters: []wruntime.FileFilter{
-			{DisplayName: "Agent YAML", Pattern: "*.yaml;*.yml"},
+			{DisplayName: "Agents", Pattern: "*.yaml;*.yml;*" + core.AgentPackExt + ";*.zip"},
 		},
 	})
 	if err != nil || path == "" {
 		return nil, err
 	}
-	return c.ImportAgent(a.ctx, path)
+	return c.ImportAgentAuto(a.ctx, path)
+}
+
+// dirExists reports whether path is an existing directory.
+func dirExists(path string) bool {
+	fi, err := os.Stat(path)
+	return err == nil && fi.IsDir()
 }
 
 // ExportAgentDialog opens a native save dialog and writes the agent

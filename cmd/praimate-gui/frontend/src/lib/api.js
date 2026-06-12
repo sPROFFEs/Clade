@@ -50,6 +50,13 @@ export const api = {
   agentYAML: (id) => call('AgentYAML', id),
   saveAgentYAML: (yaml) => call('SaveAgentYAML', yaml),
   newAgentTemplateYAML: () => call('NewAgentTemplateYAML'),
+  getAgentKnowledge: (id) => call('GetAgentKnowledge', id),
+  setAgentKnowledgeMode: (id, mode) => call('SetAgentKnowledgeMode', id, mode),
+  pickAgentKnowledgeFiles: (id) => call('PickAgentKnowledgeFiles', id),
+  pickAgentKnowledgeFolder: (id) => call('PickAgentKnowledgeFolder', id),
+  deleteAgentKnowledgeFile: (id, rel) => call('DeleteAgentKnowledgeFile', id, rel),
+  buildAgentRAG: (id) => call('BuildAgentRAG', id),
+  exportAgentPackDialog: (id) => call('ExportAgentPackDialog', id),
 
   updateChatConfig: (chatID, cli, model, tools, localEndpoint, localApiKey, localModel) =>
     call('UpdateChatConfig', chatID, cli, model, tools, localEndpoint || '', localApiKey || '', localModel || ''),

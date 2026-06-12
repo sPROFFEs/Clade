@@ -177,7 +177,7 @@ func (a *App) SendChatWithAttachments(chatID, message string, attachments []stri
 	systemPrompt := ""
 	if chat.AgentID != "" {
 		if agent, err := c.GetAgent(a.ctx, chat.AgentID); err == nil {
-			systemPrompt = agent.Instructions
+			systemPrompt = core.AgentSystemPrompt(agent)
 		}
 	}
 	return c.ContinueChatWithAttachments(a.ctx, chatID, message, chat.WorkspacePath, systemPrompt, attachments)

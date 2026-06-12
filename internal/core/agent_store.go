@@ -126,7 +126,7 @@ func (c *Core) upsertAgent(ctx context.Context, a *Agent) (*Agent, error) {
 	_, err = c.store.DB().ExecContext(ctx, agentUpsert,
 		a.ID, a.Name, a.Description, nullableText(a.Icon),
 		a.Instructions, string(tools), string(mcps), string(wfs), string(supports),
-		string(surfaces), a.DefaultWorkflow, nullableText(a.SourcePath), now, now,
+		string(surfaces), a.Knowledge, a.DefaultWorkflow, nullableText(a.SourcePath), now, now,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("upsert agent %s: %w", a.ID, err)
@@ -146,7 +146,7 @@ func scanAgent(scan func(...any) error) (*Agent, error) {
 	err := scan(
 		&a.ID, &a.Name, &a.Description, &icon,
 		&a.Instructions, &toolsJSON, &mcpsJSON, &wfsJSON, &supportsJSON,
-		&surfacesJSON, &a.DefaultWorkflow, &sourcePath, &createdAt, &updatedAt,
+		&surfacesJSON, &a.Knowledge, &a.DefaultWorkflow, &sourcePath, &createdAt, &updatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -199,7 +199,7 @@ func nullableText(s string) any {
 const (
 	agentColumns = `id, name, description, icon, instructions,
 		tools_json, mcp_servers_json, workflows_json, supports_json,
-		surfaces_json, default_workflow, source_path, created_at, updated_at`
+		surfaces_json, knowledge, default_workflow, source_path, created_at, updated_at`
 
 	agentSelectAll  = `SELECT ` + agentColumns + ` FROM agents ORDER BY name`
 	agentSelectByID = `SELECT ` + agentColumns + ` FROM agents WHERE id = ?`
@@ -207,8 +207,8 @@ const (
 	agentUpsert = `INSERT INTO agents (
 		id, name, description, icon, instructions,
 		tools_json, mcp_servers_json, workflows_json, supports_json,
-		surfaces_json, default_workflow, source_path, created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		surfaces_json, knowledge, default_workflow, source_path, created_at, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(id) DO UPDATE SET
 		name             = excluded.name,
 		description      = excluded.description,
@@ -219,6 +219,7 @@ const (
 		workflows_json   = excluded.workflows_json,
 		supports_json    = excluded.supports_json,
 		surfaces_json    = excluded.surfaces_json,
+		knowledge        = excluded.knowledge,
 		default_workflow = excluded.default_workflow,
 		source_path      = excluded.source_path,
 		updated_at       = excluded.updated_at`
