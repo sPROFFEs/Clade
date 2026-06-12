@@ -127,6 +127,12 @@
     flush(t) // our version wins on disk
   }
 
+  // --- layout: collapsible side panes ---------------------------------------
+
+  let treeOpen = true
+  let chatOpen = true
+  $: gridCols = `${treeOpen ? '220px' : '30px'} 1fr ${chatOpen ? '340px' : '30px'}`
+
   // --- toolbar + preview ---------------------------------------------------
 
   let preview = false
@@ -309,9 +315,13 @@
   $: activeTab = tabs.find((t) => t.path === active)
 </script>
 
-<div class="studio">
+<div class="studio" style="grid-template-columns: {gridCols}">
+  {#if !treeOpen}
+    <button class="rail" title="Show files" on:click={() => (treeOpen = true)}>▸<span class="rail-label">Files</span></button>
+  {:else}
   <aside class="tree">
     <div class="tree-head">
+      <button class="btn sm" title="Hide files" on:click={() => (treeOpen = false)}>◂</button>
       <span class="grow mono" title={folder}>{folder.split(/[\\/]/).pop()}</span>
       <button class="btn sm" on:click={() => (showNewFile = !showNewFile)} title="New file">＋</button>
     </div>
@@ -331,6 +341,7 @@
     {/each}
     {#if files.length === 0}<div class="card-sub" style="padding:8px">No editable files yet — create one.</div>{/if}
   </aside>
+  {/if}
 
   <section class="editor-col">
     {#if error}<div class="banner">{error}</div>{/if}
@@ -399,10 +410,14 @@
     </div>
   {/if}
 
+  {#if !chatOpen}
+    <button class="rail" title="Show agent chat" on:click={() => (chatOpen = true)}>◂<span class="rail-label">Chat</span></button>
+  {:else}
   <aside class="chatpane">
     <div class="chat-head">
-      <strong>{chat?.Title || 'Agent chat'}</strong>
+      <strong class="grow">{chat?.Title || 'Agent chat'}</strong>
       <span class="pill">{chat?.CLIAgent || ''}</span>
+      <button class="btn sm" title="Hide chat" on:click={() => (chatOpen = false)}>▸</button>
     </div>
     <div class="thread" bind:this={threadEl}>
       {#each messages as m}
@@ -451,17 +466,33 @@
       {/if}
     </div>
   </aside>
+  {/if}
 </div>
 
 <style>
   .studio {
     display: grid;
-    grid-template-columns: 220px 1fr 340px;
+    /* columns set inline (collapsible side panes) */
     gap: 10px;
     height: 100vh;
     padding: 10px;
     box-sizing: border-box;
   }
+  .rail {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--panel);
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding-top: 10px;
+  }
+  .rail:hover { color: var(--text); }
+  .rail-label { writing-mode: vertical-rl; letter-spacing: 0.08em; }
   .tree {
     overflow-y: auto;
     border: 1px solid var(--border);
@@ -574,7 +605,8 @@
   .preview-pane :global(td), .preview-pane :global(th) { border: 1px solid var(--border); padding: 4px 8px; }
   .ask-popup {
     position: fixed;
-    z-index: 50;
+    /* Above CodeMirror's internal layers (tooltips/panels go to ~300). */
+    z-index: 10000;
     width: 300px;
     background: var(--panel);
     border: 1px solid var(--border);

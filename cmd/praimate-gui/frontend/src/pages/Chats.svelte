@@ -680,7 +680,9 @@
     border-radius: var(--radius);
     background: var(--bg);
     padding: 14px;
-    height: calc(100vh - 230px);
+    /* header row (~48px) + composer (~60px) + page padding: the thread
+       takes everything else so there's no dead gap under the composer. */
+    height: calc(100vh - 172px);
     overflow-y: auto;
     margin-bottom: 12px;
   }
