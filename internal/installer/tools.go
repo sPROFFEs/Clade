@@ -3,10 +3,8 @@ package installer
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -147,14 +145,21 @@ func toolCandidatePaths(id ToolID, binary string) []string {
 		}
 		return paths
 	}
-	// Clade-managed prefix second.
+	// Managed prefixes second: current (praimate) then legacy (clade) —
+	// tools installed before the rebrand must keep detecting.
+	bins := []string{binary}
+	if runtime.GOOS == "windows" {
+		bins = append(bins, binary+".exe", binary+".cmd", binary+".bat")
+	}
 	if binDir, err := ManagedToolBinDir(string(id)); err == nil {
-		bins := []string{binary}
-		if runtime.GOOS == "windows" {
-			bins = append(bins, binary+".exe", binary+".cmd", binary+".bat")
-		}
 		for _, b := range bins {
 			paths = append(paths, filepath.Join(binDir, b))
+		}
+	}
+	if base, err := os.UserConfigDir(); err == nil {
+		legacy := filepath.Join(base, "clade", "tools", string(id), "bin")
+		for _, b := range bins {
+			paths = append(paths, filepath.Join(legacy, b))
 		}
 	}
 	return paths
@@ -168,7 +173,9 @@ func probeToolVersion(parent context.Context, path string) (string, error) {
 	const deadline = 8 * time.Second
 	ctx, cancel := context.WithTimeout(parent, deadline)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, path, "--version").CombinedOutput()
+	probe := exec.CommandContext(ctx, path, "--version")
+	hideConsole(probe)
+	out, err := probe.CombinedOutput()
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return "", fmt.Errorf("--version timed out after %s (binary is slow to start, "+
@@ -415,23 +422,27 @@ func ImportClademToolsToPath() {
 	if err != nil {
 		return
 	}
-	toolsDir := filepath.Join(base, "praimate", "tools")
-	entries, err := os.ReadDir(toolsDir)
-	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return
-		}
-		return
-	}
 	sep := ":"
 	if runtime.GOOS == "windows" {
 		sep = ";"
 	}
-	for _, e := range entries {
-		if !e.IsDir() {
+	// Scan the praimate prefix AND the legacy clade prefix: tools
+	// installed before the rebrand live under clade/tools and must keep
+	// resolving ("graphify installed but not detected").
+	var dirs []string
+	for _, brand := range []string{"praimate", "clade"} {
+		toolsDir := filepath.Join(base, brand, "tools")
+		entries, err := os.ReadDir(toolsDir)
+		if err != nil {
 			continue
 		}
-		binDir := filepath.Join(toolsDir, e.Name(), "bin")
+		for _, e := range entries {
+			if e.IsDir() {
+				dirs = append(dirs, filepath.Join(toolsDir, e.Name(), "bin"))
+			}
+		}
+	}
+	for _, binDir := range dirs {
 		if _, err := os.Stat(binDir); err != nil {
 			continue
 		}
@@ -514,6 +525,7 @@ func installUvIntoManagedPrefix(ctx context.Context, m Method, extraEnv []string
 	}
 	var cap bytes.Buffer
 	cmd := exec.CommandContext(ctx, parts[0], parts[1:]...)
+	hideConsole(cmd)
 	env := append(os.Environ(), extraEnv...)
 	env = append(env,
 		"UV_TOOL_DIR="+toolDir,
@@ -649,6 +661,7 @@ func runToolCommand(ctx context.Context, stdout, stderr io.Writer, dir string, e
 	fmt.Fprintf(stdout, "$ %s\n", strings.Join(append([]string{name}, args...), " "))
 	var cap bytes.Buffer
 	cmd := exec.CommandContext(ctx, name, args...)
+	hideConsole(cmd)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), env...)
 	cmd.Stdout = io.MultiWriter(stdout, &cap)

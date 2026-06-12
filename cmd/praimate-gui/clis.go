@@ -98,10 +98,20 @@ func (a *App) InstallCLI(cli, methodID string) error {
 			w := installLogWriter{ctx: a.ctx, cli: cli}
 			ctx, cancel := context.WithTimeout(a.ctx, 15*time.Minute)
 			defer cancel()
-			return installer.RunWithOptions(ctx, m, installer.RunOptions{InstallNode: true}, w, w)
+			err := installer.RunWithOptions(ctx, m, installer.RunOptions{InstallNode: true}, w, w)
+			refreshManagedPaths()
+			return err
 		}
 	}
 	return errUnknownMethod(cli, methodID)
+}
+
+// refreshManagedPaths re-imports the managed install dirs into PATH so
+// a tool/CLI installed seconds ago resolves without restarting the app
+// (and is inherited by every CLI child the GUI spawns from now on).
+func refreshManagedPaths() {
+	installer.ImportClademToolsToPath()
+	installer.ImportPraimateBinToPath()
 }
 
 func errUnknownMethod(cli, id string) error {
@@ -168,7 +178,9 @@ func (a *App) InstallManagedTool(tool, methodID string) error {
 			w := installLogWriter{ctx: a.ctx, cli: tool}
 			ctx, cancel := context.WithTimeout(a.ctx, 15*time.Minute)
 			defer cancel()
-			return installer.Run(ctx, m, w, w)
+			err := installer.Run(ctx, m, w, w)
+			refreshManagedPaths()
+			return err
 		}
 	}
 	return errUnknownMethod(tool, methodID)

@@ -261,6 +261,7 @@ func AutoInstallNodeWindows(ctx context.Context, w io.Writer) ([]string, error) 
 		"--silent",
 		"--accept-source-agreements",
 		"--accept-package-agreements")
+	hideConsole(cmd)
 	cmd.Stdout = w
 	cmd.Stderr = w
 	if err := cmd.Run(); err != nil {
@@ -306,6 +307,7 @@ func AutoInstallPnpm(ctx context.Context, w io.Writer) error {
 	}
 	var cap bytes.Buffer
 	cmd := exec.CommandContext(ctx, "corepack", "enable")
+	hideConsole(cmd)
 	cmd.Stdout = io.MultiWriter(w, &cap)
 	cmd.Stderr = io.MultiWriter(w, &cap)
 	if err := cmd.Run(); err != nil {
@@ -362,7 +364,9 @@ Once pnpm is on PATH, Clade's installer detects it and won't invoke ` + "`pnpm s
 // lands in the Windows user registry / shell rc) is invisible until the
 // process restarts. EnsurePnpmReady handles that gap.
 func pnpmGlobalBinDir(ctx context.Context) string {
-	out, err := exec.CommandContext(ctx, "pnpm", "config", "get", "global-bin-dir").Output()
+	pnpmCfg := exec.CommandContext(ctx, "pnpm", "config", "get", "global-bin-dir")
+	hideConsole(pnpmCfg)
+	out, err := pnpmCfg.Output()
 	if err != nil {
 		return ""
 	}
@@ -484,6 +488,7 @@ func EnsurePnpmReady(ctx context.Context, w io.Writer) ([]string, error) {
 		fmt.Fprintln(w, "→ pnpm global bin dir not configured; running `pnpm setup`...")
 		var setupCap bytes.Buffer
 		cmd := exec.CommandContext(ctx, "pnpm", "setup")
+		hideConsole(cmd)
 		cmd.Stdout = io.MultiWriter(w, &setupCap)
 		cmd.Stderr = io.MultiWriter(w, &setupCap)
 		if err := cmd.Run(); err != nil {
@@ -621,16 +626,22 @@ func RunWithOptions(ctx context.Context, m Method, opts RunOptions, stdout, stde
 func buildCmd(ctx context.Context, m Method) *exec.Cmd {
 	switch m.Shell {
 	case ShellBash:
-		return exec.CommandContext(ctx, "bash", "-c", m.Command)
+		cmd := exec.CommandContext(ctx, "bash", "-c", m.Command)
+		hideConsole(cmd)
+		return cmd
 	case ShellPowerShell:
 		bin := "powershell"
 		if _, err := exec.LookPath("powershell.exe"); err == nil {
 			bin = "powershell.exe"
 		}
-		return exec.CommandContext(ctx, bin, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", m.Command)
+		cmd := exec.CommandContext(ctx, bin, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", m.Command)
+		hideConsole(cmd)
+		return cmd
 	default:
 		parts := strings.Fields(m.Command)
-		return exec.CommandContext(ctx, parts[0], parts[1:]...)
+		cmd := exec.CommandContext(ctx, parts[0], parts[1:]...)
+		hideConsole(cmd)
+		return cmd
 	}
 }
 
@@ -721,6 +732,7 @@ func installIntoManagedPrefix(ctx context.Context, m Method, extraEnv []string, 
 	cmd := exec.CommandContext(ctx, "pnpm", "add",
 		"--config.node-linker=hoisted",
 		m.ManagedPrefixPkg)
+	hideConsole(cmd)
 	cmd.Dir = prefix
 	cmd.Stdout = io.MultiWriter(stdout, &cap)
 	cmd.Stderr = io.MultiWriter(stderr, &cap)

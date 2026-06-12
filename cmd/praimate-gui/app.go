@@ -75,6 +75,14 @@ func NewApp() *App {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 
+	// Same PATH augmentation the TUI does at startup: managed tool
+	// prefixes (graphify, gstack, scrapegraph) and the praimate bin dir
+	// (praimate-code). Without it the GUI — and every CLI child it
+	// spawns — can't resolve tools installed into the managed dirs:
+	// "graphify installs but isn't detected".
+	installer.ImportClademToolsToPath()
+	installer.ImportPraimateBinToPath()
+
 	dbPath, err := store.DefaultDBPath()
 	if err != nil {
 		a.initErr = err.Error()

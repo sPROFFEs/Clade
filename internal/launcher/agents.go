@@ -245,6 +245,10 @@ func knownInstallPaths(id AgentID, binary string) []string {
 		if binDir, err := installer.ManagedAgentBinDir("openclaude"); err == nil {
 			dirs = append(dirs, binDir)
 		}
+		// Legacy clade-managed prefix (pre-rebrand installs).
+		if base, err := os.UserConfigDir(); err == nil {
+			dirs = append(dirs, filepath.Join(base, "clade", "agents", "openclaude", "node_modules", ".bin"))
+		}
 		// Fallback: a stray global install (pnpm or npm) from a user
 		// who installed by hand. ImportPnpmPathIfPresent covers the
 		// pnpm-global PATH case; mirror codex's Windows-npm fallback.
