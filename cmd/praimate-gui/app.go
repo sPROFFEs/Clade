@@ -177,7 +177,7 @@ func (a *App) PickProjectFolder() (string, error) {
 // context file (CLAUDE.md / AGENTS.md) so the CLI adopts the persona,
 // without us reimplementing its loop. Returns the terminal session id;
 // output streams over "term:data:<id>" events.
-func (a *App) StartTerminal(agentID, cli, cwd string) (string, error) {
+func (a *App) StartTerminal(agentID, cli, model, cwd string) (string, error) {
 	c, err := a.requireCore()
 	if err != nil {
 		return "", err
@@ -185,7 +185,7 @@ func (a *App) StartTerminal(agentID, cli, cwd string) (string, error) {
 	if cwd == "" {
 		return "", fmt.Errorf("a project folder is required")
 	}
-	name, args, err := terminalCommand(cli)
+	name, args, err := terminalCommand(cli, model)
 	if err != nil {
 		return "", err
 	}
@@ -518,7 +518,7 @@ func (a *App) OpenWorkspaceChat(chatID string) (*OpenWorkspaceChatResult, error)
 	if agent == nil {
 		return nil, fmt.Errorf("unknown agent %q on chat %q", chat.AgentID, chatID)
 	}
-	name, args, err := terminalCommand(string(chat.AgentID))
+	name, args, err := terminalCommand(string(chat.AgentID), "")
 	if err != nil {
 		return nil, err
 	}

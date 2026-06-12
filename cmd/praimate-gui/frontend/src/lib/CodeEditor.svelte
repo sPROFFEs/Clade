@@ -48,6 +48,31 @@
               dispatch('change', u.state.doc.toString())
             }
           }),
+          // Right-click → "ask the agent about this text". Uses the
+          // selection, or the current line when nothing is selected.
+          EditorView.domEventHandlers({
+            contextmenu: (e, v) => {
+              const sel = v.state.selection.main
+              let from = sel.from
+              let to = sel.to
+              if (from === to) {
+                const line = v.state.doc.lineAt(from)
+                from = line.from
+                to = line.to
+              }
+              const text = v.state.sliceDoc(from, to)
+              if (!text.trim()) return false
+              e.preventDefault()
+              dispatch('askctx', {
+                text,
+                fromLine: v.state.doc.lineAt(from).number,
+                toLine: v.state.doc.lineAt(to).number,
+                x: e.clientX,
+                y: e.clientY,
+              })
+              return true
+            },
+          }),
         ],
       }),
     })
@@ -75,6 +100,61 @@
 
   export function getValue() {
     return view ? view.state.doc.toString() : value
+  }
+
+  // --- formatting helpers for the studio toolbar ----------------------
+
+  // wrapSelection surrounds the selection with prefix/suffix (toggling
+  // off when already wrapped); with no selection inserts placeholder.
+  export function wrapSelection(prefix, suffix, placeholder = 'text') {
+    if (!view) return
+    const sel = view.state.selection.main
+    const selected = view.state.sliceDoc(sel.from, sel.to)
+    let insert
+    if (!selected) {
+      insert = prefix + placeholder + suffix
+    } else if (selected.startsWith(prefix) && selected.endsWith(suffix) && selected.length >= prefix.length + suffix.length) {
+      insert = selected.slice(prefix.length, selected.length - suffix.length)
+    } else {
+      insert = prefix + selected + suffix
+    }
+    view.dispatch({
+      changes: { from: sel.from, to: sel.to, insert },
+      selection: { anchor: sel.from, head: sel.from + insert.length },
+    })
+    view.focus()
+  }
+
+  // toggleLinePrefix adds/removes a prefix on every selected line
+  // (headings, lists, quotes).
+  export function toggleLinePrefix(prefix) {
+    if (!view) return
+    const sel = view.state.selection.main
+    const startLine = view.state.doc.lineAt(sel.from).number
+    const endLine = view.state.doc.lineAt(sel.to).number
+    const changes = []
+    let allHave = true
+    for (let n = startLine; n <= endLine; n++) {
+      if (!view.state.doc.line(n).text.startsWith(prefix)) { allHave = false; break }
+    }
+    for (let n = startLine; n <= endLine; n++) {
+      const line = view.state.doc.line(n)
+      if (allHave) {
+        changes.push({ from: line.from, to: line.from + prefix.length, insert: '' })
+      } else if (!line.text.startsWith(prefix)) {
+        changes.push({ from: line.from, insert: prefix })
+      }
+    }
+    if (changes.length) view.dispatch({ changes })
+    view.focus()
+  }
+
+  // insertSnippet drops text at the cursor (tables, links, rules).
+  export function insertSnippet(snippet) {
+    if (!view) return
+    const sel = view.state.selection.main
+    view.dispatch({ changes: { from: sel.from, to: sel.to, insert: snippet } })
+    view.focus()
   }
 </script>
 

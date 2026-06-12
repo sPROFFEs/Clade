@@ -6,7 +6,7 @@
   // same parser `praimate agent import` uses.
   import { onMount, onDestroy } from 'svelte'
   import { api, onTurn } from '../lib/api.js'
-  import { activePage, openChatId } from '../lib/stores.js'
+  import { activePage, openChatId, pendingTerm } from '../lib/stores.js'
   import CodeEditor from '../lib/CodeEditor.svelte'
 
   let agents = []
@@ -29,42 +29,92 @@
     }
   }
 
-  // --- launch surfaces -------------------------------------------------------
+  // --- launch dialog (surface + CLI + model + folder) ------------------------
 
-  let launchCli = {}
+  // dlg: {agent|null, surface: 'chat'|'terminal'|'studio', cli, model,
+  //       cliOptions: [{id,label,available}], suggestions, folder, busy}
+  let dlg = null
+  let allClis = []
 
-  async function launchChat(a) {
+  async function openLaunch(agent, surface) {
+    error = ''
     try {
-      const cli = launchCli[a.id] || a.supports?.[0] || 'claude'
-      const c = await api.startChat(a.id, cli, '')
-      openChatId.set(c.ID)
-      activePage.set('chats')
+      if (allClis.length === 0) allClis = (await api.listCLIs()) || []
+      let cliOptions
+      if (agent) {
+        cliOptions = (agent.supports || []).map((s) => {
+          const info = allClis.find((c) => c.id === s)
+          return { id: s, label: info?.label || s, available: info ? info.available : true }
+        })
+      } else {
+        cliOptions = allClis
+      }
+      const first = cliOptions.find((c) => c.available) || cliOptions[0]
+      dlg = {
+        agent,
+        surface,
+        cli: first?.id || 'claude',
+        model: '',
+        cliOptions,
+        suggestions: [],
+        folder: '',
+        busy: false,
+      }
+      await dlgCliChanged()
     } catch (e) {
       error = String(e)
     }
   }
 
-  async function launchTerminal(a) {
+  async function dlgCliChanged() {
+    if (!dlg) return
+    dlg.suggestions = (await api.listCLIModels(dlg.cli).catch(() => [])) || []
+    dlg = dlg
+  }
+
+  async function dlgPickFolder() {
     try {
-      const folder = await api.pickFolder()
-      if (!folder) return
-      const cli = launchCli[a.id] || a.supports?.[0] || 'claude'
-      await api.startTerminal(a.id, cli, folder)
-      activePage.set('code')
+      const p = await api.pickFolder()
+      if (p && dlg) { dlg.folder = p; dlg = dlg }
     } catch (e) {
       error = String(e)
     }
   }
 
-  async function launchEditor(a) {
+  async function dlgGo() {
+    if (!dlg || dlg.busy) return
+    dlg.busy = true
+    error = ''
+    const { agent, surface, cli, folder } = dlg
+    const model = dlg.model.trim()
     try {
-      const folder = await api.pickFolder()
-      if (!folder) return
-      const cli = a ? (launchCli[a.id] || a.supports?.[0] || 'claude') : 'claude'
-      await api.openEditorWindow(folder, a ? a.id : '', cli, '')
+      if (surface === 'chat') {
+        const c = await api.startChat(agent.id, cli, '')
+        if (model) await api.updateChatConfig(c.ID, cli, model, '', '', '', '')
+        dlg = null
+        openChatId.set(c.ID)
+        activePage.set('chats')
+        return
+      }
+      if (!folder) {
+        error = 'Pick a project folder first.'
+        dlg.busy = false
+        return
+      }
+      if (surface === 'terminal') {
+        const termId = await api.startTerminal(agent ? agent.id : '', cli, model, folder)
+        dlg = null
+        pendingTerm.set({ termId, cli, cwd: folder, label: agent ? agent.name : cli, note: '' })
+        activePage.set('code')
+        return
+      }
+      // studio
+      await api.openEditorWindow(folder, agent ? agent.id : '', cli, model, '')
+      dlg = null
       notice = 'Studio window opened.'
     } catch (e) {
       error = String(e)
+      if (dlg) dlg.busy = false
     }
   }
 
@@ -290,7 +340,7 @@
 {:else}
   <div class="row" style="margin-bottom: 4px">
     <h1 class="grow" style="margin:0">Agents</h1>
-    <button class="btn" on:click={() => launchEditor(null)} title="Open the document studio without an agent persona">Open studio…</button>
+    <button class="btn" on:click={() => openLaunch(null, 'studio')} title="Open the document studio without an agent persona">Open studio…</button>
     <button class="btn" on:click={importYAML}>Import YAML…</button>
     <button class="btn primary" on:click={createNew}>+ New agent</button>
   </div>
@@ -299,6 +349,37 @@
   {#if error}<div class="banner">{error}</div>{/if}
   {#if notice}<div class="card card-sub">{notice}</div>{/if}
 
+  {#if dlg}
+    <div class="card" style="border-color: var(--accent, #888)">
+      <div class="card-title">
+        {dlg.surface === 'chat' ? 'New chat' : dlg.surface === 'terminal' ? 'Open terminal' : 'Open studio'}
+        {dlg.agent ? ` — ${dlg.agent.name}` : ''}
+      </div>
+      <label class="lbl">CLI</label>
+      <select class="field" style="max-width:320px" bind:value={dlg.cli} on:change={dlgCliChanged}>
+        {#each dlg.cliOptions as c}
+          <option value={c.id} disabled={!c.available}>{c.label}{c.available ? '' : ' — not installed'}</option>
+        {/each}
+      </select>
+      <label class="lbl">Model (blank = CLI default)</label>
+      <input class="field mono" style="max-width:420px" list="launch-model-suggestions" bind:value={dlg.model} />
+      <datalist id="launch-model-suggestions">
+        {#each dlg.suggestions as m}<option value={m}></option>{/each}
+      </datalist>
+      {#if dlg.surface !== 'chat'}
+        <label class="lbl">Project folder *</label>
+        <div class="row">
+          <input class="field grow mono" bind:value={dlg.folder} placeholder="pick the folder the agent works in" />
+          <button class="btn" on:click={dlgPickFolder}>Browse…</button>
+        </div>
+      {/if}
+      <div class="row" style="margin-top:12px">
+        <button class="btn primary" on:click={dlgGo} disabled={dlg.busy}>{dlg.busy ? 'Starting…' : 'Launch'}</button>
+        <button class="btn" on:click={() => (dlg = null)}>Cancel</button>
+      </div>
+    </div>
+  {/if}
+
   {#each agents as a}
     <div class="card">
       <div class="row">
@@ -306,14 +387,9 @@
           <div class="card-title">{a.name} <span class="card-sub mono">({a.id})</span></div>
           <div class="card-sub">{a.description?.split('\n')[0]}</div>
         </div>
-        {#if (a.supports || []).length > 1}
-          <select class="field" style="max-width:130px" bind:value={launchCli[a.id]}>
-            {#each a.supports as s}<option value={s}>{s}</option>{/each}
-          </select>
-        {/if}
-        {#if allows(a, 'chat')}<button class="btn primary" on:click={() => launchChat(a)}>Chat</button>{/if}
-        {#if allows(a, 'terminal')}<button class="btn" on:click={() => launchTerminal(a)}>Terminal</button>{/if}
-        {#if allows(a, 'editor')}<button class="btn" on:click={() => launchEditor(a)}>Studio</button>{/if}
+        {#if allows(a, 'chat')}<button class="btn primary" on:click={() => openLaunch(a, 'chat')}>Chat</button>{/if}
+        {#if allows(a, 'terminal')}<button class="btn" on:click={() => openLaunch(a, 'terminal')}>Terminal</button>{/if}
+        {#if allows(a, 'editor')}<button class="btn" on:click={() => openLaunch(a, 'studio')}>Studio</button>{/if}
       </div>
       <div class="row" style="margin-top: 8px">
         <div class="grow">

@@ -72,9 +72,9 @@ export const api = {
   editorReadFile: (rel) => call('EditorReadFile', rel),
   editorWriteFile: (rel, content) => call('EditorWriteFile', rel, content),
   editorCreateFile: (rel) => call('EditorCreateFile', rel),
-  openEditorWindow: (folder, agentID, cli, chatID) =>
-    call('OpenEditorWindow', folder, agentID, cli, chatID),
-  startTerminal: (agentID, cli, cwd) => call('StartTerminal', agentID, cli, cwd),
+  openEditorWindow: (folder, agentID, cli, model, chatID) =>
+    call('OpenEditorWindow', folder, agentID, cli, model || '', chatID),
+  startTerminal: (agentID, cli, model, cwd) => call('StartTerminal', agentID, cli, model || '', cwd),
 
   pickFolder: () => call('PickFolder'),
   runWorkflow: (agentID, workflow, cli, cwd, inputs) =>

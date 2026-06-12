@@ -17,20 +17,30 @@ import (
 // terminalCommand maps a PrAImate CLI id to the binary + interactive
 // args to launch. We deliberately launch the CLI in its normal
 // interactive mode — the whole point is the user gets the real tool.
-func terminalCommand(cli string) (name string, args []string, err error) {
+// model, when non-empty, is passed with the CLI's own model flag
+// (deepseek has none; its config picks the model).
+func terminalCommand(cli, model string) (name string, args []string, err error) {
 	switch cli {
-	case "claude":
-		return "claude", nil, nil
-	case "openclaude":
-		return "openclaude", nil, nil
+	case "claude", "openclaude":
+		if model != "" {
+			args = []string{"--model", model}
+		}
+		return cli, args, nil
 	case "codex":
-		return "codex", nil, nil
-	case "opencode":
-		return "opencode", nil, nil
-	case "praimate-code":
-		return "praimate-code", nil, nil
+		if model != "" {
+			args = []string{"-m", model}
+		}
+		return "codex", args, nil
+	case "opencode", "praimate-code":
+		if model != "" {
+			args = []string{"--model", model}
+		}
+		return cli, args, nil
 	case "gemini":
-		return "gemini", nil, nil
+		if model != "" {
+			args = []string{"-m", model}
+		}
+		return "gemini", args, nil
 	case "deepseek":
 		return "deepseek-tui", nil, nil
 	case "":

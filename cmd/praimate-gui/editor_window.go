@@ -253,9 +253,10 @@ func (a *App) startEditorWatcher() {
 // --- launching the studio from the main window -------------------------------
 
 // OpenEditorWindow creates (or reuses) a chat scoped to folder and
-// spawns the studio window as a second process of this binary. Returns
-// the chat id backing the studio's chat pane.
-func (a *App) OpenEditorWindow(folder, agentID, cli, chatID string) (string, error) {
+// spawns the studio window as a second process of this binary. model,
+// when non-empty, pins the chat's model. Returns the chat id backing
+// the studio's chat pane.
+func (a *App) OpenEditorWindow(folder, agentID, cli, model, chatID string) (string, error) {
 	c, err := a.requireCore()
 	if err != nil {
 		return "", err
@@ -281,15 +282,22 @@ func (a *App) OpenEditorWindow(folder, agentID, cli, chatID string) (string, err
 			if cli == "" {
 				cli = "claude"
 			}
-			chat, err := c.StartCleanChat(a.ctx, cli, "", folder)
+			chat, err := c.StartCleanChat(a.ctx, cli, model, folder)
 			if err != nil {
 				return "", err
 			}
 			chatID = chat.ID
 		}
-		// Documents-first default: let the agent edit files without a
-		// per-edit prompt; the user can lower it from the chat header.
-		_ = c.UpdateChatSettings(a.ctx, chatID, func(s *core.ChatSettings) { s.Tools = "edits" })
+		// Documents-first defaults: tag the chat as a studio session and
+		// let the agent edit files without a per-edit prompt; the user
+		// can lower it from the chat header.
+		_ = c.UpdateChatSettings(a.ctx, chatID, func(s *core.ChatSettings) {
+			s.Tools = "edits"
+			s.Surface = "studio"
+			if model != "" {
+				s.Model = model
+			}
+		})
 	}
 	exe, err := os.Executable()
 	if err != nil {

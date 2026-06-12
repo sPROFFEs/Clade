@@ -63,6 +63,19 @@
     }, 250)
   }
   $: shownChats = searchResults ?? chats
+  // Studio sessions live in their own section — they're folder-scoped
+  // co-editing chats, not regular conversations.
+  $: regularChats = shownChats.filter((c) => c.Settings?.surface !== 'studio')
+  $: studioChats = shownChats.filter((c) => c.Settings?.surface === 'studio')
+
+  async function reopenStudio(chat) {
+    error = ''
+    try {
+      await api.openEditorWindow(chat.WorkspacePath, '', '', '', chat.ID)
+    } catch (e) {
+      error = String(e)
+    }
+  }
 
   async function load() {
     try {
@@ -606,7 +619,7 @@
   {#if shownChats.length === 0 && !creating}
     <div class="empty">{searchResults !== null ? 'No chats match the search.' : 'No chats yet — press “New chat”, or start one from an agent on the Agents page.'}</div>
   {/if}
-  {#each shownChats as chat}
+  {#each regularChats as chat}
     <div class="card row">
       <div class="grow" style="cursor:pointer" on:click={() => open(chat)} on:keydown={(e) => e.key === 'Enter' && open(chat)} role="button" tabindex="0">
         <div class="card-title">{chat.Title}</div>
@@ -622,6 +635,27 @@
       <button class="btn danger" on:click={() => remove(chat)}>Delete</button>
     </div>
   {/each}
+
+  {#if studioChats.length > 0}
+    <h1 style="font-size:16px; margin-top:24px">Studio sessions</h1>
+    <p class="subtitle">Document-studio chats, scoped to a folder. Reopen the studio window to continue co-editing, or open the transcript like any chat.</p>
+    {#each studioChats as chat}
+      <div class="card row">
+        <div class="grow">
+          <div class="card-title">{chat.Title}</div>
+          <div class="card-sub mono">
+            {chat.WorkspacePath} · {chat.CLIAgent}
+            {#if chat.Settings?.model} · {chat.Settings.model}{/if}
+            · {fmtDate(chat.UpdatedAt)}
+          </div>
+        </div>
+        <button class="btn primary" on:click={() => reopenStudio(chat)}>Reopen studio</button>
+        <button class="btn" on:click={() => open(chat)}>Transcript</button>
+        <button class="btn" on:click={() => openConfig(chat)}>Edit</button>
+        <button class="btn danger" on:click={() => remove(chat)}>Delete</button>
+      </div>
+    {/each}
+  {/if}
 
   {#if workspaceChats.length > 0}
     <h1 style="font-size:16px; margin-top:24px">Workspace chats (TUI)</h1>

@@ -7,6 +7,7 @@
   // cursor-preserving diff; user keystrokes flush to disk debounced so
   // the agent's next turn reads what's on screen.
   import { onMount, onDestroy, tick } from 'svelte'
+  import { marked } from 'marked'
   import { api, onChatStream, onApproval } from '../lib/api.js'
   import CodeEditor from '../lib/CodeEditor.svelte'
 
@@ -126,6 +127,66 @@
     flush(t) // our version wins on disk
   }
 
+  // --- toolbar + preview ---------------------------------------------------
+
+  let preview = false
+  const TOOLBAR = [
+    { label: 'B', title: 'Bold', act: (r) => r.wrapSelection('**', '**') },
+    { label: 'I', title: 'Italic', act: (r) => r.wrapSelection('*', '*') },
+    { label: 'S', title: 'Strikethrough', act: (r) => r.wrapSelection('~~', '~~') },
+    { label: 'H1', title: 'Heading 1', act: (r) => r.toggleLinePrefix('# ') },
+    { label: 'H2', title: 'Heading 2', act: (r) => r.toggleLinePrefix('## ') },
+    { label: 'H3', title: 'Heading 3', act: (r) => r.toggleLinePrefix('### ') },
+    { label: '•', title: 'Bullet list', act: (r) => r.toggleLinePrefix('- ') },
+    { label: '1.', title: 'Numbered list', act: (r) => r.toggleLinePrefix('1. ') },
+    { label: '☑', title: 'Task list', act: (r) => r.toggleLinePrefix('- [ ] ') },
+    { label: '❝', title: 'Quote', act: (r) => r.toggleLinePrefix('> ') },
+    { label: '</>', title: 'Inline code', act: (r) => r.wrapSelection('`', '`') },
+    { label: '```', title: 'Code block', act: (r) => r.wrapSelection('\n```\n', '\n```\n', 'code') },
+    { label: '🔗', title: 'Link', act: (r) => r.wrapSelection('[', '](url)') },
+    { label: '▦', title: 'Table', act: (r) => r.insertSnippet('\n| Column | Column |\n| --- | --- |\n| cell | cell |\n') },
+    { label: '—', title: 'Horizontal rule', act: (r) => r.insertSnippet('\n---\n') },
+  ]
+  function toolbarAct(item) {
+    const t = tabs.find((x) => x.path === active)
+    if (t?.ref) item.act(t.ref)
+  }
+  $: previewHTML = preview && activeTab ? marked.parse(activeTab.content) : ''
+
+  // --- right-click → ask the agent about the selection ----------------------
+
+  let ask = null // {text, fromLine, toLine, x, y, custom}
+  const ASK_ACTIONS = [
+    'Improve the writing',
+    'Fix grammar and spelling',
+    'Make it more concise',
+    'Expand with more detail',
+    'Summarize it',
+    'Translate to English',
+  ]
+
+  function onAskCtx(e) {
+    const d = e.detail
+    // Clamp the popup inside the window.
+    ask = {
+      ...d,
+      x: Math.min(d.x, window.innerWidth - 320),
+      y: Math.min(d.y, window.innerHeight - 280),
+      custom: '',
+    }
+  }
+
+  async function askAgent(instruction) {
+    if (!ask || !instruction.trim() || sending) return
+    const a = ask
+    ask = null
+    const snippet = a.text.length > 4000 ? a.text.slice(0, 4000) + '…' : a.text
+    const msg =
+      `In ${active} (lines ${a.fromLine}–${a.toLine}), apply this instruction to the selected text and edit the file directly, keeping everything else unchanged.\n\n` +
+      `Instruction: ${instruction.trim()}\n\nSelected text:\n"""\n${snippet}\n"""`
+    await sendText(msg)
+  }
+
   // --- chat pane ---------------------------------------------------------
 
   let chat = null
@@ -178,6 +239,12 @@
 
   async function send() {
     const text = draft.trim()
+    if (!text) return
+    draft = ''
+    await sendText(text)
+  }
+
+  async function sendText(text) {
     if (!text || sending) return
     // Flush every dirty tab first so the agent reads what's on screen.
     for (const t of tabs) if (t.dirty) await flush(t)
@@ -186,7 +253,6 @@
     error = ''
     const focused = active ? `\n\n[The user is looking at: ${active} — open files: ${tabs.map((t) => t.path).join(', ')}]` : ''
     messages = [...messages, { Role: 'user', Content: text, TS: new Date().toISOString(), _pending: true }]
-    draft = ''
     await scrollToBottom()
     try {
       if (text.startsWith('!')) {
@@ -276,22 +342,62 @@
         </div>
       {/each}
     </div>
-    {#each tabs as t (t.path)}
-      <div class="editor-host" style:display={t.path === active ? 'flex' : 'none'}>
-        {#if t.externalPending}
-          <div class="conflict">
-            The agent changed <span class="mono">{t.path}</span> while you had unsaved edits.
-            <button class="btn sm" on:click={() => acceptExternal(t)}>Take agent's version</button>
-            <button class="btn sm" on:click={() => keepMine(t)}>Keep mine</button>
-          </div>
-        {/if}
-        <CodeEditor bind:this={t.ref} value={t.content} lang={lang(t.path)} on:change={(e) => onEdit(t, e.detail)} />
+    {#if activeTab}
+      <div class="toolbar">
+        {#each TOOLBAR as item}
+          <button class="tb-btn" title={item.title} on:click={() => toolbarAct(item)}>{item.label}</button>
+        {/each}
+        <span class="grow"></span>
+        <button class="tb-btn" class:tb-active={preview} title="Toggle rendered preview" on:click={() => (preview = !preview)}>👁 Preview</button>
       </div>
-    {/each}
+    {/if}
+    <div class="editor-split">
+      <div class="editor-stack" class:half={preview}>
+        {#each tabs as t (t.path)}
+          <div class="editor-host" style:display={t.path === active ? 'flex' : 'none'}>
+            {#if t.externalPending}
+              <div class="conflict">
+                The agent changed <span class="mono">{t.path}</span> while you had unsaved edits.
+                <button class="btn sm" on:click={() => acceptExternal(t)}>Take agent's version</button>
+                <button class="btn sm" on:click={() => keepMine(t)}>Keep mine</button>
+              </div>
+            {/if}
+            <CodeEditor
+              bind:this={t.ref}
+              value={t.content}
+              lang={lang(t.path)}
+              on:change={(e) => onEdit(t, e.detail)}
+              on:askctx={onAskCtx} />
+          </div>
+        {/each}
+      </div>
+      {#if preview && activeTab}
+        <div class="preview-pane md">{@html previewHTML}</div>
+      {/if}
+    </div>
     {#if tabs.length === 0}
       <div class="empty" style="margin-top:40px">Open a file from the tree — the agent's edits appear here live.</div>
     {/if}
   </section>
+
+  {#if ask}
+    <div class="ask-popup" style="left:{ask.x}px; top:{ask.y}px">
+      <div class="ask-head">Ask the agent — lines {ask.fromLine}–{ask.toLine}</div>
+      {#each ASK_ACTIONS as act}
+        <button class="ask-act" on:click={() => askAgent(act)} disabled={sending}>{act}</button>
+      {/each}
+      <div class="row" style="gap:4px; margin-top:6px">
+        <input
+          class="field grow"
+          style="font-size:12px; padding:4px 6px"
+          placeholder="Or tell it what to do…"
+          bind:value={ask.custom}
+          on:keydown={(e) => e.key === 'Enter' && askAgent(ask.custom)} />
+        <button class="btn sm primary" on:click={() => askAgent(ask.custom)} disabled={!ask.custom.trim()}>Go</button>
+      </div>
+      <button class="ask-close" on:click={() => (ask = null)}>×</button>
+    </div>
+  {/if}
 
   <aside class="chatpane">
     <div class="chat-head">
@@ -427,4 +533,77 @@
   .approval-card { border: 1px solid var(--warning, #d4a72c); border-radius: var(--radius); padding: 8px; margin: 6px 0; font-size: 12px; }
   .msg.pending { opacity: 0.6; }
   .btn.sm { padding: 3px 10px; font-size: 12px; }
+  .toolbar {
+    display: flex;
+    gap: 2px;
+    align-items: center;
+    flex-wrap: wrap;
+    padding: 4px 0 6px;
+  }
+  .tb-btn {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 12px;
+    padding: 3px 8px;
+    cursor: pointer;
+    min-width: 28px;
+  }
+  .tb-btn:hover { background: var(--raised, rgba(255,255,255,0.08)); }
+  .tb-btn.tb-active { background: var(--raised, rgba(255,255,255,0.12)); }
+  .editor-split { flex: 1; min-height: 0; display: flex; gap: 8px; }
+  .editor-stack { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .editor-stack.half { flex: 1; }
+  .preview-pane {
+    flex: 1;
+    min-width: 0;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--panel);
+    padding: 14px 18px;
+    font-size: 14px;
+    line-height: 1.55;
+  }
+  .preview-pane :global(h1), .preview-pane :global(h2), .preview-pane :global(h3) { margin: 0.8em 0 0.4em; }
+  .preview-pane :global(code) { background: var(--bg); padding: 1px 4px; border-radius: 4px; font-size: 12px; }
+  .preview-pane :global(pre) { background: var(--bg); padding: 8px 10px; border-radius: 6px; overflow-x: auto; }
+  .preview-pane :global(blockquote) { border-left: 3px solid var(--border); margin: 0.5em 0; padding-left: 10px; color: var(--text-dim); }
+  .preview-pane :global(table) { border-collapse: collapse; }
+  .preview-pane :global(td), .preview-pane :global(th) { border: 1px solid var(--border); padding: 4px 8px; }
+  .ask-popup {
+    position: fixed;
+    z-index: 50;
+    width: 300px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: 0 8px 30px rgba(0,0,0,0.45);
+    padding: 10px;
+  }
+  .ask-head { font-size: 12px; color: var(--text-dim); margin-bottom: 6px; }
+  .ask-act {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    color: var(--text);
+    font-size: 13px;
+    padding: 5px 6px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .ask-act:hover { background: var(--raised, rgba(255,255,255,0.08)); }
+  .ask-close {
+    position: absolute;
+    top: 6px;
+    right: 8px;
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 14px;
+  }
 </style>

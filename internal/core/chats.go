@@ -68,6 +68,11 @@ type ChatSettings struct {
 	// SingleShotOpts.Tools for the per-CLI flag mapping.
 	Tools string `json:"tools,omitempty"`
 
+	// Surface records which GUI surface owns the chat ("studio" for
+	// document-studio chats). The Chats page uses it to list studio
+	// sessions separately and offer "reopen studio".
+	Surface string `json:"surface,omitempty"`
+
 	// Local, if set, routes this chat through a self-hosted
 	// OpenAI-compatible endpoint instead of the CLI's cloud backend —
 	// the DB-chat counterpart of the TUI's per-chat Ollama wizard.
