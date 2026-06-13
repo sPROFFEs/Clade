@@ -56,7 +56,47 @@
     notice = 'Cleared the saved endpoint.'
   }
 
-  onMount(load)
+  // --- route the config-file CLIs (opencode / codex) to the endpoint ---
+  // claude/openclaude route by env (the per-chat toggle); opencode/codex
+  // read a provider block from their own config files, which this writes.
+  let cliStatus = { codex: false, opencode: false }
+  let applyModel = ''
+  let applyBusy = ''
+
+  async function refreshStatus() {
+    try { cliStatus = (await api.localCLIStatus()) || cliStatus } catch {}
+  }
+
+  async function applyCLI(cli) {
+    applyBusy = cli
+    error = ''
+    try {
+      notice = await api.applyLocalToCLI(cli, applyModel.trim())
+      await refreshStatus()
+    } catch (e) {
+      error = String(e)
+    } finally {
+      applyBusy = ''
+    }
+  }
+
+  async function disableCLI(cli) {
+    applyBusy = cli
+    error = ''
+    try {
+      notice = await api.disableLocalForCLI(cli)
+      await refreshStatus()
+    } catch (e) {
+      error = String(e)
+    } finally {
+      applyBusy = ''
+    }
+  }
+
+  onMount(async () => {
+    await load()
+    await refreshStatus()
+  })
 </script>
 
 <h1>Local LLM</h1>
@@ -106,3 +146,34 @@
     </div>
   </div>
 {/if}
+
+<h1 style="font-size:16px; margin-top:24px">Route CLIs to the local model</h1>
+<p class="subtitle" style="margin-top:-6px">
+  <strong>claude</strong> and <strong>openclaude</strong> route by environment — just tick “Use the local LLM” when you start a chat/code/studio session, no setup here.
+  <strong>opencode</strong> and <strong>codex</strong> read their endpoint from their own config files, so apply it once here and every opencode/codex session (chat, code, studio) uses the local model.
+</p>
+<div class="card">
+  <label class="lbl">Model to route to</label>
+  <input class="field mono" style="max-width:420px" list="apply-models" bind:value={applyModel} placeholder="e.g. qwen2.5-coder:14b" />
+  <datalist id="apply-models">{#each models || [] as m}<option value={m}></option>{/each}</datalist>
+  <div class="card-sub" style="margin-top:4px">Tip: press “Test connection” above to populate the model list.</div>
+
+  <div class="row" style="margin-top:14px; flex-wrap:wrap; gap:8px">
+    <div class="grow">
+      <strong>opencode</strong>
+      {#if cliStatus.opencode}<span class="pill ok">routed to local</span>{:else}<span class="pill">cloud default</span>{/if}
+    </div>
+    <button class="btn primary" on:click={() => applyCLI('opencode')} disabled={!!applyBusy || !d.endpoint}>{applyBusy === 'opencode' ? 'Applying…' : 'Apply'}</button>
+    <button class="btn" on:click={() => disableCLI('opencode')} disabled={!!applyBusy || !cliStatus.opencode}>Disable</button>
+  </div>
+
+  <div class="row" style="margin-top:10px; flex-wrap:wrap; gap:8px">
+    <div class="grow">
+      <strong>codex</strong>
+      {#if cliStatus.codex}<span class="pill ok">routed to local</span>{:else}<span class="pill">cloud default</span>{/if}
+      <span class="card-sub">(needs an OpenAI /v1/responses-compatible endpoint)</span>
+    </div>
+    <button class="btn primary" on:click={() => applyCLI('codex')} disabled={!!applyBusy || !d.endpoint}>{applyBusy === 'codex' ? 'Applying…' : 'Apply'}</button>
+    <button class="btn" on:click={() => disableCLI('codex')} disabled={!!applyBusy || !cliStatus.codex}>Disable</button>
+  </div>
+</div>

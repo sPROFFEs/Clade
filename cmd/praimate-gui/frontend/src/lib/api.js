@@ -91,6 +91,9 @@ export const api = {
   startTerminal: (agentID, cli, model, cwd, localEndpoint, localApiKey, localModel) =>
     call('StartTerminal', agentID, cli, model || '', cwd, localEndpoint || '', localApiKey || '', localModel || ''),
   localLLMModels: () => call('LocalLLMModels'),
+  localCLIStatus: () => call('LocalCLIStatusNow'),
+  applyLocalToCLI: (cli, model) => call('ApplyLocalToCLI', cli, model || ''),
+  disableLocalForCLI: (cli) => call('DisableLocalForCLI', cli),
 
   pickFolder: () => call('PickFolder'),
   runWorkflow: (agentID, workflow, cli, cwd, inputs) =>
