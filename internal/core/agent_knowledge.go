@@ -6,7 +6,7 @@ package core
 //
 //	<config>/praimate/agents/<id>/knowledge/
 //	    style-guide.md, spec.pdf, …       the documents (mode "raw")
-//	    .graphify/                        the RAG index (mode "rag")
+//	    graphify-out/                     the RAG index (mode "rag")
 //
 // THE PATH IS THE CONTRACT: both modes live in the same folder, so the
 // user can flip an existing agent between raw and rag at any time and
@@ -14,7 +14,7 @@ package core
 // ("read the files" vs "query the graph").
 //
 // Distribution format: ".praimate-agent" — a plain zip carrying
-// agent.yaml at its root plus knowledge/** (including .graphify when
+// agent.yaml at its root plus knowledge/** (including graphify-out when
 // built). Agents without knowledge keep round-tripping as bare YAML.
 
 import (
@@ -43,7 +43,7 @@ func AgentKnowledgeDir(id string) (string, error) {
 }
 
 // ListAgentKnowledge returns the knowledge files (slash-relative,
-// sorted), excluding the .graphify index internals.
+// sorted), excluding the graphify-out index internals.
 func ListAgentKnowledge(id string) ([]string, error) {
 	dir, err := AgentKnowledgeDir(id)
 	if err != nil {
@@ -57,7 +57,7 @@ func ListAgentKnowledge(id string) ([]string, error) {
 			return nil
 		}
 		if d.IsDir() {
-			if d.Name() == ".graphify" {
+			if d.Name() == "graphify-out" {
 				return filepath.SkipDir
 			}
 			return nil
@@ -195,7 +195,7 @@ func DeleteAgentKnowledgeFile(id, rel string) error {
 const AgentPackExt = ".praimate-agent"
 
 // ExportAgentPack writes a .praimate-agent zip (agent.yaml + the whole
-// knowledge folder, .graphify index included so RAG agents arrive
+// knowledge folder, graphify-out index included so RAG agents arrive
 // pre-indexed). Works for knowledge-less agents too — the zip then
 // just carries agent.yaml.
 func (c *Core) ExportAgentPack(ctx context.Context, id, path string) error {

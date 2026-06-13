@@ -144,6 +144,8 @@
 
   let know = null // AgentKnowledgeInfo for the agent being edited
   let knowBusy = false
+  let ragBackend = 'claude-cli' // graphify backend for RAG indexing
+  let ragKey = ''
   let ragLog = []
   let unsubRag = () => {}
 
@@ -198,7 +200,7 @@
     ragLog = []
     error = ''
     try {
-      await api.buildAgentRAG(editing.id)
+      await api.buildAgentRAG(editing.id, ragBackend, ragKey)
       notice = 'RAG index built.'
       await loadKnowledge(editing.id)
     } catch (e) {
@@ -255,6 +257,14 @@
     try {
       const a = await api.importAgentDialog()
       if (a) { notice = `Imported ${a.name}`; await load() }
+    } catch (e) { error = String(e) }
+  }
+
+  async function importTemplate() {
+    error = ''
+    try {
+      const msg = await api.importWorkpathTemplateDialog()
+      if (msg) { notice = msg; await load() }
     } catch (e) { error = String(e) }
   }
 
@@ -387,6 +397,32 @@
           Until then the agent falls back to reading the files directly.
         </div>
       {/if}
+      {#if know.mode === 'rag' && know.graphifyInstalled}
+        <label class="lbl" style="margin-top:8px">Indexing backend</label>
+        <div class="row">
+          <select class="field" style="max-width:280px" bind:value={ragBackend}>
+            <option value="claude-cli">Claude CLI (uses your install · no key)</option>
+            <option value="code">Code only (no key · skips documents)</option>
+            <option value="claude">Anthropic API</option>
+            <option value="openai">OpenAI</option>
+            <option value="gemini">Google Gemini</option>
+            <option value="deepseek">DeepSeek</option>
+            <option value="kimi">Kimi (Moonshot)</option>
+          </select>
+          {#if ragBackend !== 'code' && ragBackend !== 'claude-cli'}
+            <input class="field grow mono" type="password" placeholder="API key for the backend" bind:value={ragKey} />
+          {/if}
+        </div>
+        <div class="card-sub" style="margin-top:4px">
+          {#if ragBackend === 'claude-cli'}
+            Uses your installed, signed-in Claude CLI to summarize documents — no API key, no extra cost. Recommended.
+          {:else if ragBackend === 'code'}
+            Builds a code knowledge-graph (functions, calls, imports) only. Documents/PDFs are skipped — pick an LLM backend to index those.
+          {:else}
+            Documents are summarized by the chosen LLM (uses your key, costs tokens). Code is still AST-extracted for free.
+          {/if}
+        </div>
+      {/if}
       {#if know.mode !== ''}
         <label class="lbl">Documents ({(know.files || []).length})</label>
         {#each know.files || [] as f}
@@ -484,7 +520,8 @@
   <div class="row" style="margin-bottom: 4px">
     <h1 class="grow" style="margin:0">Agents</h1>
     <button class="btn" on:click={() => openLaunch(null, 'studio')} title="Open the document studio without an agent persona">Open studio…</button>
-    <button class="btn" on:click={importYAML}>Import YAML…</button>
+    <button class="btn" on:click={importYAML}>Import…</button>
+    <button class="btn" on:click={importTemplate} title="Convert a pre-1.1 workpath template folder into an agent with its knowledge base">Import template…</button>
     <button class="btn primary" on:click={createNew}>+ New agent</button>
   </div>
   <p class="subtitle">Portable YAML agents, shared with the TUI. Launch them in a Chat, a live Terminal, or the document Studio — each agent declares which surfaces it allows.</p>

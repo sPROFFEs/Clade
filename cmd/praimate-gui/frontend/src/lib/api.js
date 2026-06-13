@@ -58,8 +58,9 @@ export const api = {
   pickAgentKnowledgeFiles: (id) => call('PickAgentKnowledgeFiles', id),
   pickAgentKnowledgeFolder: (id) => call('PickAgentKnowledgeFolder', id),
   deleteAgentKnowledgeFile: (id, rel) => call('DeleteAgentKnowledgeFile', id, rel),
-  buildAgentRAG: (id) => call('BuildAgentRAG', id),
+  buildAgentRAG: (id, backend, apiKey) => call('BuildAgentRAG', id, backend || '', apiKey || ''),
   exportAgentPackDialog: (id) => call('ExportAgentPackDialog', id),
+  importWorkpathTemplateDialog: () => call('ImportWorkpathTemplateDialog'),
 
   updateChatConfig: (chatID, cli, model, tools, localEndpoint, localApiKey, localModel) =>
     call('UpdateChatConfig', chatID, cli, model, tools, localEndpoint || '', localApiKey || '', localModel || ''),

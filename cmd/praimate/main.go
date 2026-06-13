@@ -69,6 +69,9 @@ func main() {
 		"comma-separated key=value pairs for -run-agent workflow inputs (e.g. task=hello,tone=polite)")
 	listAgents := flag.Bool("list-agents", false,
 		"print every agent in the DB (built-in + imported) and exit")
+	importTemplate := flag.String("import-template", "",
+		"convert a pre-1.1 workpath template (or a parent dir of templates) into "+
+			"agent(s) with their knowledge bases, then exit")
 	flag.Parse()
 	if *versionFlag {
 		fmt.Println(version.Banner)
@@ -94,6 +97,9 @@ func main() {
 	}
 	if *listAgents {
 		os.Exit(runListAgents())
+	}
+	if *importTemplate != "" {
+		os.Exit(runImportTemplate(*importTemplate))
 	}
 	if *runAgent != "" {
 		os.Exit(runAgentWorkflow(*runAgent, *runCLI, *runWorkflow, *runInputs))

@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -133,4 +134,56 @@ func parseInputsCSV(s string) map[string]string {
 		out[k] = v
 	}
 	return out
+}
+
+// runImportTemplate implements `praimate -import-template <dir>`. It
+// converts a pre-1.1 workpath template into an agent with its knowledge
+// base. Pass a single dir, or a parent dir to import every template
+// subdirectory inside it (skips _common and any dir without a template
+// marker).
+func runImportTemplate(path string) int {
+	c, cleanup, err := openCore()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "praimate:", err)
+		return 1
+	}
+	defer cleanup()
+	ctx := context.Background()
+
+	var dirs []string
+	if core.IsWorkpathTemplate(path) {
+		dirs = []string{path}
+	} else {
+		entries, rerr := os.ReadDir(path)
+		if rerr != nil {
+			fmt.Fprintln(os.Stderr, "praimate:", rerr)
+			return 1
+		}
+		for _, e := range entries {
+			if !e.IsDir() || e.Name() == "_common" || strings.HasPrefix(e.Name(), ".") {
+				continue
+			}
+			sub := filepath.Join(path, e.Name())
+			if core.IsWorkpathTemplate(sub) {
+				dirs = append(dirs, sub)
+			}
+		}
+	}
+	if len(dirs) == 0 {
+		fmt.Fprintf(os.Stderr, "praimate: no workpath templates found under %s\n", path)
+		return 1
+	}
+
+	rc := 0
+	for _, d := range dirs {
+		agent, err := c.ImportWorkpathTemplate(ctx, d, "", nil)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "  ✗ %s: %v\n", filepath.Base(d), err)
+			rc = 1
+			continue
+		}
+		files, _ := core.ListAgentKnowledge(agent.ID)
+		fmt.Printf("  ✓ %s → agent %q (%d knowledge files)\n", filepath.Base(d), agent.ID, len(files))
+	}
+	return rc
 }

@@ -24,7 +24,7 @@ param(
         "darwin-amd64",
         "darwin-arm64"
     ),
-    [string] $Version = "1.1.14",
+    [string] $Version = "1.1.15",
     [string] $LdFlags = "-s -w",
     [switch] $NoArchive
 )

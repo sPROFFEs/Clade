@@ -8,7 +8,10 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -50,7 +53,7 @@ func (a *App) GetAgentKnowledge(id string) (*AgentKnowledgeInfo, error) {
 		Dir:               dir,
 		Files:             files,
 		GraphifyInstalled: gerr == nil,
-		HasIndex:          dirExists(dir + "/.graphify"),
+		HasIndex:          dirExists(dir + "/graphify-out"),
 	}, nil
 }
 
@@ -124,12 +127,23 @@ func (a *App) DeleteAgentKnowledgeFile(id, rel string) ([]string, error) {
 	return core.ListAgentKnowledge(id)
 }
 
-// BuildAgentRAG runs `graphify extract` over the knowledge folder so
-// the index at knowledge/.graphify is ready before the agent's first
-// query. Output streams over "praimate:install" (same channel the CLI
-// installs use). Requires graphify on PATH — the frontend gates the
-// button on GraphifyInstalled and points at the CLIs tab otherwise.
-func (a *App) BuildAgentRAG(id string) error {
+// backendEnvKey maps a graphify backend name to the env var that holds
+// its API key. Empty backend == code-only (AST extraction, no key).
+var backendEnvKey = map[string]string{
+	"anthropic": "ANTHROPIC_API_KEY",
+	"openai":    "OPENAI_API_KEY",
+	"gemini":    "GEMINI_API_KEY",
+	"deepseek":  "DEEPSEEK_API_KEY",
+	"kimi":      "MOONSHOT_API_KEY",
+}
+
+// BuildAgentRAG runs `graphify extract` over the knowledge folder so the
+// index at knowledge/graphify-out is ready before the agent's first
+// query. backend selects the semantic-extraction LLM ("" / "code" =
+// code-only, which needs no key; documents/PDFs need a real backend +
+// apiKey). Output streams over "praimate:install"; on failure the real
+// graphify error is surfaced (not a bare "exit status 1").
+func (a *App) BuildAgentRAG(id, backend, apiKey string) error {
 	if _, err := exec.LookPath("graphify"); err != nil {
 		return fmt.Errorf("graphify is not installed — install it from the CLIs tab (Managed tools) first")
 	}
@@ -140,18 +154,106 @@ func (a *App) BuildAgentRAG(id string) error {
 	if !dirExists(dir) {
 		return fmt.Errorf("the agent has no knowledge documents yet — add files first")
 	}
+
+	args := []string{"extract", "."}
+	env := os.Environ()
+	if backend != "" && backend != "code" {
+		args = append(args, "--backend", backend)
+		if key := backendEnvKey[backend]; key != "" && strings.TrimSpace(apiKey) != "" {
+			env = append(env, key+"="+strings.TrimSpace(apiKey))
+		}
+	}
+
 	ctx, cancel := context.WithTimeout(a.ctx, 30*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "graphify", "extract")
+	cmd := exec.CommandContext(ctx, "graphify", args...)
 	hideConsole(cmd)
 	cmd.Dir = dir
-	w := installLogWriter{ctx: a.ctx, cli: "graphify:" + id}
+	cmd.Env = env
+	// Stream live AND keep a tail so the failure message is actionable.
+	var tail tailBuffer
+	w := io.MultiWriter(installLogWriter{ctx: a.ctx, cli: "graphify:" + id}, &tail)
 	cmd.Stdout = w
 	cmd.Stderr = w
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("graphify extract failed: %w", err)
+		msg := strings.TrimSpace(tail.String())
+		hint := ""
+		if strings.Contains(msg, "no LLM API key") || strings.Contains(msg, "requires") || strings.Contains(msg, "semantic") {
+			hint = "\n\nDocument/PDF indexing needs an LLM backend + API key (pick one above). " +
+				"Or switch this agent to Raw documents — that needs no key (the agent reads the files directly)."
+		}
+		if msg != "" {
+			return fmt.Errorf("graphify extract failed:\n%s%s", lastLines(msg, 12), hint)
+		}
+		return fmt.Errorf("graphify extract failed: %w%s", err, hint)
 	}
 	return nil
+}
+
+// tailBuffer keeps only the last ~8KB written — enough for the error
+// tail without unbounded memory on a chatty extract.
+type tailBuffer struct{ b []byte }
+
+func (t *tailBuffer) Write(p []byte) (int, error) {
+	t.b = append(t.b, p...)
+	if len(t.b) > 8192 {
+		t.b = t.b[len(t.b)-8192:]
+	}
+	return len(p), nil
+}
+func (t *tailBuffer) String() string { return string(t.b) }
+
+func lastLines(s string, n int) string {
+	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return strings.Join(lines, "\n")
+}
+
+// ImportWorkpathTemplateDialog opens a folder picker and converts the
+// chosen pre-1.1 workpath template (or a parent dir of templates) into
+// agent(s) with their knowledge bases. Returns a short summary.
+func (a *App) ImportWorkpathTemplateDialog() (string, error) {
+	c, err := a.requireCore()
+	if err != nil {
+		return "", err
+	}
+	dir, err := wruntime.OpenDirectoryDialog(a.ctx, wruntime.OpenDialogOptions{
+		Title: "Import a workpath template folder (or a folder of templates)",
+	})
+	if err != nil || dir == "" {
+		return "", err
+	}
+	if core.IsWorkpathTemplate(dir) {
+		ag, err := c.ImportWorkpathTemplate(a.ctx, dir, "", nil)
+		if err != nil {
+			return "", err
+		}
+		return "Imported agent: " + ag.Name, nil
+	}
+	// Parent dir: import every template subdir (skip _common / dotdirs).
+	entries, rerr := os.ReadDir(dir)
+	if rerr != nil {
+		return "", rerr
+	}
+	var names []string
+	for _, e := range entries {
+		if !e.IsDir() || e.Name() == "_common" || strings.HasPrefix(e.Name(), ".") {
+			continue
+		}
+		sub := filepath.Join(dir, e.Name())
+		if !core.IsWorkpathTemplate(sub) {
+			continue
+		}
+		if ag, err := c.ImportWorkpathTemplate(a.ctx, sub, "", nil); err == nil {
+			names = append(names, ag.Name)
+		}
+	}
+	if len(names) == 0 {
+		return "", fmt.Errorf("no workpath templates found in %s", dir)
+	}
+	return fmt.Sprintf("Imported %d agent(s): %s", len(names), strings.Join(names, ", ")), nil
 }
 
 // ExportAgentPackDialog saves the agent as a .praimate-agent pack
