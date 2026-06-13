@@ -290,6 +290,20 @@ install_from_release() {
     [[ -f "$extracted/PRAIMATE-CODE-LICENSE" ]] && $SUDO cp "$extracted/PRAIMATE-CODE-LICENSE" "$DEST/" 2>/dev/null || true
     c_grn "  praimate-code installed (launch with: praimate code)"
   fi
+  # Bundled standalone graphify (when built --with-graphify) goes into
+  # the praimate config bin dir, where ResolveGraphify looks for it first
+  # — our zero-dependency RAG indexing fallback.
+  if [[ -f "$extracted/praimate-graphify" ]]; then
+    local cfgbin
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+      cfgbin="$HOME/Library/Application Support/praimate/bin"
+    else
+      cfgbin="${XDG_CONFIG_HOME:-$HOME/.config}/praimate/bin"
+    fi
+    mkdir -p "$cfgbin"
+    install -m 0755 "$extracted/praimate-graphify" "$cfgbin/praimate-graphify"
+    c_grn "  bundled graphify installed (used for agent RAG indexing)"
+  fi
   # Ship the bundled samples next to the binary at the XDG-style path
   # the launcher already probes (see internal/launcher SampleCandidates:
   # "<execDir>/../share/praimate/samples/workpaths"). Without this, the

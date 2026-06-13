@@ -146,6 +146,7 @@
   let knowBusy = false
   let ragBackend = 'claude-cli' // graphify backend for RAG indexing
   let ragKey = ''
+  let ragModel = ''
   let ragLog = []
   let unsubRag = () => {}
 
@@ -194,13 +195,28 @@
     }
   }
 
+  async function installGraphify() {
+    if (knowBusy) return
+    knowBusy = true
+    error = ''
+    try {
+      await api.installBundledGraphify()
+      notice = 'Bundled graphify installed.'
+      await loadKnowledge(editing.id)
+    } catch (e) {
+      error = String(e)
+    } finally {
+      knowBusy = false
+    }
+  }
+
   async function buildRAG() {
     if (!editing?.id || knowBusy) return
     knowBusy = true
     ragLog = []
     error = ''
     try {
-      await api.buildAgentRAG(editing.id, ragBackend, ragKey)
+      await api.buildAgentRAG(editing.id, ragBackend, ragKey, ragModel)
       notice = 'RAG index built.'
       await loadKnowledge(editing.id)
     } catch (e) {
@@ -393,8 +409,11 @@
       </div>
       {#if know.mode === 'rag' && !know.graphifyInstalled}
         <div class="banner" style="margin-top:8px">
-          RAG mode needs <strong>graphify</strong> — install it from the CLIs tab (Managed tools).
-          Until then the agent falls back to reading the files directly.
+          RAG mode needs <strong>graphify</strong>.
+          <button class="btn sm primary" style="margin-left:8px" on:click={installGraphify} disabled={knowBusy}>
+            {knowBusy ? 'Installing…' : 'Install bundled graphify'}
+          </button>
+          <span class="card-sub"> — PrAImate's self-contained build, no Python needed. Until then the agent just reads the files directly.</span>
         </div>
       {/if}
       {#if know.mode === 'rag' && know.graphifyInstalled}
@@ -403,21 +422,33 @@
           <select class="field" style="max-width:280px" bind:value={ragBackend}>
             <option value="claude-cli">Claude CLI (uses your install · no key)</option>
             <option value="code">Code only (no key · skips documents)</option>
+            {#if know.localEndpoint}<option value="local">Local LLM (your saved endpoint)</option>{/if}
             <option value="claude">Anthropic API</option>
             <option value="openai">OpenAI</option>
             <option value="gemini">Google Gemini</option>
             <option value="deepseek">DeepSeek</option>
             <option value="kimi">Kimi (Moonshot)</option>
           </select>
-          {#if ragBackend !== 'code' && ragBackend !== 'claude-cli'}
+          {#if ragBackend !== 'code' && ragBackend !== 'claude-cli' && ragBackend !== 'local'}
             <input class="field grow mono" type="password" placeholder="API key for the backend" bind:value={ragKey} />
           {/if}
         </div>
+        {#if ragBackend === 'local'}
+          <div class="row" style="margin-top:6px">
+            <input class="field grow mono" placeholder="model name at the endpoint (e.g. qwen2.5-coder)" bind:value={ragModel} />
+          </div>
+        {:else if ragBackend !== 'code' && ragBackend !== 'claude-cli'}
+          <div class="row" style="margin-top:6px">
+            <input class="field grow mono" placeholder="model (optional — blank uses the backend default)" bind:value={ragModel} />
+          </div>
+        {/if}
         <div class="card-sub" style="margin-top:4px">
           {#if ragBackend === 'claude-cli'}
             Uses your installed, signed-in Claude CLI to summarize documents — no API key, no extra cost. Recommended.
           {:else if ragBackend === 'code'}
             Builds a code knowledge-graph (functions, calls, imports) only. Documents/PDFs are skipped — pick an LLM backend to index those.
+          {:else if ragBackend === 'local'}
+            Routes through your saved Local LLM endpoint (<span class="mono">{know.localEndpoint}</span>) — no cloud key. Configure it in the Local LLM tab.
           {:else}
             Documents are summarized by the chosen LLM (uses your key, costs tokens). Code is still AST-extracted for free.
           {/if}

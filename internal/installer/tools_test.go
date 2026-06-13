@@ -10,28 +10,54 @@ func TestToolCatalog_GraphifyShape(t *testing.T) {
 	for _, o := range []OS{OSMacOS, OSLinux, OSWSL, OSWindows} {
 		for _, act := range []Action{ActionInstall, ActionUpdate} {
 			got := allToolMethods(ToolGraphify, act, o)
-			if len(got) != 1 {
-				t.Fatalf("graphify %s/%s: got %d methods, want exactly 1", o, act, len(got))
+			// Two methods now: the bundled standalone download
+			// (recommended) and the pinned uv install.
+			var uv *Method
+			for i := range got {
+				if got[i].ID == "uv" {
+					uv = &got[i]
+				}
 			}
-			m := got[0]
-			if m.ID != "uv" {
-				t.Errorf("graphify %s/%s: ID=%q, want \"uv\"", o, act, m.ID)
+			if uv == nil {
+				t.Fatalf("graphify %s/%s: no uv method in %d methods", o, act, len(got))
 			}
-			if m.ManagedPrefix != "graphify" {
-				t.Errorf("graphify %s/%s: ManagedPrefix=%q", o, act, m.ManagedPrefix)
+			if uv.ManagedPrefix != "graphify" {
+				t.Errorf("graphify %s/%s: ManagedPrefix=%q", o, act, uv.ManagedPrefix)
 			}
-			if m.ManagedPrefixPkg == "" {
-				t.Errorf("graphify %s/%s: ManagedPrefixPkg unset", o, act)
+			if !strings.Contains(uv.ManagedPrefixPkg, "graphifyy[openai]==") {
+				t.Errorf("graphify %s/%s: pkg not pinned with openai extra: %q", o, act, uv.ManagedPrefixPkg)
 			}
-			// Supply-chain pin: explicit index URL.
-			if !strings.Contains(m.Command, "--index-url=https://pypi.org/simple/") {
-				t.Errorf("graphify %s/%s: missing --index-url in command %q", o, act, m.Command)
+			if !strings.Contains(uv.Command, "--index-url=https://pypi.org/simple/") {
+				t.Errorf("graphify %s/%s: missing --index-url in command %q", o, act, uv.Command)
 			}
-			// Project-local: must NOT be a `-g` style install for graphify.
-			if strings.Contains(m.Command, " -g ") {
-				t.Errorf("graphify %s/%s: should not use -g, got %q", o, act, m.Command)
+			if strings.Contains(uv.Command, " -g ") {
+				t.Errorf("graphify %s/%s: should not use -g, got %q", o, act, uv.Command)
 			}
 		}
+	}
+}
+
+// On a platform where the bundled asset ships, the recommended graphify
+// method downloads our prebuilt standalone from the release.
+func TestToolCatalog_GraphifyBundledMethod(t *testing.T) {
+	if !graphifyAssetShipped() {
+		t.Skip("no bundled graphify asset for this host platform")
+	}
+	got := allToolMethods(ToolGraphify, ActionInstall, DetectOS())
+	var bundled *Method
+	for i := range got {
+		if strings.Contains(got[i].Command, "praimate-graphify") {
+			bundled = &got[i]
+		}
+	}
+	if bundled == nil {
+		t.Fatal("no bundled download method on a platform that ships the asset")
+	}
+	if !bundled.Recommended {
+		t.Error("bundled method should be recommended")
+	}
+	if !strings.Contains(bundled.Command, "releases/latest/download/") {
+		t.Errorf("bundled command not a release download: %q", bundled.Command)
 	}
 }
 

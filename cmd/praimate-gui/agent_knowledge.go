@@ -18,6 +18,8 @@ import (
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"github.com/sPROFFEs/PrAImate/internal/core"
+	"github.com/sPROFFEs/PrAImate/internal/installer"
+	"github.com/sPROFFEs/PrAImate/internal/launcher"
 )
 
 // AgentKnowledgeInfo is the knowledge panel's state for one agent.
@@ -27,6 +29,9 @@ type AgentKnowledgeInfo struct {
 	Files             []string `json:"files"`
 	GraphifyInstalled bool     `json:"graphifyInstalled"`
 	HasIndex          bool     `json:"hasIndex"`
+	// LocalEndpoint is the saved Local-LLM endpoint (Local LLM tab), so
+	// the RAG panel can offer "Local LLM" indexing without retyping it.
+	LocalEndpoint string `json:"localEndpoint"`
 }
 
 // GetAgentKnowledge reports the agent's knowledge state.
@@ -47,13 +52,19 @@ func (a *App) GetAgentKnowledge(id string) (*AgentKnowledgeInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	_, gerr := exec.LookPath("graphify")
+	_, gOK := installer.ResolveGraphify()
+	localCfg, _ := launcher.LoadConfig()
+	localEndpoint := ""
+	if localCfg != nil {
+		localEndpoint = localCfg.DefaultLocalEndpoint
+	}
 	return &AgentKnowledgeInfo{
 		Mode:              agent.Knowledge,
 		Dir:               dir,
 		Files:             files,
-		GraphifyInstalled: gerr == nil,
+		GraphifyInstalled: gOK,
 		HasIndex:          dirExists(dir + "/graphify-out"),
+		LocalEndpoint:     localEndpoint,
 	}, nil
 }
 
@@ -139,12 +150,22 @@ var backendEnvKey = map[string]string{
 
 // BuildAgentRAG runs `graphify extract` over the knowledge folder so the
 // index at knowledge/graphify-out is ready before the agent's first
-// query. backend selects the semantic-extraction LLM ("" / "code" =
-// code-only, which needs no key; documents/PDFs need a real backend +
-// apiKey). Output streams over "praimate:install"; on failure the real
-// graphify error is surfaced (not a bare "exit status 1").
-func (a *App) BuildAgentRAG(id, backend, apiKey string) error {
-	if _, err := exec.LookPath("graphify"); err != nil {
+// query. backend selects the semantic-extraction LLM:
+//
+//	""/"code"   — code-only (AST, no key); documents are skipped
+//	"claude-cli"— drives the installed Claude CLI (no key, no cost)
+//	"local"     — the saved Local-LLM endpoint (OpenAI-compatible) via
+//	              graphify's openai backend + OPENAI_BASE_URL
+//	other       — a cloud backend taking apiKey
+//
+// model, when set, overrides graphify's default model (required for
+// "local"). graphify resolves from PrAImate's pinned managed install
+// first (ResolveGraphify), so our verified version is the fallback even
+// if the user's PATH graphify changed. On failure the real graphify
+// error is surfaced (not a bare "exit status 1").
+func (a *App) BuildAgentRAG(id, backend, apiKey, model string) error {
+	graphifyBin, ok := installer.ResolveGraphify()
+	if !ok {
 		return fmt.Errorf("graphify is not installed — install it from the CLIs tab (Managed tools) first")
 	}
 	dir, err := core.AgentKnowledgeDir(id)
@@ -157,8 +178,31 @@ func (a *App) BuildAgentRAG(id, backend, apiKey string) error {
 
 	args := []string{"extract", "."}
 	env := os.Environ()
-	if backend != "" && backend != "code" {
+	switch {
+	case backend == "" || backend == "code":
+		// code-only — no backend flag, no key.
+	case backend == "local":
+		cfg, _ := launcher.LoadConfig()
+		if cfg == nil || strings.TrimSpace(cfg.DefaultLocalEndpoint) == "" {
+			return fmt.Errorf("no Local LLM endpoint configured — set one in the Local LLM tab first")
+		}
+		key := cfg.DefaultLocalAPIKey
+		if strings.TrimSpace(key) == "" {
+			key = "local" // openai client rejects an empty key
+		}
+		args = append(args, "--backend", "openai")
+		if strings.TrimSpace(model) != "" {
+			args = append(args, "--model", strings.TrimSpace(model))
+		}
+		env = append(env,
+			"OPENAI_BASE_URL="+openAIBaseURL(cfg.DefaultLocalEndpoint),
+			"OPENAI_API_KEY="+key,
+		)
+	default:
 		args = append(args, "--backend", backend)
+		if strings.TrimSpace(model) != "" {
+			args = append(args, "--model", strings.TrimSpace(model))
+		}
 		if key := backendEnvKey[backend]; key != "" && strings.TrimSpace(apiKey) != "" {
 			env = append(env, key+"="+strings.TrimSpace(apiKey))
 		}
@@ -166,7 +210,7 @@ func (a *App) BuildAgentRAG(id, backend, apiKey string) error {
 
 	ctx, cancel := context.WithTimeout(a.ctx, 30*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "graphify", args...)
+	cmd := exec.CommandContext(ctx, graphifyBin, args...)
 	hideConsole(cmd)
 	cmd.Dir = dir
 	cmd.Env = env
@@ -209,6 +253,34 @@ func lastLines(s string, n int) string {
 		lines = lines[len(lines)-n:]
 	}
 	return strings.Join(lines, "\n")
+}
+
+// openAIBaseURL normalises a Local-LLM endpoint for the openai client:
+// trims a trailing slash and appends /v1 unless the path already ends
+// in a version segment. Ollama/vLLM/LiteLLM all expose /v1.
+func openAIBaseURL(endpoint string) string {
+	e := strings.TrimRight(strings.TrimSpace(endpoint), "/")
+	if !strings.HasPrefix(e, "http://") && !strings.HasPrefix(e, "https://") {
+		e = "http://" + e
+	}
+	if strings.HasSuffix(e, "/v1") || strings.Contains(e, "/v1/") {
+		return e
+	}
+	return e + "/v1"
+}
+
+// InstallBundledGraphify downloads PrAImate's bundled standalone
+// graphify into the managed bin dir (no Python/uv needed), streaming
+// progress over "praimate:install".
+func (a *App) InstallBundledGraphify() error {
+	ctx, cancel := context.WithTimeout(a.ctx, 15*time.Minute)
+	defer cancel()
+	w := installLogWriter{ctx: a.ctx, cli: "graphify"}
+	if err := installer.InstallBundledGraphify(ctx, w); err != nil {
+		return err
+	}
+	refreshManagedPaths()
+	return nil
 }
 
 // ImportWorkpathTemplateDialog opens a folder picker and converts the

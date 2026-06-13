@@ -58,7 +58,8 @@ export const api = {
   pickAgentKnowledgeFiles: (id) => call('PickAgentKnowledgeFiles', id),
   pickAgentKnowledgeFolder: (id) => call('PickAgentKnowledgeFolder', id),
   deleteAgentKnowledgeFile: (id, rel) => call('DeleteAgentKnowledgeFile', id, rel),
-  buildAgentRAG: (id, backend, apiKey) => call('BuildAgentRAG', id, backend || '', apiKey || ''),
+  buildAgentRAG: (id, backend, apiKey, model) => call('BuildAgentRAG', id, backend || '', apiKey || '', model || ''),
+  installBundledGraphify: () => call('InstallBundledGraphify'),
   exportAgentPackDialog: (id) => call('ExportAgentPackDialog', id),
   importWorkpathTemplateDialog: () => call('ImportWorkpathTemplateDialog'),
 

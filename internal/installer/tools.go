@@ -211,6 +211,145 @@ func ManagedToolBinDir(name string) (string, error) {
 	return filepath.Join(prefix, "bin"), nil
 }
 
+// GraphifyPinnedVersion is the graphify version PrAImate's RAG
+// integration is verified against. The CLIs-tab installer pins this
+// exact version into the managed prefix, and ResolveGraphify prefers
+// that install — so an upstream change to graphify's CLI or output
+// layout can't break us. Bump only after re-verifying extract + query
+// + the graphify-out/ layout against the new version.
+const GraphifyPinnedVersion = "0.8.36"
+
+// bundledGraphifyName is the file name of the self-contained graphify
+// binary PrAImate ships (PyInstaller-frozen, no Python needed). Lives in
+// the praimate bin dir next to praimate-code.
+func bundledGraphifyName() string {
+	n := "praimate-graphify"
+	if runtime.GOOS == "windows" {
+		n += ".exe"
+	}
+	return n
+}
+
+// BundledGraphifyPath returns where the shipped standalone graphify
+// binary lives (<config>/praimate/bin/praimate-graphify), whether or not
+// it exists yet.
+func BundledGraphifyPath() (string, error) {
+	binDir, err := PraimateBinDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(binDir, bundledGraphifyName()), nil
+}
+
+// ResolveGraphify returns the absolute path to the graphify binary to
+// use, in robustness order:
+//
+//  1. PrAImate's BUNDLED standalone build (no Python/uv/PATH needed) —
+//     our most reliable known-good fallback.
+//  2. The pinned uv-managed install in the praimate prefix.
+//  3. The legacy clade-managed prefix.
+//  4. Whatever's on PATH.
+//
+// Returns ("", false) when graphify can't be found anywhere.
+func ResolveGraphify() (string, bool) {
+	if p, err := BundledGraphifyPath(); err == nil && fileExists(p) {
+		return p, true
+	}
+	name := "graphify"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	if binDir, err := ManagedToolBinDir("graphify"); err == nil {
+		if p := filepath.Join(binDir, name); fileExists(p) {
+			return p, true
+		}
+	}
+	if base, err := os.UserConfigDir(); err == nil {
+		if p := filepath.Join(base, "clade", "tools", "graphify", "bin", name); fileExists(p) {
+			return p, true
+		}
+	}
+	if p, err := exec.LookPath("graphify"); err == nil {
+		return p, true
+	}
+	return "", false
+}
+
+// graphifyAssetName is the release-asset file name for the bundled
+// standalone graphify on the current OS/arch.
+func graphifyAssetName() string {
+	name := fmt.Sprintf("praimate-graphify-%s-%s", runtime.GOOS, runtime.GOARCH)
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	return name
+}
+
+// graphifyAssetShipped reports whether a prebuilt praimate-graphify asset
+// exists in the release for the current OS/arch. PyInstaller can't
+// cross-compile, so we add platforms here as they're built on native
+// hosts. Until a platform is listed, its users install graphify via the
+// pinned uv method instead (still robust — same vetted version).
+func graphifyAssetShipped() bool {
+	switch runtime.GOOS + "/" + runtime.GOARCH {
+	case "linux/amd64":
+		return true
+	default:
+		return false
+	}
+}
+
+// graphifyBundledMethod builds the download-the-prebuilt-binary install
+// method for graphify — mirrors praimateCodeMethods: pull the shipped
+// standalone build from the GitHub release into <config>/praimate/bin.
+// Returns nil when no asset ships for this platform or the praimate bin
+// dir can't be resolved.
+func graphifyBundledMethod(current OS) *Method {
+	if !graphifyAssetShipped() {
+		return nil
+	}
+	binDir, err := PraimateBinDir()
+	if err != nil {
+		return nil
+	}
+	url := "https://github.com/sPROFFEs/PrAImate/releases/latest/download/" + graphifyAssetName()
+	if current == OSWindows {
+		dest := filepath.Join(binDir, "praimate-graphify.exe")
+		return &Method{
+			ID:    "powershell",
+			Label: "Download PrAImate's bundled graphify (no Python needed)",
+			Command: fmt.Sprintf(
+				"New-Item -ItemType Directory -Force -Path '%s' | Out-Null; "+
+					"Invoke-WebRequest -Uri '%s' -OutFile '%s'", binDir, url, dest),
+			Shell:       ShellPowerShell,
+			Recommended: true,
+		}
+	}
+	dest := filepath.Join(binDir, "praimate-graphify")
+	return &Method{
+		ID:          "curl",
+		Label:       "Download PrAImate's bundled graphify (no Python needed)",
+		Command:     fmt.Sprintf("mkdir -p %q && curl -fSL %q -o %q && chmod +x %q", binDir, url, dest, dest),
+		Shell:       ShellBash,
+		Recommended: true,
+	}
+}
+
+// InstallBundledGraphify downloads the shipped standalone graphify into
+// the praimate bin dir. Used by the GUI's one-click install path.
+func InstallBundledGraphify(ctx context.Context, w io.Writer) error {
+	m := graphifyBundledMethod(DetectOS())
+	if m == nil {
+		return fmt.Errorf("can't resolve the praimate bin dir")
+	}
+	return Run(ctx, *m, w, w)
+}
+
+func fileExists(p string) bool {
+	fi, err := os.Stat(p)
+	return err == nil && !fi.IsDir()
+}
+
 // ToolMethods returns the install/update methods for a tool. Mirrors
 // Methods (the AgentID variant) but with a tool-only catalog.
 func ToolMethods(tool ToolID, action Action, current OS) []Method {
@@ -245,22 +384,38 @@ func allToolMethods(tool ToolID, action Action, current OS) []Method {
 		// --index-url is the supply-chain pin equivalent of pnpm's
 		// --registry: defends against a poisoned ~/.config/uv/uv.toml
 		// or UV_INDEX_URL env var.
-		const pin = "graphifyy" // version-pin TODO: switch to graphifyy==X.Y.Z once vetted
+		// VETTED PIN: PrAImate's graphify integration (RAG indexing,
+		// `graphify query`, the graphify-out/ layout) is verified against
+		// this exact version. Pinning means an upstream release that
+		// changes the CLI surface or output layout can't silently break
+		// us — installing from the CLIs tab always lands the version we
+		// tested, and ResolveGraphify prefers this managed install over
+		// whatever's on PATH. The [openai] extra pulls the openai python
+		// client so the OpenAI and Local-LLM (OpenAI-compatible) backends
+		// work out of the box. Bump deliberately after re-verifying.
+		// No shell quoting: Command is split with strings.Fields and
+		// exec'd directly (no shell), and the spec has no whitespace.
+		pin := "graphifyy[openai]==" + GraphifyPinnedVersion
 		cmd := "uv tool install --index-url=https://pypi.org/simple/ " + pin
 		if action == ActionUpdate {
 			cmd = "uv tool upgrade --index-url=https://pypi.org/simple/ " + pin
 		}
-		return []Method{
-			{
-				ID:               "uv",
-				Label:            "uv tool install into Clade-managed prefix",
-				Command:          cmd,
-				ManagedPrefix:    "graphify",
-				ManagedPrefixPkg: pin,
-				Recommended:      true,
-				Prereqs:          []string{"uv"},
-			},
+		var methods []Method
+		// Recommended: PrAImate's bundled standalone build — no Python or
+		// uv needed, and it's the exact version we test against.
+		if m := graphifyBundledMethod(current); m != nil {
+			methods = append(methods, *m)
 		}
+		methods = append(methods, Method{
+			ID:               "uv",
+			Label:            "uv tool install (pinned " + GraphifyPinnedVersion + ") into PrAImate-managed prefix",
+			Command:          cmd,
+			ManagedPrefix:    "graphify",
+			ManagedPrefixPkg: pin,
+			Recommended:      len(methods) == 0,
+			Prereqs:          []string{"uv"},
+		})
+		return methods
 	case ToolGstack:
 		// gstack's upstream setup is a bash script that installs skills
 		// into whichever supported hosts it detects. The README's broad

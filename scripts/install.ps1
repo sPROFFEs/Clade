@@ -198,6 +198,15 @@ function Install-Binary {
             Copy-Item -Path $codeSrc -Destination $Dest -Force
             Write-Host "  v praimate-code.exe installed (launch with: praimate code)" -ForegroundColor Green
         }
+        # Bundled standalone graphify → %APPDATA%\praimate\bin, where
+        # ResolveGraphify looks first (zero-dependency RAG fallback).
+        $gfSrc = Join-Path $extracted "praimate-graphify.exe"
+        if (Test-Path $gfSrc) {
+            $cfgbin = Join-Path $env:APPDATA "praimate\bin"
+            New-Item -ItemType Directory -Force -Path $cfgbin | Out-Null
+            Copy-Item -Path $gfSrc -Destination (Join-Path $cfgbin "praimate-graphify.exe") -Force
+            Write-Host "  v bundled graphify installed (used for agent RAG indexing)" -ForegroundColor Green
+        }
         # Ship the bundled samples next to the binary at the same path
         # the launcher probes in SampleCandidates:
         # "<execDir>\..\share\praimate\samples\workpaths". Without this,

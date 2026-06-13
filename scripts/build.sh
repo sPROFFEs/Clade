@@ -36,11 +36,12 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-VERSION="${VERSION:-1.1.15}"
+VERSION="${VERSION:-1.1.16}"
 EXTRA_LDFLAGS="${LDFLAGS:--s -w}"  # strip symbols by default — tiny binaries
 ARCHIVE=1
 WITH_GUI=0
 WITH_CODE=0
+WITH_GRAPHIFY=0
 TARGETS=()
 
 for arg in "$@"; do
@@ -48,6 +49,7 @@ for arg in "$@"; do
     --no-archive) ARCHIVE=0 ;;
     --with-gui) WITH_GUI=1 ;;
     --with-code) WITH_CODE=1 ;;
+    --with-graphify) WITH_GRAPHIFY=1 ;;
     --version=*) VERSION="${arg#--version=}" ;;
     -h|--help)
       sed -n '2,26p' "$0"
@@ -123,6 +125,17 @@ build_one() {
       OUT="$out" bash scripts/build-praimate-code.sh
     else
       echo "  (skipping praimate-code: bun not on PATH)" >&2
+    fi
+  fi
+
+  # Bundled graphify: PyInstaller-frozen standalone, native target only
+  # (can't cross-compile). Needs uv; skipped quietly otherwise.
+  if [ "$WITH_GRAPHIFY" = "1" ] && [ "$triplet" = "$NATIVE_TRIPLET" ]; then
+    if command -v uv >/dev/null 2>&1; then
+      echo "  + praimate-graphify (native, via build-graphify.sh)"
+      OUT="$out" bash scripts/build-graphify.sh
+    else
+      echo "  (skipping praimate-graphify: uv not on PATH)" >&2
     fi
   fi
 
