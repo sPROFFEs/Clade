@@ -3,7 +3,9 @@
   // mirroring the TUI's install screen. Pick an install method per CLI
   // and watch its output stream live.
   import { onMount, onDestroy } from 'svelte'
+  import { get } from 'svelte/store'
   import { api } from '../lib/api.js'
+  import { cliCache } from '../lib/stores.js'
 
   let clis = []
   let error = ''
@@ -32,6 +34,9 @@
     try { codeInstalled = await api.praimateCodeInstalled() } catch {}
     try { tools = (await api.listManagedTools()) || [] } catch { tools = [] }
     loading = false
+    // Keep the app-wide prefetch cache warm so re-opening the tab is
+    // instant after this fresh probe.
+    cliCache.set({ clis, tools, codeInstalled, loaded: true })
   }
 
   async function showToolMethods(t) {
@@ -109,6 +114,15 @@
         log = [...log.slice(-300), ev.line]
       })
       unsub = () => window.runtime.EventsOff('praimate:install')
+    }
+    // Render instantly from the app-warmed prefetch cache, then refresh
+    // in the background so the tab never shows a spinner on first open.
+    const cached = get(cliCache)
+    if (cached.loaded) {
+      clis = cached.clis
+      tools = cached.tools
+      codeInstalled = cached.codeInstalled
+      loading = false
     }
     await load()
   })

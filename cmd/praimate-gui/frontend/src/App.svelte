@@ -1,9 +1,10 @@
 <script>
   import { onMount } from 'svelte'
   import { api } from './lib/api.js'
-  import { activePage } from './lib/stores.js'
+  import { activePage, prefetchCLIs } from './lib/stores.js'
   import { initTheme, themeMode, setThemeMode } from './lib/theme.js'
-  import logo from './assets/praimate.png'
+  import logo from './assets/monke-icon.png'
+  import mascot from './assets/monke-mascot.png'
   import Chats from './pages/Chats.svelte'
   import Code from './pages/Code.svelte'
   import Agents from './pages/Agents.svelte'
@@ -28,6 +29,21 @@
     sun: 'M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10zM12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4',
     moon: 'M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z',
     monitor: 'M2 4a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2zM8 21h8M12 17v4',
+    chevronLeft: 'M15 18l-6-6 6-6',
+    chevronRight: 'M9 18l6-6-6-6',
+  }
+
+  // Sidebar collapse — icons-only rail. Persisted to localStorage so it
+  // survives reloads; default expanded on first run.
+  let collapsed = false
+  try {
+    collapsed = localStorage.getItem('praimate:sidebar-collapsed') === '1'
+  } catch {}
+  function toggleCollapsed() {
+    collapsed = !collapsed
+    try {
+      localStorage.setItem('praimate:sidebar-collapsed', collapsed ? '1' : '0')
+    } catch {}
   }
 
   // Code-oriented order: lead with the live coding terminal, then
@@ -36,7 +52,7 @@
     { id: 'code', label: 'Code', icon: icons.code, component: Code },
     { id: 'chats', label: 'Chats', icon: icons.chats, component: Chats },
     { id: 'agents', label: 'Agents', icon: icons.run, component: Agents },
-    { id: 'clis', label: 'CLIs', icon: icons.agents, component: CLIs },
+    { id: 'clis', label: 'CLI & Tools', icon: icons.agents, component: CLIs },
     { id: 'localllm', label: 'Local LLM', icon: icons.monitor, component: LocalLLM },
     { id: 'mcp', label: 'MCP', icon: icons.mcp, component: MCP },
     { id: 'memory', label: 'Memory', icon: icons.memory, component: Memory },
@@ -67,6 +83,12 @@
     } catch (e) {
       health = { ok: false, error: String(e) }
     }
+    // Warm the CLI & Tools detection cache in the background so the tab
+    // opens instantly instead of probing on first view. Only for the
+    // main app window (skip in editor/setup modes).
+    if (editorMode && !editorMode.active && !firstRun?.needed) {
+      prefetchCLIs()
+    }
   })
 
   function setupDone() {
@@ -93,21 +115,29 @@
   <Setup defaultRoot={firstRun.defaultRoot} on:done={setupDone} />
 {:else if editorMode}
 <div class="shell">
-  <nav class="sidebar">
+  <nav class="sidebar" class:collapsed>
     <div class="brand">
       <img src={logo} alt="PrAImate" />
-      <span>PrAImate GUI</span>
+      {#if !collapsed}<span>PrAImate</span>{/if}
+      <button
+        class="icon-btn collapse-btn"
+        title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        on:click={toggleCollapsed}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d={collapsed ? icons.chevronRight : icons.chevronLeft} /></svg>
+      </button>
     </div>
     {#each pages as p}
       <button
         class="nav-item"
         class:active={$activePage === p.id}
+        title={collapsed ? p.label : ''}
         on:click={() => activePage.set(p.id)}>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d={p.icon} /></svg>
-        {p.label}
+        {#if !collapsed}<span class="nav-label">{p.label}</span>{/if}
       </button>
     {/each}
     <div style="flex:1"></div>
+    <div class="mascot" style="background-image:url({mascot})" aria-hidden="true"></div>
     <div class="sidebar-footer">
       {#if health}
         {#if health.ok}

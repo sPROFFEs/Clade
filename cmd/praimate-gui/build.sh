@@ -21,9 +21,9 @@ esac
 
 # Windows icon: go build embeds the checked-in rsrc_windows_*.syso
 # automatically (taskbar + titlebar icon). Regenerate after changing
-# frontend/src/assets/praimate.png with:
+# frontend/src/assets/monke-icon.png with:
 #   go run github.com/tc-hib/go-winres@v0.3.3 simply \
-#     --icon frontend/src/assets/praimate.png \
+#     --icon frontend/src/assets/monke-icon.png \
 #     --product-name "PrAImate GUI" --product-version <version>
 
 # Name the output praimate-gui.exe on Windows (Go does NOT auto-append

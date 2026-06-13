@@ -34,11 +34,21 @@ else
   echo "    · WARN: update-advisory anchor not found (upstream moved?); skipped" >&2
 fi
 
-# 2. Replace the home-screen block logo with a PrAImate text title. We
-#    swap the <Logo /> element rather than reproduce their ASCII art.
+# 2. Replace the home-screen block logo with PrAImate Code ASCII
+#    lettering art. A TUI can't render the monke PNG icon, so we keep
+#    the OpenCode-style block-art look but spell "praimate-code". The
+#    art is a figlet "small" rendering, JSON-encoded so its backslashes
+#    and backticks survive injection into the TSX as a plain JS string
+#    literal. opentui's <text> renders the embedded \n as line breaks,
+#    reproducing the multi-line banner the original <Logo /> drew.
+PRAIMATE_CODE_ART_JSON="$(cat <<'PCART'
+"               _            _                      _     \n _ __ _ _ __ _(_)_ __  __ _| |_ ___ ___ __ ___  __| |___ \n| '_ \\ '_/ _` | | '  \\/ _` |  _/ -_)___/ _/ _ \\/ _` / -_)\n| .__/_| \\__,_|_|_|_|_\\__,_|\\__\\___|   \\__\\___/\\__,_\\___|\n|_|                                                      "
+PCART
+)"
 if [ -f "$HOME_TSX" ] && grep -q '<Logo />' "$HOME_TSX"; then
-  perl -0pi -e 's/<Logo \/>/<text selectable={false}>{"praimate code"}<\/text>/' "$HOME_TSX"
-  echo "    · replaced home wordmark"
+  REPLACEMENT="<text selectable={false}>{${PRAIMATE_CODE_ART_JSON}}</text>" \
+    perl -0pi -e 's/<Logo \/>/$ENV{REPLACEMENT}/' "$HOME_TSX"
+  echo "    · replaced home wordmark with praimate-code ASCII banner"
 else
   echo "    · WARN: home <Logo /> anchor not found; skipped" >&2
 fi

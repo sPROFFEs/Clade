@@ -73,27 +73,54 @@ html, body {
   flex-direction: column;
   padding: 0 8px 10px;
   gap: 1px;
+  position: relative;
+  transition: width 0.16s ease;
+}
+.sidebar.collapsed {
+  width: 60px;
 }
 
 .brand {
   display: flex;
   align-items: center;
-  gap: 8px;
-  height: 44px;
-  padding: 0 8px;
+  gap: 9px;
+  height: 48px;
+  padding: 0 6px;
   margin: 0 -8px 8px;
   border-bottom: 1px solid var(--border);
-  font-weight: 600;
-  font-size: 13.5px;
-  letter-spacing: 0.3px;
+  font-weight: 700;
+  font-size: 14.5px;
+  letter-spacing: 0.2px;
   user-select: none;
+  position: relative;
+}
+.sidebar.collapsed .brand {
   justify-content: center;
+  padding: 0;
 }
 .brand img {
-  width: 20px;
-  height: 20px;
-  border-radius: 5px;
+  width: 30px;
+  height: 30px;
+  border-radius: 7px;
   display: block;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 1px var(--border), 0 1px 4px rgba(0, 0, 0, 0.28);
+  background: var(--bg-raised);
+}
+
+/* Collapse/expand chevron — pinned to the brand's right edge when
+   expanded; centred under the logo in the collapsed rail. */
+.collapse-btn {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+}
+.sidebar.collapsed .collapse-btn {
+  position: absolute;
+  right: 2px;
+  top: 6px;
+  transform: none;
 }
 
 .nav-item {
@@ -111,12 +138,33 @@ html, body {
   font-family: var(--sans);
   font-size: 13px;
 }
+.sidebar.collapsed .nav-item {
+  justify-content: center;
+  padding: 8px 0;
+}
 .nav-item svg { width: 15px; height: 15px; flex-shrink: 0; }
 .nav-item:hover { background: var(--bg-raised); color: var(--text); }
 .nav-item.active {
   background: var(--bg-raised);
   color: var(--text);
   font-weight: 600;
+}
+
+/* Branding mascot — pinned above the footer, fades into the panel so
+   it reads as a watermark rather than UI. Hidden in the narrow rail. */
+.mascot {
+  height: 104px;
+  margin: 0 -8px 4px;
+  background-repeat: no-repeat;
+  background-position: bottom center;
+  background-size: contain;
+  opacity: 0.9;
+  pointer-events: none;
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 38%);
+  mask-image: linear-gradient(to bottom, transparent, #000 38%);
+}
+.sidebar.collapsed .mascot {
+  display: none;
 }
 
 .sidebar-footer {
@@ -127,6 +175,12 @@ html, body {
   padding: 8px 4px 0;
   border-top: 1px solid var(--border);
   margin-top: 8px;
+}
+.sidebar.collapsed .sidebar-footer {
+  justify-content: center;
+}
+.sidebar.collapsed .sidebar-footer .pill {
+  display: none;
 }
 
 /* Icon-only ghost button (theme toggle, small actions) */

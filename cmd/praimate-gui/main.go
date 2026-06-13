@@ -29,7 +29,7 @@ var assets embed.FS
 // exe's embedded resource (rsrc_windows_amd64.syso, generated with
 // go-winres from this same PNG — see build.sh).
 //
-//go:embed frontend/src/assets/praimate.png
+//go:embed frontend/src/assets/monke-icon.png
 var appIcon []byte
 
 func main() {
