@@ -12,22 +12,26 @@
 # binary and writes a NOTICE recording the upstream source + commit.
 # Do NOT remove those. We rebrand the product NAME, not the attribution.
 #
-# Requires: bun (>=1.3), git, ~2GB disk, network. The build downloads
-# OpenCode's full dependency tree and compiles a ~100MB binary.
+# Requires: bun (>=1.3), ~2GB disk, network (bun pulls the JS dep tree).
+# The OpenCode SOURCE is vendored in-repo (third_party/opencode), so no
+# git clone of upstream is needed — bun install fetches node_modules from
+# npm, reproducible from the committed bun.lock.
 #
 # Usage:
 #   scripts/build-praimate-code.sh                 # native target → dist/<triplet>/
 #   OUT=/some/dir scripts/build-praimate-code.sh    # custom output dir
-#   OPENCODE_REF=v1.17.3 scripts/build-praimate-code.sh  # pin override
+#   OPENCODE_SRC=/path/to/opencode scripts/build-praimate-code.sh  # source override
+#   OPENCODE_REF=v1.17.4 scripts/build-praimate-code.sh  # clone this ref instead of vendored
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
 REPO_ROOT="$(pwd)"
 
-# Pinned upstream. Bump deliberately after smoke-testing against the
-# PrAImate launcher; the whole point of "managed by us" is that this
-# moves on our cadence, not upstream's.
-OPENCODE_REF="${OPENCODE_REF:-v1.17.3}"
+# Vendored OpenCode source (pristine mirror at the pinned ref). See
+# third_party/README.md. OPENCODE_REF, when set, falls back to cloning
+# that ref from upstream instead — used to bump/re-vendor.
+VENDORED_OPENCODE="$REPO_ROOT/third_party/opencode"
+OPENCODE_REF="${OPENCODE_REF:-}"
 OPENCODE_URL="https://github.com/sst/opencode"
 
 GOOS="$(go env GOOS 2>/dev/null || uname -s | tr '[:upper:]' '[:lower:]')"
@@ -40,9 +44,28 @@ command -v bun >/dev/null 2>&1 || { echo "error: bun not found on PATH (install 
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
-echo "→ vendoring OpenCode $OPENCODE_REF into $WORK"
-git clone --depth 1 --branch "$OPENCODE_REF" "$OPENCODE_URL" "$WORK/opencode" 2>&1 | tail -2
 SRC="$WORK/opencode"
+
+# bun install mutates the tree, so always build from a scratch copy —
+# never touch the committed vendored source in place.
+if [ -n "$OPENCODE_REF" ]; then
+  echo "→ cloning OpenCode $OPENCODE_REF (override) into $WORK"
+  git clone --depth 1 --branch "$OPENCODE_REF" "$OPENCODE_URL" "$SRC" 2>&1 | tail -2
+elif [ -d "${OPENCODE_SRC:-$VENDORED_OPENCODE}" ]; then
+  SRC_DIR="${OPENCODE_SRC:-$VENDORED_OPENCODE}"
+  echo "→ using vendored OpenCode source: $SRC_DIR"
+  cp -a "$SRC_DIR" "$SRC"
+  # Drop any stray node_modules from a prior local build so bun installs clean.
+  find "$SRC" -name node_modules -type d -prune -exec rm -rf {} + 2>/dev/null || true
+  # OpenCode's build.ts calls `git branch --show-current` to pick a
+  # release channel. The vendored source has no .git (it's a stripped
+  # mirror), so init a throwaway repo in the scratch copy to make that
+  # command succeed — exactly what a fresh clone would have provided.
+  git init -q "$SRC" 2>/dev/null || true
+else
+  echo "error: no vendored OpenCode at $VENDORED_OPENCODE and no OPENCODE_REF set" >&2
+  exit 1
+fi
 
 echo "→ bun install (this is the heavy step)"
 ( cd "$SRC" && bun install )
@@ -78,7 +101,7 @@ cat > "$OUT/PRAIMATE-CODE-NOTICE" <<EOF
 PrAImate Code is a rebranded build of OpenCode.
 
 Upstream:  $OPENCODE_URL
-Pinned ref: $OPENCODE_REF
+Pinned ref: ${OPENCODE_REF:-v1.17.3 (vendored in third_party/opencode)}
 License:   MIT (see PRAIMATE-CODE-LICENSE)
 
 OpenCode is the work of its authors; PrAImate ships a version-pinned

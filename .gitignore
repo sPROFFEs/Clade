@@ -1,11 +1,9 @@
 build/
 dist/
 # Built binaries at the repo root only (anchored with leading slash so the
-# cmd/clade/ source directory isn't matched).
+# cmd/ source directories aren't matched).
 /wpc
 /wpc.exe
-/clade
-/clade.exe
 *.test
 *.tmp
 /praimate
@@ -16,3 +14,9 @@ dist/
 dist/**/praimate-code
 cmd/praimate-gui/praimate-gui
 cmd/praimate-gui/praimate-gui.exe
+
+# Dependency / build artifacts — never commit these. The vendored
+# third_party SOURCES are committed; their installed deps are not.
+node_modules/
+.venv/
+*.egg-info/

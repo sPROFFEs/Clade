@@ -20,7 +20,7 @@
 # Usage:
 #   scripts/build-graphify.sh                  # native target → dist/<triplet>/
 #   OUT=/some/dir scripts/build-graphify.sh    # custom output dir
-#   GRAPHIFY_PIN=0.8.36 scripts/build-graphify.sh
+#   GRAPHIFY_PIN=0.8.36 scripts/build-graphify.sh   # install from PyPI instead of vendored source
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -28,6 +28,9 @@ REPO_ROOT="$(pwd)"
 
 # Keep in sync with installer.GraphifyPinnedVersion.
 GRAPHIFY_PIN="${GRAPHIFY_PIN:-0.8.36}"
+# Vendored graphify source (the exact 0.8.36 sdist; see third_party/README.md).
+# Set GRAPHIFY_PIN to force a PyPI install of that version instead.
+VENDORED_GRAPHIFY="$REPO_ROOT/third_party/graphify"
 
 GOOS="$(go env GOOS 2>/dev/null || uname -s | tr '[:upper:]' '[:lower:]')"
 GOARCH="$(go env GOARCH 2>/dev/null || echo amd64)"
@@ -41,11 +44,19 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 cd "$WORK"
 
-echo "→ freezing graphifyy[openai]==$GRAPHIFY_PIN with PyInstaller"
 uv venv --python 3.13 .venv
 # shellcheck disable=SC1091
 . .venv/bin/activate
-uv pip install --index-url=https://pypi.org/simple/ "graphifyy[openai]==$GRAPHIFY_PIN" pyinstaller
+# Prefer the vendored source so the build is self-contained re: graphify
+# itself (its own deps still resolve from PyPI). Falls back to PyPI when
+# the vendored tree is absent or GRAPHIFY_PIN is overridden explicitly.
+if [ -z "${GRAPHIFY_PIN_OVERRIDE:-}" ] && [ -d "$VENDORED_GRAPHIFY" ]; then
+  echo "→ freezing vendored graphify ($VENDORED_GRAPHIFY) [openai] with PyInstaller"
+  uv pip install --index-url=https://pypi.org/simple/ "$VENDORED_GRAPHIFY[openai]" pyinstaller
+else
+  echo "→ freezing graphifyy[openai]==$GRAPHIFY_PIN (PyPI) with PyInstaller"
+  uv pip install --index-url=https://pypi.org/simple/ "graphifyy[openai]==$GRAPHIFY_PIN" pyinstaller
+fi
 
 cat > entry.py <<'EOF'
 from graphify.__main__ import main
