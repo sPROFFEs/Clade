@@ -702,15 +702,14 @@
     accent-color: var(--accent, #7c6cf2);
   }
   /* Ask-menu lives inside CodeMirror's tooltip (imperative DOM →
-     :global). The .cm-tooltip wrapper gets a clean panel look too. */
-  /* Strip CodeMirror's default (light) tooltip chrome so the menu's own
-     dark-theme styling shows. Class-based (.ask-tooltip, tagged in
-     CodeEditor) for WebKitGTK; :has() kept as a progressive bonus.
-     !important beats CM's baseTheme tooltip color/background. */
+     :global). HARDCODED light palette (black text on white) regardless of
+     the app theme — the Studio's WebKitGTK does not reliably render
+     var()/oklch() colours inside this tooltip, so we use plain literal
+     colours that always have contrast. The .cm-tooltip wrapper is
+     stripped (class-based for WebKitGTK, which lacks :has()). */
   :global(.cm-tooltip.ask-tooltip),
   :global(.cm-tooltip:has(> .ask-menu)) {
     background: transparent !important;
-    color: var(--text) !important;
     border: none !important;
     padding: 0 !important;
   }
@@ -718,15 +717,15 @@
     width: 300px;
     padding: 10px;
     font-family: inherit;
-    background: var(--bg-panel);
-    color: var(--text);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
+    background: #ffffff;
+    color: #1a1a1a;
+    border: 1px solid #c9c9c9;
+    border-radius: 10px;
     box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
   }
   :global(.ask-menu .ask-head) {
     font-size: 12px;
-    color: var(--text-dim);
+    color: #666666;
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -736,7 +735,8 @@
     display: block;
     width: 100%;
     text-align: left;
-    color: var(--text);
+    color: #1a1a1a;
+    background: #ffffff;
     font-size: 13px;
     padding: 6px 8px;
     border-radius: 6px;
@@ -745,21 +745,31 @@
     font-family: inherit;
     user-select: none;
   }
-  :global(.ask-menu .ask-item:hover) { background: var(--bg-raised, rgba(127, 127, 127, 0.15)); }
+  :global(.ask-menu .ask-item:hover) { background: #ececec; color: #000000; }
   :global(.ask-menu .ask-free) { display: flex; gap: 4px; margin-top: 8px; align-items: center; }
-  :global(.ask-menu .ask-free input) { font-size: 12px; padding: 4px 6px; flex: 1; min-width: 0; }
+  :global(.ask-menu .ask-free input) {
+    font-size: 12px;
+    padding: 4px 6px;
+    flex: 1;
+    min-width: 0;
+    background: #ffffff;
+    color: #1a1a1a;
+    border: 1px solid #c9c9c9;
+    border-radius: 6px;
+  }
+  :global(.ask-menu .ask-free input::placeholder) { color: #888888; }
   :global(.ask-menu .ask-go) {
-    background: var(--accent, #7c6cf2);
+    background: #2563eb;
     border: none;
     border-radius: 8px;
-    color: #fff;
+    color: #ffffff;
     font-size: 12px;
     padding: 5px 12px;
     cursor: pointer;
   }
   :global(.ask-menu .ask-close) {
-    color: var(--text-dim);
-    opacity: 0.85;
+    color: #666666;
+    opacity: 0.9;
     cursor: pointer;
     font-size: 16px;
     line-height: 1;
