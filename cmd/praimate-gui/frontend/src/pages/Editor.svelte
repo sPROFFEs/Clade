@@ -545,7 +545,7 @@
   .rail {
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    background: var(--panel);
+    background: var(--bg-panel);
     color: var(--text-dim);
     cursor: pointer;
     font-size: 12px;
@@ -562,7 +562,7 @@
     min-height: 0;
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    background: var(--panel);
+    background: var(--bg-panel);
     padding: 6px;
   }
   .tree-head { display: flex; align-items: center; gap: 6px; padding: 4px 6px 8px; font-size: 12px; color: var(--text-dim); }
@@ -595,8 +595,8 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .tree-item:hover { background: var(--raised, rgba(255,255,255,0.06)); }
-  .tree-item.active { background: var(--raised, rgba(255,255,255,0.1)); }
+  .tree-item:hover { background: var(--bg-raised, rgba(255,255,255,0.06)); }
+  .tree-item.active { background: var(--bg-raised, rgba(255,255,255,0.1)); }
   .editor-col { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
   .tabbar { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px; }
   .tab {
@@ -604,7 +604,7 @@
     align-items: center;
     border: 1px solid var(--border);
     border-radius: 8px 8px 0 0;
-    background: var(--panel);
+    background: var(--bg-panel);
     font-size: 12px;
   }
   .tab.active { background: var(--bg); border-bottom-color: var(--bg); }
@@ -613,7 +613,7 @@
   .editor-host { flex: 1; min-height: 0; display: flex; flex-direction: column; }
   .editor-host :global(.cm-host) { flex: 1; }
   .conflict {
-    border: 1px solid var(--warning, #d4a72c);
+    border: 1px solid var(--warn, #d4a72c);
     border-radius: var(--radius);
     padding: 6px 10px;
     margin-bottom: 6px;
@@ -628,7 +628,7 @@
     flex-direction: column;
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    background: var(--panel);
+    background: var(--bg-panel);
     padding: 8px;
     min-height: 0;
   }
@@ -640,7 +640,7 @@
   .typing { color: var(--text-dim); font-style: italic; }
   .cursor { animation: blink 1s steps(1) infinite; }
   @keyframes blink { 50% { opacity: 0; } }
-  .approval-card { border: 1px solid var(--warning, #d4a72c); border-radius: var(--radius); padding: 8px; margin: 6px 0; font-size: 12px; }
+  .approval-card { border: 1px solid var(--warn, #d4a72c); border-radius: var(--radius); padding: 8px; margin: 6px 0; font-size: 12px; }
   .msg.pending { opacity: 0.6; }
   .btn.sm { padding: 3px 10px; font-size: 12px; }
   .toolbar {
@@ -651,7 +651,7 @@
     padding: 4px 0 6px;
   }
   .tb-btn {
-    background: var(--panel);
+    background: var(--bg-panel);
     border: 1px solid var(--border);
     border-radius: 6px;
     color: var(--text);
@@ -660,8 +660,8 @@
     cursor: pointer;
     min-width: 28px;
   }
-  .tb-btn:hover { background: var(--raised, rgba(255,255,255,0.08)); }
-  .tb-btn.tb-active { background: var(--raised, rgba(255,255,255,0.12)); }
+  .tb-btn:hover { background: var(--bg-raised, rgba(255,255,255,0.08)); }
+  .tb-btn.tb-active { background: var(--bg-raised, rgba(255,255,255,0.12)); }
   .editor-split { flex: 1; min-height: 0; display: flex; gap: 8px; }
   .editor-stack { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
   .editor-stack.half { flex: 1; }
@@ -671,7 +671,7 @@
     overflow-y: auto;
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    background: var(--panel);
+    background: var(--bg-panel);
     padding: 14px 18px;
     font-size: 14px;
     line-height: 1.55;
@@ -707,7 +707,7 @@
     width: 300px;
     padding: 10px;
     font-family: inherit;
-    background: var(--panel);
+    background: var(--bg-panel);
     color: var(--text);
     border: 1px solid var(--border);
     border-radius: var(--radius);
@@ -727,15 +727,8 @@
     text-align: left;
     background: none;
     border: none;
-    /* INHERIT the colour the .ask-menu <div> already computed from
-       var(--text), rather than re-resolving the var on the <button>
-       itself — in the Studio's WebKitGTK, var()/oklch() on a <button>
-       inside the CodeMirror tooltip resolved to dark, leaving the items
-       unreadable while the <div> header (same var) was fine. Inherit +
-       -webkit-text-fill-color sidesteps both the var and the form-control
-       fill quirk. */
-    color: inherit;
-    -webkit-text-fill-color: currentColor;
+    color: var(--text);
+    -webkit-text-fill-color: var(--text);
     font-size: 13px;
     padding: 6px 8px;
     border-radius: 6px;
@@ -743,7 +736,7 @@
     line-height: 1.3;
     font-family: inherit;
   }
-  :global(.ask-menu .ask-item:hover) { background: var(--raised, rgba(127, 127, 127, 0.15)); }
+  :global(.ask-menu .ask-item:hover) { background: var(--bg-raised, rgba(127, 127, 127, 0.15)); }
   :global(.ask-menu .ask-free) { display: flex; gap: 4px; margin-top: 8px; align-items: center; }
   :global(.ask-menu .ask-free input) { font-size: 12px; padding: 4px 6px; flex: 1; min-width: 0; }
   :global(.ask-menu .ask-go) {
