@@ -9,7 +9,8 @@ function app() {
 
 export const term = {
   pickFolder: () => app()?.PickProjectFolder() ?? Promise.reject(new Error('no backend')),
-  start: (agentID, cli, cwd) => app()?.StartTerminal(agentID, cli, cwd) ?? Promise.reject(new Error('no backend')),
+  start: (agentID, cli, model, cwd) =>
+    app()?.StartTerminal(agentID, cli, model || '', cwd) ?? Promise.reject(new Error('no backend')),
   write: (id, bytes) => {
     // bytes is a string of raw chars from xterm onData; encode to base64.
     const b64 = btoa(unescape(encodeURIComponent(bytes)))
