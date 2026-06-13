@@ -131,7 +131,14 @@
         above: false,
         strictSide: false,
         arrow: false,
-        create: () => ({ dom: makeDOM() }),
+        create: () => {
+          const dom = makeDOM()
+          // Tag the .cm-tooltip wrapper CodeMirror puts around our DOM so
+          // we can theme it by class instead of :has() (which older
+          // WebKitGTK doesn't support — leaving the menu on CM's default
+          // light tooltip styling).
+          return { dom, mount: () => dom.parentElement?.classList.add('ask-tooltip') }
+        },
       }),
     })
   }

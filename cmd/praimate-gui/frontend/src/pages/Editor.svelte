@@ -692,16 +692,26 @@
   }
   /* Ask-menu lives inside CodeMirror's tooltip (imperative DOM →
      :global). The .cm-tooltip wrapper gets a clean panel look too. */
+  /* Strip CodeMirror's default (light) tooltip chrome so the menu's own
+     dark-theme styling shows. Class-based (.ask-tooltip, tagged in
+     CodeEditor) for WebKitGTK; :has() kept as a progressive bonus.
+     !important beats CM's baseTheme tooltip color/background. */
+  :global(.cm-tooltip.ask-tooltip),
   :global(.cm-tooltip:has(> .ask-menu)) {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+    background: transparent !important;
+    color: var(--text) !important;
+    border: none !important;
+    padding: 0 !important;
   }
   :global(.ask-menu) {
     width: 300px;
     padding: 10px;
     font-family: inherit;
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
   }
   :global(.ask-menu .ask-head) {
     font-size: 12px;
