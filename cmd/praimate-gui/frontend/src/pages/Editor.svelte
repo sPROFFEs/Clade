@@ -208,18 +208,29 @@
     const head = document.createElement('div')
     head.className = 'ask-head'
     head.textContent = `Ask the agent — lines ${ask.fromLine}–${ask.toLine}`
-    const x = document.createElement('button')
+    // NB: these are <div role=button>, not <button>. The Studio's
+    // WebKitGTK fails to resolve var()/oklch() colours on <button>
+    // elements (the items rendered dark, visible only on hover), while a
+    // <div> resolves them fine — so we use clickable divs.
+    const x = document.createElement('div')
     x.className = 'ask-close'
+    x.setAttribute('role', 'button')
+    x.tabIndex = 0
     x.textContent = '×'
     x.onclick = closeAsk
     head.appendChild(x)
     root.appendChild(head)
 
     for (const act of ASK_ACTIONS) {
-      const b = document.createElement('button')
+      const b = document.createElement('div')
       b.className = 'ask-item'
+      b.setAttribute('role', 'button')
+      b.tabIndex = 0
       b.textContent = act
       b.onclick = () => askAgent(act)
+      b.onkeydown = (ev) => {
+        if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); askAgent(act) }
+      }
       root.appendChild(b)
     }
 
@@ -725,22 +736,14 @@
     display: block;
     width: 100%;
     text-align: left;
-    background: none;
-    border: none;
-    /* INHERIT the colour the .ask-menu <div> already computed from
-       var(--text). The Studio's WebKitGTK fails to resolve var()/oklch()
-       directly on <button> elements (they render dark and were only
-       visible on hover), but a <div> resolves it fine — so inherit the
-       parent's already-computed value. currentColor keeps the WebKit
-       text-fill in sync. */
-    color: inherit;
-    -webkit-text-fill-color: currentColor;
+    color: var(--text);
     font-size: 13px;
     padding: 6px 8px;
     border-radius: 6px;
     cursor: pointer;
     line-height: 1.3;
     font-family: inherit;
+    user-select: none;
   }
   :global(.ask-menu .ask-item:hover) { background: var(--bg-raised, rgba(127, 127, 127, 0.15)); }
   :global(.ask-menu .ask-free) { display: flex; gap: 4px; margin-top: 8px; align-items: center; }
@@ -755,14 +758,11 @@
     cursor: pointer;
   }
   :global(.ask-menu .ask-close) {
-    background: none;
-    border: none;
-    /* Inherit the head's computed colour (WebKitGTK fails var() on the
-       <button> itself). */
-    color: inherit;
-    -webkit-text-fill-color: currentColor;
-    opacity: 0.75;
+    color: var(--text-dim);
+    opacity: 0.85;
     cursor: pointer;
-    font-size: 14px;
+    font-size: 16px;
+    line-height: 1;
+    user-select: none;
   }
 </style>
