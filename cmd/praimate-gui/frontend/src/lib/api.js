@@ -55,6 +55,7 @@ export const api = {
   newAgentTemplateYAML: () => call('NewAgentTemplateYAML'),
   getAgentKnowledge: (id) => call('GetAgentKnowledge', id),
   setAgentKnowledgeMode: (id, mode) => call('SetAgentKnowledgeMode', id, mode),
+  enableAgentKnowledge: (id) => call('EnableAgentKnowledge', id),
   pickAgentKnowledgeFiles: (id) => call('PickAgentKnowledgeFiles', id),
   pickAgentKnowledgeFolder: (id) => call('PickAgentKnowledgeFolder', id),
   deleteAgentKnowledgeFile: (id, rel) => call('DeleteAgentKnowledgeFile', id, rel),

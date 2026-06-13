@@ -19,10 +19,13 @@
   let notice = ''
 
   // --- agent identity / new-agent name prompt ---
+  // Read the store SYNCHRONOUSLY at init so the name prompt is the very
+  // first thing painted for a new agent — no flash of the empty editor.
+  const initCfg = get(agentStudio) || {}
   let agentId = ''
-  let isNew = true
+  let isNew = !initCfg.id
   let agentName = ''
-  let needName = false
+  let needName = !initCfg.id
   let newName = ''
   let creating = false
 
@@ -185,6 +188,9 @@
   async function setKnowMode(mode) {
     if (!agentId) return
     try {
+      // Raw/RAG need a folder to read/index — create it if the user
+      // jumped straight to a mode without enabling the base first.
+      if ((mode === 'raw' || mode === 'rag') && !know?.exists) await api.enableAgentKnowledge(agentId)
       await api.setAgentKnowledgeMode(agentId, mode)
       const y = await api.agentYAML(agentId)
       const d = tabs.find((t) => t.isDef)
@@ -192,9 +198,15 @@
       await loadKnowledge()
     } catch (e) { error = String(e) }
   }
+  async function enableKnow() {
+    if (!agentId) return
+    try { await api.enableAgentKnowledge(agentId); await refreshTree(); await loadKnowledge() }
+    catch (e) { error = String(e) }
+  }
   async function addKnowFiles(folder) {
     if (!agentId) return
     try {
+      if (!know?.exists) await api.enableAgentKnowledge(agentId)
       folder ? await api.pickAgentKnowledgeFolder(agentId) : await api.pickAgentKnowledgeFiles(agentId)
       await refreshTree(); await loadKnowledge()
     } catch (e) { error = String(e) }
@@ -332,13 +344,12 @@
   }
 
   onMount(async () => {
-    const cfg = get(agentStudio) || {}
     try { clis = (await api.listCLIs()) || [] } catch {}
     const firstAvail = clis.find((c) => c.available)
     helperCli = firstAvail ? firstAvail.id : (clis[0]?.id ?? 'claude')
     modelSuggestions = (await api.listCLIModels(helperCli).catch(() => [])) || []
-    if (cfg.id) await loadAll(cfg.id)
-    else { needName = true; isNew = true } // new agent → ask the name first
+    if (initCfg.id) await loadAll(initCfg.id)
+    // else: needName is already true from sync init — the prompt is shown.
     try { const c = await api.startAgentHelperChat(helperCli, helperModel); helperChatId = c.ID } catch (e) { error = String(e) }
     unsubStream = onChatStream(handleStreamEvent)
     unsubApproval = onApproval(handleApproval)
@@ -399,6 +410,11 @@
 
     <!-- knowledge / RAG controls -->
     <div class="kctl">
+      {#if know && !know.exists}
+        <div class="lbl2">Knowledge base</div>
+        <div class="hint">This agent has no knowledge folder yet. Enable it to add documents and pick a Raw or RAG mode.</div>
+        <button class="btn sm primary" on:click={enableKnow}>＋ Enable knowledge base</button>
+      {:else}
       <div class="lbl2">Knowledge mode</div>
       <div class="seg">
         <button class="seg-btn" class:on={know?.mode === '' || !know} on:click={() => setKnowMode('')}>None</button>
@@ -434,6 +450,7 @@
         <div class="hint">Raw mode: the CLI reads these files directly — no indexing.</div>
       {:else}
         <div class="hint">Pick Raw (read files directly) or RAG (graphify-indexed retrieval) to give this agent a knowledge base.</div>
+      {/if}
       {/if}
     </div>
   </aside>

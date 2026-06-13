@@ -26,6 +26,7 @@ import (
 type AgentKnowledgeInfo struct {
 	Mode              string   `json:"mode"` // "", "raw", "rag"
 	Dir               string   `json:"dir"`
+	Exists            bool     `json:"exists"` // the knowledge folder exists on disk
 	Files             []string `json:"files"`
 	GraphifyInstalled bool     `json:"graphifyInstalled"`
 	HasIndex          bool     `json:"hasIndex"`
@@ -61,11 +62,22 @@ func (a *App) GetAgentKnowledge(id string) (*AgentKnowledgeInfo, error) {
 	return &AgentKnowledgeInfo{
 		Mode:              agent.Knowledge,
 		Dir:               dir,
+		Exists:            dirExists(dir),
 		Files:             files,
 		GraphifyInstalled: gOK,
 		HasIndex:          dirExists(dir + "/graphify-out"),
 		LocalEndpoint:     localEndpoint,
 	}, nil
+}
+
+// EnableAgentKnowledge creates the agent's knowledge folder so the user
+// can add documents and pick a Raw/RAG mode. Safe to call repeatedly.
+func (a *App) EnableAgentKnowledge(id string) error {
+	dir, err := core.AgentKnowledgeDir(id)
+	if err != nil {
+		return err
+	}
+	return os.MkdirAll(dir, 0o755)
 }
 
 // SetAgentKnowledgeMode persists the mode ("", "raw", "rag"). The
