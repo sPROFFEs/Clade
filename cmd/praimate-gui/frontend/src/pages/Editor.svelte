@@ -727,8 +727,14 @@
     text-align: left;
     background: none;
     border: none;
-    color: var(--text);
-    -webkit-text-fill-color: var(--text);
+    /* INHERIT the colour the .ask-menu <div> already computed from
+       var(--text). The Studio's WebKitGTK fails to resolve var()/oklch()
+       directly on <button> elements (they render dark and were only
+       visible on hover), but a <div> resolves it fine — so inherit the
+       parent's already-computed value. currentColor keeps the WebKit
+       text-fill in sync. */
+    color: inherit;
+    -webkit-text-fill-color: currentColor;
     font-size: 13px;
     padding: 6px 8px;
     border-radius: 6px;
@@ -751,7 +757,11 @@
   :global(.ask-menu .ask-close) {
     background: none;
     border: none;
-    color: var(--text-dim);
+    /* Inherit the head's computed colour (WebKitGTK fails var() on the
+       <button> itself). */
+    color: inherit;
+    -webkit-text-fill-color: currentColor;
+    opacity: 0.75;
     cursor: pointer;
     font-size: 14px;
   }
