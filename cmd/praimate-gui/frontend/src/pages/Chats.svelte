@@ -70,7 +70,7 @@
   $: shownChats = searchResults ?? chats
   // Studio + Code sessions live in their own sections — they're
   // folder-scoped, not regular conversations.
-  $: regularChats = shownChats.filter((c) => c.Settings?.surface !== 'studio' && c.Settings?.surface !== 'code')
+  $: regularChats = shownChats.filter((c) => c.Settings?.surface !== 'studio' && c.Settings?.surface !== 'code' && c.Settings?.surface !== 'agent-helper')
   $: studioChats = shownChats.filter((c) => c.Settings?.surface === 'studio')
   $: codeChats = shownChats.filter((c) => c.Settings?.surface === 'code')
 

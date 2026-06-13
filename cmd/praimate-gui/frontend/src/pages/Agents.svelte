@@ -6,7 +6,7 @@
   // same parser `praimate agent import` uses.
   import { onMount, onDestroy } from 'svelte'
   import { api, onTurn } from '../lib/api.js'
-  import { activePage, openChatId, pendingTerm } from '../lib/stores.js'
+  import { activePage, openChatId, pendingTerm, agentStudio } from '../lib/stores.js'
   import CodeEditor from '../lib/CodeEditor.svelte'
 
   let agents = []
@@ -582,7 +582,7 @@
     <button class="btn" on:click={() => openLaunch(null, 'studio')} title="Open the document studio without an agent persona">Open studio…</button>
     <button class="btn" on:click={importYAML}>Import…</button>
     <button class="btn" on:click={importTemplate} title="Convert a pre-1.1 workpath template folder into an agent with its knowledge base">Import template…</button>
-    <button class="btn primary" on:click={createNew}>+ New agent</button>
+    <button class="btn primary" on:click={() => agentStudio.set({ id: '' })}>+ New agent</button>
   </div>
   <p class="subtitle">Portable YAML agents, shared with the TUI. Launch them in a Chat, a live Terminal, or the document Studio — each agent declares which surfaces it allows.</p>
 
@@ -656,7 +656,7 @@
         {#if (a.workflows || []).length > 0}
           <button class="btn" on:click={() => openRun(a)}>Run workflow</button>
         {/if}
-        <button class="btn" on:click={() => edit(a)}>Edit</button>
+        <button class="btn" on:click={() => agentStudio.set({ id: a.id })}>Edit</button>
         <button class="btn" on:click={() => exportYAML(a)}>Export</button>
         <button class="btn danger" on:click={() => remove(a)}>Delete</button>
       </div>

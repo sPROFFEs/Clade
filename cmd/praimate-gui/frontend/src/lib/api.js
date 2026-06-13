@@ -93,6 +93,7 @@ export const api = {
   localLLMModels: () => call('LocalLLMModels'),
   recordCodeSession: (cli, model, cwd, localEndpoint, localApiKey, localModel) =>
     call('RecordCodeSession', cli, model || '', cwd, localEndpoint || '', localApiKey || '', localModel || ''),
+  startAgentHelperChat: (cli, model) => call('StartAgentHelperChat', cli, model || ''),
   localCLIStatus: () => call('LocalCLIStatusNow'),
   applyLocalToCLI: (cli, model) => call('ApplyLocalToCLI', cli, model || ''),
   disableLocalForCLI: (cli) => call('DisableLocalForCLI', cli),

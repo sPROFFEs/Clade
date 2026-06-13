@@ -7,6 +7,11 @@ import { api } from './api.js'
 export const activePage = writable('code')
 export const openChatId = writable(null)
 
+// agentStudio, when set, opens the full-screen agent authoring studio.
+// Value: { id } for an existing agent, or { id: '' } / { new: true } for
+// a brand-new agent. null = studio closed (main shell shown).
+export const agentStudio = writable(null)
+
 // CLI & Tools detection cache. Probing the CLIs + managed tools takes
 // several seconds; prefetching at app startup means the "CLI & Tools"
 // tab renders instantly from cache when the user opens it, then

@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte'
   import { api } from './lib/api.js'
-  import { activePage, prefetchCLIs } from './lib/stores.js'
+  import { activePage, prefetchCLIs, agentStudio } from './lib/stores.js'
   import { initTheme, themeMode, setThemeMode } from './lib/theme.js'
   import logo from './assets/monke-icon.png'
   import mascot from './assets/monke-mascot.png'
@@ -14,6 +14,7 @@
   import MCP from './pages/MCP.svelte'
   import Settings from './pages/Settings.svelte'
   import Editor from './pages/Editor.svelte'
+  import AgentStudio from './pages/AgentStudio.svelte'
   import Setup from './pages/Setup.svelte'
 
   // Lucide-style outline icon paths (24x24 viewBox, stroke-based).
@@ -113,6 +114,10 @@
   <Editor folder={editorMode.folder} chatId={editorMode.chatId} />
 {:else if editorMode && firstRun?.needed}
   <Setup defaultRoot={firstRun.defaultRoot} on:done={setupDone} />
+{:else if editorMode && $agentStudio}
+  {#key $agentStudio.id ?? 'new'}
+    <AgentStudio />
+  {/key}
 {:else if editorMode}
 <div class="shell">
   <nav class="sidebar" class:collapsed>
