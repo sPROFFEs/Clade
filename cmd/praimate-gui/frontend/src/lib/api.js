@@ -91,6 +91,8 @@ export const api = {
   startTerminal: (agentID, cli, model, cwd, localEndpoint, localApiKey, localModel) =>
     call('StartTerminal', agentID, cli, model || '', cwd, localEndpoint || '', localApiKey || '', localModel || ''),
   localLLMModels: () => call('LocalLLMModels'),
+  recordCodeSession: (cli, model, cwd, localEndpoint, localApiKey, localModel) =>
+    call('RecordCodeSession', cli, model || '', cwd, localEndpoint || '', localApiKey || '', localModel || ''),
   localCLIStatus: () => call('LocalCLIStatusNow'),
   applyLocalToCLI: (cli, model) => call('ApplyLocalToCLI', cli, model || ''),
   disableLocalForCLI: (cli) => call('DisableLocalForCLI', cli),

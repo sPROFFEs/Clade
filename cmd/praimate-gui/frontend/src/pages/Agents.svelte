@@ -146,6 +146,7 @@
       }
       if (surface === 'terminal') {
         const termId = await api.startTerminal(agent ? agent.id : '', cli, local ? '' : model, folder, lEnd, lKey, lModel)
+        api.recordCodeSession(cli, local ? '' : model, folder, lEnd, lKey, lModel).catch(() => {})
         dlg = null
         pendingTerm.set({ termId, cli, cwd: folder, label: (agent ? agent.name : cli) + (local ? ' · local' : ''), note: '' })
         activePage.set('code')

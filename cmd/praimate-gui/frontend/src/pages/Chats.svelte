@@ -68,15 +68,36 @@
     }, 250)
   }
   $: shownChats = searchResults ?? chats
-  // Studio sessions live in their own section — they're folder-scoped
-  // co-editing chats, not regular conversations.
-  $: regularChats = shownChats.filter((c) => c.Settings?.surface !== 'studio')
+  // Studio + Code sessions live in their own sections — they're
+  // folder-scoped, not regular conversations.
+  $: regularChats = shownChats.filter((c) => c.Settings?.surface !== 'studio' && c.Settings?.surface !== 'code')
   $: studioChats = shownChats.filter((c) => c.Settings?.surface === 'studio')
+  $: codeChats = shownChats.filter((c) => c.Settings?.surface === 'code')
 
   async function reopenStudio(chat) {
     error = ''
     try {
       await api.openEditorWindow(chat.WorkspacePath, '', '', '', chat.ID, '', '', '')
+    } catch (e) {
+      error = String(e)
+    }
+  }
+
+  // Reopen a code session: relaunch a terminal in its folder (restoring
+  // the local route if it had one) and jump to the Code page.
+  async function reopenCode(chat) {
+    error = ''
+    try {
+      const l = chat.Settings?.local
+      const termId = await api.startTerminal(
+        '', chat.CLIAgent, chat.Settings?.model || '', chat.WorkspacePath,
+        l?.endpoint || '', l?.apiKey || '', l?.model || '')
+      pendingTerm.set({
+        termId, cli: chat.CLIAgent, cwd: chat.WorkspacePath,
+        label: (chat.CLIAgent || 'CLI') + (l?.endpoint ? ' · local' : ''),
+        note: 'reopened — the CLI resumes its own session',
+      })
+      activePage.set('code')
     } catch (e) {
       error = String(e)
     }
@@ -711,6 +732,27 @@
         </div>
         <button class="btn primary" on:click={() => reopenStudio(chat)}>Reopen studio</button>
         <button class="btn" on:click={() => open(chat)}>Transcript</button>
+        <button class="btn" on:click={() => openConfig(chat)}>Edit</button>
+        <button class="btn danger" on:click={() => remove(chat)}>Delete</button>
+      </div>
+    {/each}
+  {/if}
+
+  {#if codeChats.length > 0}
+    <h1 style="font-size:16px; margin-top:24px">Code sessions</h1>
+    <p class="subtitle">Live CLI sessions in a project folder. Reopen relaunches the CLI in the same folder (it resumes its own native session).</p>
+    {#each codeChats as chat}
+      <div class="card row">
+        <div class="grow">
+          <div class="card-title mono">{chat.WorkspacePath}</div>
+          <div class="card-sub mono">
+            {chat.CLIAgent}
+            {#if chat.Settings?.local?.endpoint}· local {chat.Settings.local.model || chat.Settings.local.endpoint}
+            {:else if chat.Settings?.model}· {chat.Settings.model}{/if}
+            · {fmtDate(chat.UpdatedAt)}
+          </div>
+        </div>
+        <button class="btn primary" on:click={() => reopenCode(chat)}>Reopen</button>
         <button class="btn" on:click={() => openConfig(chat)}>Edit</button>
         <button class="btn danger" on:click={() => remove(chat)}>Delete</button>
       </div>

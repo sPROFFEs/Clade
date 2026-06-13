@@ -147,6 +147,16 @@
       return
     }
     sessionLabel = (agent ? agent.name : cli) + (local ? ' · local' : '')
+    // Persist a "Code session" record so it appears in the Chats tab.
+    // Fire-and-forget — failure to record never blocks the live session.
+    api.recordCodeSession(
+      cli,
+      local ? '' : (modelSupported ? model.trim() : ''),
+      cwd,
+      local ? localOpt.endpoint : '',
+      local ? localOpt.apiKey : '',
+      local ? localModel.trim() : '',
+    ).catch(() => {})
     started = true
     await tick()
     mountXterm()

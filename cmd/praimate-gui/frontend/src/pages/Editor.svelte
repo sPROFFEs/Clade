@@ -535,10 +535,12 @@
   .studio {
     display: grid;
     /* columns set inline (collapsible side panes) */
+    grid-template-rows: minmax(0, 1fr);
     gap: 10px;
     height: 100vh;
     padding: 10px;
     box-sizing: border-box;
+    overflow: hidden;
   }
   .rail {
     border: 1px solid var(--border);
@@ -557,6 +559,7 @@
   .rail-label { writing-mode: vertical-rl; letter-spacing: 0.08em; }
   .tree {
     overflow-y: auto;
+    min-height: 0;
     border: 1px solid var(--border);
     border-radius: var(--radius);
     background: var(--panel);
@@ -594,7 +597,7 @@
   }
   .tree-item:hover { background: var(--raised, rgba(255,255,255,0.06)); }
   .tree-item.active { background: var(--raised, rgba(255,255,255,0.1)); }
-  .editor-col { display: flex; flex-direction: column; min-width: 0; }
+  .editor-col { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
   .tabbar { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px; }
   .tab {
     display: flex;
@@ -660,7 +663,7 @@
   .tb-btn:hover { background: var(--raised, rgba(255,255,255,0.08)); }
   .tb-btn.tb-active { background: var(--raised, rgba(255,255,255,0.12)); }
   .editor-split { flex: 1; min-height: 0; display: flex; gap: 8px; }
-  .editor-stack { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .editor-stack { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
   .editor-stack.half { flex: 1; }
   .preview-pane {
     flex: 1;
