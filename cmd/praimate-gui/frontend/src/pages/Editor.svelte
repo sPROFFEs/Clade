@@ -727,7 +727,15 @@
     text-align: left;
     background: none;
     border: none;
-    color: var(--text);
+    /* INHERIT the colour the .ask-menu <div> already computed from
+       var(--text), rather than re-resolving the var on the <button>
+       itself — in the Studio's WebKitGTK, var()/oklch() on a <button>
+       inside the CodeMirror tooltip resolved to dark, leaving the items
+       unreadable while the <div> header (same var) was fine. Inherit +
+       -webkit-text-fill-color sidesteps both the var and the form-control
+       fill quirk. */
+    color: inherit;
+    -webkit-text-fill-color: currentColor;
     font-size: 13px;
     padding: 6px 8px;
     border-radius: 6px;
