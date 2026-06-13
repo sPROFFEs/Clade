@@ -21,8 +21,8 @@ function call(method, ...args) {
 export const api = {
   health: () => call('Health'),
   firstRun: () => call('FirstRun'),
-  completeFirstRun: (root, samples, cloneURL) =>
-    call('CompleteFirstRun', root, samples, cloneURL || ''),
+  completeFirstRun: (root, samples, agents, cloneURL) =>
+    call('CompleteFirstRun', root, samples, agents, cloneURL || ''),
 
   listChats: () => call('ListChats'),
   chatMessages: (id) => call('ChatMessages', id),
@@ -73,6 +73,8 @@ export const api = {
   listManagedTools: () => call('ListManagedTools'),
   listToolInstallMethods: (tool) => call('ListToolInstallMethods', tool),
   installManagedTool: (tool, methodID) => call('InstallManagedTool', tool, methodID),
+  buildRequirements: (tool) => call('BuildRequirements', tool),
+  buildToolFromSource: (tool) => call('BuildToolFromSource', tool),
   checkUpdate: () => call('CheckUpdate'),
 
   getLocalLLM: () => call('GetLocalLLM'),

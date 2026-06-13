@@ -1,5 +1,5 @@
 <script>
-  import { onMount } from 'svelte'
+  import { onMount, onDestroy } from 'svelte'
   import { api } from '../lib/api.js'
   import {
     ACCENT_PRESETS,
@@ -166,7 +166,49 @@
     } catch (e) { error = String(e) }
   }
 
-  onMount(load)
+  // Build tools from source — for platforms where we don't ship a
+  // prebuilt bundle (praimate-code off Linux, graphify off linux/amd64).
+  let buildInfo = {} // tool -> BuildToolInfo
+  let building = '' // tool currently compiling, '' = idle
+  let buildLog = []
+  let buildUnsub = () => {}
+
+  async function loadBuildInfo() {
+    const next = {}
+    for (const t of ['praimate-code', 'graphify']) {
+      try { next[t] = await api.buildRequirements(t) } catch (e) { /* ignore */ }
+    }
+    buildInfo = next
+  }
+
+  async function buildTool(t) {
+    if (building) return
+    building = t
+    buildLog = []
+    try {
+      await api.buildToolFromSource(t)
+      buildLog = [...buildLog, '✓ finished']
+      await loadBuildInfo()
+    } catch (e) {
+      buildLog = [...buildLog, '✗ ' + String(e)]
+    } finally {
+      building = ''
+    }
+  }
+
+  onMount(async () => {
+    await load()
+    await loadBuildInfo()
+    if (typeof window !== 'undefined' && window.runtime?.EventsOn) {
+      window.runtime.EventsOn('praimate:install', (ev) => {
+        if (ev && typeof ev.cli === 'string' && ev.cli.startsWith('build:')) {
+          buildLog = [...buildLog.slice(-400), ev.line]
+        }
+      })
+      buildUnsub = () => window.runtime.EventsOff('praimate:install')
+    }
+  })
+  onDestroy(() => buildUnsub())
 </script>
 
 <h1>Settings</h1>
@@ -194,6 +236,46 @@
     <button class="btn" on:click={checkUpdate} disabled={checkingUpdate}>{checkingUpdate ? 'Checking…' : 'Check for updates'}</button>
   </div>
 </div>
+
+<h1 style="font-size:16px; margin-top:24px">Build bundled tools from source</h1>
+<p class="subtitle" style="margin-top:-6px">
+  On platforms where we don't ship a prebuilt binary, build it locally from our repo.
+  We clone the source, compile, install it into <span class="mono">~/.config/praimate/bin</span>, and delete the temporary checkout.
+</p>
+{#each [{ id: 'praimate-code', name: 'PrAImate Code' }, { id: 'graphify', name: 'Graphify (RAG)' }] as t}
+  {@const info = buildInfo[t.id]}
+  <div class="card">
+    <div class="row" style="align-items:flex-start">
+      <div class="grow">
+        <div class="card-title">{t.name}</div>
+        <div class="card-sub">{info?.note || 'Compile this tool locally from source.'}</div>
+        {#if info}
+          <div class="row" style="gap:6px; flex-wrap:wrap; margin-top:8px">
+            {#each info.requirements as r}
+              <span class="pill {r.found ? 'ok' : 'err'}" title={r.detail}>
+                {r.found ? '✓' : '✗'} {r.name}
+              </span>
+            {/each}
+          </div>
+          {#if !info.ready}
+            <div class="card-sub" style="margin-top:6px; color: var(--warn)">
+              Install the missing tool(s) above, then re-open Settings.
+            </div>
+          {/if}
+        {/if}
+      </div>
+      <button
+        class="btn primary"
+        on:click={() => buildTool(t.id)}
+        disabled={!info || !info.ready || !!building}>
+        {building === t.id ? 'Building…' : 'Build from source'}
+      </button>
+    </div>
+  </div>
+{/each}
+{#if buildLog.length}
+  <pre class="build-log">{buildLog.join('\n')}</pre>
+{/if}
 
 <h1 style="font-size:16px; margin-top:24px">Appearance</h1>
 <div class="card">

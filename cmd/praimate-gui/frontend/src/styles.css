@@ -98,29 +98,29 @@ html, body {
   justify-content: center;
   padding: 0;
 }
+.brand.clickable {
+  cursor: pointer;
+}
 .brand img {
-  width: 30px;
-  height: 30px;
-  border-radius: 7px;
+  width: 38px;
+  height: 38px;
+  border-radius: 9px;
   display: block;
   flex-shrink: 0;
-  box-shadow: 0 0 0 1px var(--border), 0 1px 4px rgba(0, 0, 0, 0.28);
+  box-shadow: 0 0 0 1px var(--border), 0 1px 5px rgba(0, 0, 0, 0.3);
   background: var(--bg-raised);
 }
+.brand.clickable:hover img {
+  box-shadow: 0 0 0 1px var(--accent), 0 1px 6px rgba(0, 0, 0, 0.35);
+}
 
-/* Collapse/expand chevron — pinned to the brand's right edge when
-   expanded; centred under the logo in the collapsed rail. */
+/* Collapse chevron — pinned to the brand's right edge. Only rendered in
+   the expanded state, so it never overlaps the collapsed-rail logo. */
 .collapse-btn {
   position: absolute;
   right: 0;
   top: 50%;
   transform: translateY(-50%);
-}
-.sidebar.collapsed .collapse-btn {
-  position: absolute;
-  right: 2px;
-  top: 6px;
-  transform: none;
 }
 
 .nav-item {
@@ -219,6 +219,23 @@ h1 { font-size: 17px; margin: 0 0 4px; font-weight: 600; letter-spacing: -0.01em
 }
 .card-title { font-weight: 600; margin-bottom: 2px; }
 .card-sub { color: var(--text-dim); font-size: 12px; }
+
+/* Streamed build/install output (Settings → build from source) */
+.build-log {
+  margin-top: 10px;
+  max-height: 280px;
+  overflow-y: auto;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 
 .row { display: flex; align-items: center; gap: 9px; }
 .row .grow { flex: 1; }

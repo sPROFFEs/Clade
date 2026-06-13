@@ -46,7 +46,7 @@ func (a *App) FirstRun() (*FirstRunInfo, error) {
 // backup remote), optionally seeds the bundled sample templates, saves
 // the config and rebinds Core to the new root. Mirrors the TUI's three
 // first-run options: empty root / root + samples / clone from remote.
-func (a *App) CompleteFirstRun(root string, seedSamples bool, cloneURL string) error {
+func (a *App) CompleteFirstRun(root string, seedSamples bool, seedAgents bool, cloneURL string) error {
 	root = strings.TrimSpace(root)
 	if root == "" {
 		return errors.New("a workspaces folder is required")
@@ -98,6 +98,22 @@ func (a *App) CompleteFirstRun(root string, seedSamples bool, cloneURL string) e
 			a.core = c
 			c.SetApprovalProvider(a.approvalProvider)
 			backup.SetStateSyncer(coreStateSyncer{core: c})
+		}
+	}
+
+	// Opt-in: import the curated sample agents (reverse-ghidra,
+	// code-review, dev-team, security-review, agent-builder). Best-effort
+	// — a bundle without samples/agents/ just imports nothing. Skipped
+	// when cloning a backup (that already carries the user's agents).
+	if seedAgents && cloneURL == "" && a.core != nil {
+		exe, err := os.Executable()
+		if err == nil {
+			dir := launcher.FirstExistingDir(launcher.SampleAgentCandidates(filepath.Dir(exe)))
+			if dir != "" {
+				ctx, cancel := context.WithTimeout(a.ctx, 60*time.Second)
+				_, _ = a.core.SeedSampleAgents(ctx, dir)
+				cancel()
+			}
 		}
 	}
 	return nil

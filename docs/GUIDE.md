@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/monke-icon.png" alt="PrAImate" width="120" />
+</p>
+
 # PrAImate — the full guide
 
 The complete manual. For the short version (install + quick start),
@@ -68,13 +72,21 @@ renamed but not deleted); the next update cleans it up.
 
 ## First run
 
-First run is two questions:
+First run asks where your data lives and what to seed:
 
 1. **Workspaces root** — where templates + chats live. Default
    `~/praimate-workspaces`.
 2. **Seed bundled samples?** — copies the `reversing`,
    `code-review`, and `workpath-author` example templates in so you
    have something to chat against immediately.
+3. **Import the starter agents?** (GUI setup) — imports a curated
+   agent set so the app is useful out of the box: **Reverse Ghidra**
+   (a Ghidra-first reverse-engineering workflow with its helper
+   scripts), **Code Review**, **Dev Team**, **Security Review**, and
+   **Agent Builder**. They ship in `samples/agents/` as portable YAML
+   and `.praimate-agent` packs; the import skips any agent you already
+   have, so it never clobbers your edits. You can re-import or share
+   them any time from the Agents tab.
 
 Then: home screen → `n` (new chat) → pick a template → name the chat
 → pick an agent. The chat is created, the workpath is compiled into
@@ -556,6 +568,31 @@ irm https://astral.sh/uv/install.ps1 | iex         # Windows
 brew install uv                                    # macOS (Homebrew)
 winget install --id=astral-sh.uv -e                # Windows (winget)
 ```
+
+### Building bundled tools from source (GUI)
+
+Some bundled binaries can't be cross-compiled, so a release only ships
+prebuilt **PrAImate Code** and **graphify** for the platforms we build
+them on (graphify standalone is currently Linux/amd64; PrAImate Code is
+the native target of each release host). On any other platform you can
+build them locally instead of downloading:
+
+**GUI → Settings → Build bundled tools from source.** Each tool shows
+the toolchain it needs (`git` always; `bun` for PrAImate Code, `uv` for
+graphify; plus `bash` on Windows, which ships with Git for Windows) and
+a ✓/✗ for each. When everything's present, **Build from source**:
+
+1. clones the PrAImate repo (shallow) into a temp directory,
+2. runs the matching build script (`scripts/build-praimate-code.sh` /
+   `scripts/build-graphify.sh`), streaming the output live,
+3. installs the finished binary into `<config>/praimate/bin/` — exactly
+   where the resolver looks for the bundled copy,
+4. deletes the temporary checkout so nothing lingers on disk.
+
+The PrAImate Code build downloads OpenCode's full dependency tree (~2 GB)
+and takes a few minutes; graphify freezes a PyInstaller standalone. Both
+are one-and-done — the result resolves on the next launch with no PATH
+edits.
 
 After uv lands, re-run `praimate -install-tool graphify`. The bin ends up
 at `<config>/praimate/tools/graphify/bin/graphify`.

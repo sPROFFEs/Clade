@@ -4,7 +4,7 @@
   // root + bundled samples, or clone an existing backup remote.
   import { createEventDispatcher } from 'svelte'
   import { api } from '../lib/api.js'
-  import logo from '../assets/praimate.png'
+  import logo from '../assets/monke-icon.png'
 
   export let defaultRoot = ''
 
@@ -12,6 +12,7 @@
 
   let root = defaultRoot
   let samples = true
+  let agents = true
   let mode = 'new' // 'new' | 'clone'
   let cloneURL = ''
   let busy = false
@@ -43,7 +44,7 @@
     busy = true
     error = ''
     try {
-      await api.completeFirstRun(root.trim(), samples, mode === 'clone' ? cloneURL.trim() : '')
+      await api.completeFirstRun(root.trim(), samples, agents, mode === 'clone' ? cloneURL.trim() : '')
       dispatch('done')
     } catch (e) {
       error = String(e)
@@ -81,6 +82,10 @@
       <label class="row" style="margin-top:12px; gap:8px; cursor:pointer">
         <input type="checkbox" bind:checked={samples} />
         <span>Seed the bundled sample templates (recommended for a first look)</span>
+      </label>
+      <label class="row" style="margin-top:8px; gap:8px; cursor:pointer">
+        <input type="checkbox" bind:checked={agents} />
+        <span>Import the starter agents (Reverse Ghidra, Code Review, Dev Team, Security Review, Agent Builder)</span>
       </label>
     {:else}
       <label class="lbl" style="margin-top:12px">Backup remote (git URL — HTTPS or SSH)</label>

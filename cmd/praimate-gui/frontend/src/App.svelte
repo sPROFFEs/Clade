@@ -116,15 +116,20 @@
 {:else if editorMode}
 <div class="shell">
   <nav class="sidebar" class:collapsed>
-    <div class="brand">
+    <!-- Collapsed: the logo itself is the expand button (no floating
+         chevron overlapping the icon). Expanded: logo + wordmark + a
+         collapse chevron pinned to the right edge. -->
+    <div class="brand" class:clickable={collapsed} on:click={collapsed ? toggleCollapsed : undefined} title={collapsed ? 'Expand sidebar' : ''}>
       <img src={logo} alt="PrAImate" />
-      {#if !collapsed}<span>PrAImate</span>{/if}
-      <button
-        class="icon-btn collapse-btn"
-        title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-        on:click={toggleCollapsed}>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d={collapsed ? icons.chevronRight : icons.chevronLeft} /></svg>
-      </button>
+      {#if !collapsed}
+        <span>PrAImate</span>
+        <button
+          class="icon-btn collapse-btn"
+          title="Collapse sidebar"
+          on:click|stopPropagation={toggleCollapsed}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d={icons.chevronLeft} /></svg>
+        </button>
+      {/if}
     </div>
     {#each pages as p}
       <button

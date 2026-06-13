@@ -495,3 +495,27 @@ func SampleCandidates(execDir string) []string {
 		filepath.Join(execDir, "..", "share", "praimate", "samples", "workpaths"),
 	}
 }
+
+// SampleAgentCandidates mirrors SampleCandidates for the curated sample
+// agents shipped under samples/agents/ (bare YAML + .praimate-agent
+// packs). The first directory that exists is used by setup to seed the
+// starter agent set.
+func SampleAgentCandidates(execDir string) []string {
+	return []string{
+		filepath.Join(execDir, "samples", "agents"),
+		filepath.Join(execDir, "..", "samples", "agents"),
+		filepath.Join(execDir, "..", "..", "samples", "agents"),
+		filepath.Join(execDir, "..", "share", "praimate", "samples", "agents"),
+	}
+}
+
+// FirstExistingDir returns the first path in candidates that is an
+// existing directory, or "" if none exist.
+func FirstExistingDir(candidates []string) string {
+	for _, d := range candidates {
+		if fi, err := os.Stat(d); err == nil && fi.IsDir() {
+			return d
+		}
+	}
+	return ""
+}
