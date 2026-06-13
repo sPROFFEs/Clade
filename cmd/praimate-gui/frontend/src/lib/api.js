@@ -94,6 +94,11 @@ export const api = {
   recordCodeSession: (cli, model, cwd, localEndpoint, localApiKey, localModel) =>
     call('RecordCodeSession', cli, model || '', cwd, localEndpoint || '', localApiKey || '', localModel || ''),
   startAgentHelperChat: (cli, model) => call('StartAgentHelperChat', cli, model || ''),
+  createAgentFromName: (name) => call('CreateAgentFromName', name),
+  agentKnowledgeTree: (id) => call('AgentKnowledgeTree', id),
+  agentReadKnowledgeFile: (id, rel) => call('AgentReadKnowledgeFile', id, rel),
+  agentWriteKnowledgeFile: (id, rel, content) => call('AgentWriteKnowledgeFile', id, rel, content),
+  agentCreateKnowledgeFile: (id, rel) => call('AgentCreateKnowledgeFile', id, rel),
   localCLIStatus: () => call('LocalCLIStatusNow'),
   applyLocalToCLI: (cli, model) => call('ApplyLocalToCLI', cli, model || ''),
   disableLocalForCLI: (cli) => call('DisableLocalForCLI', cli),

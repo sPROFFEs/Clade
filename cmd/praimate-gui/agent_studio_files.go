@@ -1,0 +1,186 @@
+package main
+
+// IDE-style file operations for the agent authoring studio. The agent's
+// on-disk folder is its knowledge dir (<config>/praimate/agents/<id>/
+// knowledge/) — documents the user manages plus the graphify-out RAG
+// index. These bindings list the tree and read/write/create files inside
+// it (path-safety guarded so nothing escapes the knowledge folder). The
+// agent DEFINITION itself lives in the DB and is edited via AgentYAML /
+// SaveAgentYAML; the studio shows it as a pinned "agent.yaml" tab.
+
+import (
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+
+	"github.com/sPROFFEs/PrAImate/internal/core"
+)
+
+// AgentFileNode is one entry in the agent's knowledge tree.
+type AgentFileNode struct {
+	Rel     string `json:"rel"`     // slash path relative to the knowledge dir
+	Name    string `json:"name"`    // base name
+	IsDir   bool   `json:"isDir"`   //
+	IsIndex bool   `json:"isIndex"` // part of the graphify-out RAG index
+	Depth   int    `json:"depth"`   // nesting depth (0 = top level)
+}
+
+// resolveKnowPath joins rel under the agent's knowledge dir and rejects
+// anything that escapes it. Returns (knowledgeDir, absPath).
+func resolveKnowPath(id, rel string) (string, string, error) {
+	dir, err := core.AgentKnowledgeDir(id)
+	if err != nil {
+		return "", "", err
+	}
+	clean := strings.TrimPrefix(filepath.Clean("/"+filepath.ToSlash(rel)), "/")
+	abs := filepath.Join(dir, filepath.FromSlash(clean))
+	rp, err := filepath.Rel(dir, abs)
+	if err != nil || rp == ".." || strings.HasPrefix(rp, ".."+string(filepath.Separator)) {
+		return "", "", fmt.Errorf("path %q escapes the knowledge folder", rel)
+	}
+	return dir, abs, nil
+}
+
+// AgentKnowledgeTree returns the agent's knowledge folder as a flat,
+// sorted, depth-tagged list (dirs before files at each level). The
+// graphify-out subtree is marked IsIndex so the UI can badge it.
+func (a *App) AgentKnowledgeTree(id string) ([]AgentFileNode, error) {
+	dir, err := core.AgentKnowledgeDir(id)
+	if err != nil {
+		return nil, err
+	}
+	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+		return []AgentFileNode{}, nil // no knowledge yet
+	}
+	var nodes []AgentFileNode
+	_ = filepath.WalkDir(dir, func(p string, d fs.DirEntry, werr error) error {
+		if werr != nil || p == dir {
+			return nil
+		}
+		rel, err := filepath.Rel(dir, p)
+		if err != nil {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		nodes = append(nodes, AgentFileNode{
+			Rel:     rel,
+			Name:    d.Name(),
+			IsDir:   d.IsDir(),
+			IsIndex: rel == "graphify-out" || strings.HasPrefix(rel, "graphify-out/"),
+			Depth:   strings.Count(rel, "/"),
+		})
+		return nil
+	})
+	// Stable order: each directory's children grouped, dirs first.
+	sort.Slice(nodes, func(i, j int) bool {
+		a, b := nodes[i], nodes[j]
+		ai, bi := strings.LastIndex(a.Rel, "/"), strings.LastIndex(b.Rel, "/")
+		ap, bp := a.Rel[:ai+1], b.Rel[:bi+1]
+		if ap != bp {
+			return ap < bp
+		}
+		if a.IsDir != b.IsDir {
+			return a.IsDir // dirs first within a folder
+		}
+		return strings.ToLower(a.Name) < strings.ToLower(b.Name)
+	})
+	return nodes, nil
+}
+
+// AgentReadKnowledgeFile reads a text file from the knowledge folder.
+func (a *App) AgentReadKnowledgeFile(id, rel string) (string, error) {
+	_, abs, err := resolveKnowPath(id, rel)
+	if err != nil {
+		return "", err
+	}
+	b, err := os.ReadFile(abs)
+	if err != nil {
+		return "", err
+	}
+	if len(b) > 2<<20 {
+		return "", fmt.Errorf("%s is too large to edit here (%d KB)", rel, len(b)/1024)
+	}
+	return string(b), nil
+}
+
+// AgentWriteKnowledgeFile writes (saves) a knowledge file.
+func (a *App) AgentWriteKnowledgeFile(id, rel, content string) error {
+	_, abs, err := resolveKnowPath(id, rel)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(abs, []byte(content), 0o644)
+}
+
+// AgentCreateKnowledgeFile creates a new empty file (or a directory when
+// rel ends in "/") in the knowledge folder and returns its rel path.
+func (a *App) AgentCreateKnowledgeFile(id, rel string) (string, error) {
+	rel = strings.TrimSpace(rel)
+	if rel == "" {
+		return "", fmt.Errorf("a file name is required")
+	}
+	dir, abs, err := resolveKnowPath(id, rel)
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	if strings.HasSuffix(rel, "/") {
+		if err := os.MkdirAll(abs, 0o755); err != nil {
+			return "", err
+		}
+	} else {
+		if _, err := os.Stat(abs); err == nil {
+			return "", fmt.Errorf("%s already exists", rel)
+		}
+		if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+			return "", err
+		}
+		if err := os.WriteFile(abs, []byte(""), 0o644); err != nil {
+			return "", err
+		}
+	}
+	return strings.TrimSuffix(filepath.ToSlash(rel), "/"), nil
+}
+
+var agentNameIDRE = regexp.MustCompile(`[^a-z0-9-]+`)
+
+// CreateAgentFromName creates a new agent from the starter template with
+// the chosen name (and a slug id) injected, persisting it so its folder /
+// knowledge base exist immediately. Returns the saved agent.
+func (a *App) CreateAgentFromName(name string) (*core.Agent, error) {
+	c, err := a.requireCore()
+	if err != nil {
+		return nil, err
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, fmt.Errorf("a name is required")
+	}
+	id := strings.Trim(agentNameIDRE.ReplaceAllString(strings.ToLower(name), "-"), "-")
+	if id == "" {
+		return nil, fmt.Errorf("the name needs at least one letter or digit")
+	}
+	if _, err := c.GetAgent(a.ctx, id); err == nil {
+		return nil, fmt.Errorf("an agent named %q (id %q) already exists", name, id)
+	}
+	agent, err := core.ParseAgentYAML(strings.NewReader(a.NewAgentTemplateYAML()))
+	if err != nil {
+		return nil, err
+	}
+	agent.ID = id
+	agent.Name = name
+	raw, err := core.MarshalAgentYAML(agent)
+	if err != nil {
+		return nil, err
+	}
+	return c.ImportAgentYAML(a.ctx, raw, "")
+}
