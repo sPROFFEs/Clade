@@ -18,17 +18,21 @@ import (
 )
 
 // LocalCLIStatus reports which config-file CLIs currently have the local
-// ollama_remote route applied to their global config.
+// ollama_remote route applied to their global config. praimate-code is
+// the OpenCode fork (name-only rebrand) and reads the SAME opencode.json,
+// so the opencode route covers it.
 type LocalCLIStatus struct {
 	Codex    bool `json:"codex"`
-	Opencode bool `json:"opencode"`
+	Opencode bool `json:"opencode"` // also governs praimate-code (shared config)
+	Deepseek bool `json:"deepseek"`
 }
 
-// LocalCLIStatusNow probes the on-disk config of codex + opencode.
+// LocalCLIStatusNow probes the on-disk config of the config-file CLIs.
 func (a *App) LocalCLIStatusNow() LocalCLIStatus {
 	return LocalCLIStatus{
 		Codex:    ollama.CodexConfigured(),
 		Opencode: ollama.OpenCodeConfigured(),
+		Deepseek: ollama.DeepSeekConfigured(),
 	}
 }
 
@@ -57,12 +61,20 @@ func (a *App) ApplyLocalToCLI(cli, model string) (string, error) {
 		OutputTokens:  d.OutputTokens,
 	}
 	switch cli {
-	case "opencode":
+	case "opencode", "praimate-code":
+		// Shared config: praimate-code is OpenCode rebranded name-only and
+		// reads the same opencode.json, so one write routes both.
 		path, err := ollama.ApplyOpenCode(s, true)
 		if err != nil {
 			return "", err
 		}
-		return "opencode routed to the local model — wrote " + path, nil
+		return "opencode + praimate-code routed to the local model — wrote " + path, nil
+	case "deepseek":
+		path, err := ollama.ApplyDeepSeek(s)
+		if err != nil {
+			return "", err
+		}
+		return "deepseek routed to the local model — wrote " + path, nil
 	case "codex":
 		// codex needs an OpenAI /v1/responses-compatible endpoint; probe
 		// before writing so the user gets a clear error instead of codex
@@ -87,7 +99,7 @@ func (a *App) ApplyLocalToCLI(cli, model string) (string, error) {
 		}
 		return msg, nil
 	default:
-		return "", fmt.Errorf("apply-to-local is for opencode/codex only — claude/openclaude use the per-chat toggle")
+		return "", fmt.Errorf("apply-to-local supports opencode/praimate-code, codex, deepseek — claude/openclaude use the per-chat toggle, gemini isn't wired")
 	}
 }
 
@@ -95,12 +107,18 @@ func (a *App) ApplyLocalToCLI(cli, model string) (string, error) {
 // global config, returning it to its cloud default.
 func (a *App) DisableLocalForCLI(cli string) (string, error) {
 	switch cli {
-	case "opencode":
+	case "opencode", "praimate-code":
 		path, err := ollama.DisableOpenCode()
 		if err != nil {
 			return "", err
 		}
-		return "opencode local route removed — " + path, nil
+		return "opencode + praimate-code local route removed — " + path, nil
+	case "deepseek":
+		path, err := ollama.DisableDeepSeek()
+		if err != nil {
+			return "", err
+		}
+		return "deepseek local route removed — " + path, nil
 	case "codex":
 		path, err := ollama.DisableCodex()
 		if err != nil {

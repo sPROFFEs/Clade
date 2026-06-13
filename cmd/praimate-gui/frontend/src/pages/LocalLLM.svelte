@@ -59,7 +59,7 @@
   // --- route the config-file CLIs (opencode / codex) to the endpoint ---
   // claude/openclaude route by env (the per-chat toggle); opencode/codex
   // read a provider block from their own config files, which this writes.
-  let cliStatus = { codex: false, opencode: false }
+  let cliStatus = { codex: false, opencode: false, deepseek: false }
   let applyModel = ''
   let applyBusy = ''
 
@@ -150,7 +150,8 @@
 <h1 style="font-size:16px; margin-top:24px">Route CLIs to the local model</h1>
 <p class="subtitle" style="margin-top:-6px">
   <strong>claude</strong> and <strong>openclaude</strong> route by environment — just tick “Use the local LLM” when you start a chat/code/studio session, no setup here.
-  <strong>opencode</strong> and <strong>codex</strong> read their endpoint from their own config files, so apply it once here and every opencode/codex session (chat, code, studio) uses the local model.
+  <strong>opencode / praimate-code</strong>, <strong>codex</strong> and <strong>deepseek</strong> read their endpoint from their own config files, so apply it once here and every session (chat, code, studio) uses the local model.
+  <strong>gemini</strong> isn't supported (its auth schema changes per release).
 </p>
 <div class="card">
   <label class="lbl">Model to route to</label>
@@ -160,8 +161,9 @@
 
   <div class="row" style="margin-top:14px; flex-wrap:wrap; gap:8px">
     <div class="grow">
-      <strong>opencode</strong>
+      <strong>opencode / praimate-code</strong>
       {#if cliStatus.opencode}<span class="pill ok">routed to local</span>{:else}<span class="pill">cloud default</span>{/if}
+      <span class="card-sub">(shared config — one apply routes both)</span>
     </div>
     <button class="btn primary" on:click={() => applyCLI('opencode')} disabled={!!applyBusy || !d.endpoint}>{applyBusy === 'opencode' ? 'Applying…' : 'Apply'}</button>
     <button class="btn" on:click={() => disableCLI('opencode')} disabled={!!applyBusy || !cliStatus.opencode}>Disable</button>
@@ -175,5 +177,14 @@
     </div>
     <button class="btn primary" on:click={() => applyCLI('codex')} disabled={!!applyBusy || !d.endpoint}>{applyBusy === 'codex' ? 'Applying…' : 'Apply'}</button>
     <button class="btn" on:click={() => disableCLI('codex')} disabled={!!applyBusy || !cliStatus.codex}>Disable</button>
+  </div>
+
+  <div class="row" style="margin-top:10px; flex-wrap:wrap; gap:8px">
+    <div class="grow">
+      <strong>deepseek</strong>
+      {#if cliStatus.deepseek}<span class="pill ok">routed to local</span>{:else}<span class="pill">cloud default</span>{/if}
+    </div>
+    <button class="btn primary" on:click={() => applyCLI('deepseek')} disabled={!!applyBusy || !d.endpoint}>{applyBusy === 'deepseek' ? 'Applying…' : 'Apply'}</button>
+    <button class="btn" on:click={() => disableCLI('deepseek')} disabled={!!applyBusy || !cliStatus.deepseek}>Disable</button>
   </div>
 </div>
