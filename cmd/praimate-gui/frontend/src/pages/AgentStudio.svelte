@@ -217,7 +217,7 @@
     if (!name) return
     try {
       const rel = await api.agentCreateKnowledgeFile(agentId, name)
-      await refreshTree()
+      await refreshTree(); await loadKnowledge()
       await openFile(rel)
     } catch (e) { error = String(e) }
   }
