@@ -389,22 +389,32 @@
       <button class="xbtn" title="Hide" on:click={() => (leftOpen = false)}>◂</button>
     </div>
 
-    <!-- file tree -->
+    <!-- file tree: agent.yaml (definition, in the DB) + the knowledge/
+         folder (everything inside it IS the agent's knowledge base) -->
     <div class="files">
       <button class="tree-item" class:on={active === DEF} on:click={() => (active = DEF)}>📄 agent.yaml <span class="tag">definition</span></button>
-      {#each tree as n}
-        <div class="tree-row" style="padding-left:{8 + n.depth * 12}px" title={n.rel}>
-          {#if n.isDir}
-            <span class="tree-item dir" class:idx={n.isIndex}>{n.isIndex ? '🗂' : '📁'} {n.name}{#if n.isIndex} <span class="tag idx">RAG index</span>{/if}</span>
-          {:else}
-            <button class="tree-item file grow" class:on={active === n.rel} on:click={() => openFile(n.rel)}>{n.isIndex ? '◦' : '📄'} {n.name}</button>
-            {#if !n.isIndex}<button class="xbtn danger" title="Delete" on:click={() => rmFile(n.rel)}>×</button>{/if}
-          {/if}
-        </div>
-      {/each}
+      {#if know?.exists}
+        <div class="tree-row" style="padding-left:8px"><span class="tree-item dir">📁 knowledge <span class="tag">{tree.filter((n) => !n.isIndex && !n.isDir).length} file(s)</span></span></div>
+        {#if tree.length === 0}
+          <div class="tree-row" style="padding-left:24px"><span class="empty-note">empty — add documents below</span></div>
+        {/if}
+        {#each tree as n}
+          <div class="tree-row" style="padding-left:{20 + n.depth * 12}px" title={n.rel}>
+            {#if n.isDir}
+              <span class="tree-item dir" class:idx={n.isIndex}>{n.isIndex ? '🗂' : '📁'} {n.name}{#if n.isIndex} <span class="tag idx">RAG index</span>{/if}</span>
+            {:else}
+              <button class="tree-item file grow" class:on={active === n.rel} on:click={() => openFile(n.rel)}>{n.isIndex ? '◦' : '📄'} {n.name}</button>
+              {#if !n.isIndex}<button class="xbtn danger" title="Delete" on:click={() => rmFile(n.rel)}>×</button>{/if}
+            {/if}
+          </div>
+        {/each}
+      {:else}
+        <div class="tree-row" style="padding-left:8px"><span class="empty-note">No knowledge base yet — enable it below to add documents.</span></div>
+      {/if}
       <div class="row2" style="padding:8px 4px 2px">
         <button class="btn sm" on:click={() => addKnowFiles(false)}>+ Files</button>
         <button class="btn sm" on:click={() => addKnowFiles(true)}>+ Folder</button>
+        <button class="btn sm" on:click={newFilePrompt}>+ New</button>
       </div>
     </div>
 
