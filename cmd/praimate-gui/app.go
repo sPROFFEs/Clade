@@ -185,13 +185,25 @@ func (a *App) PickProjectFolder() (string, error) {
 // context file (CLAUDE.md / AGENTS.md) so the CLI adopts the persona,
 // without us reimplementing its loop. Returns the terminal session id;
 // output streams over "term:data:<id>" events.
-func (a *App) StartTerminal(agentID, cli, model, cwd string) (string, error) {
+func (a *App) StartTerminal(agentID, cli, model, cwd, localEndpoint, localAPIKey, localModel string) (string, error) {
 	c, err := a.requireCore()
 	if err != nil {
 		return "", err
 	}
 	if cwd == "" {
 		return "", fmt.Errorf("a project folder is required")
+	}
+	// A local endpoint routes by env; its model wins over the CLI model
+	// box so claude/openclaude get --model pointed at the local model.
+	var env []string
+	if strings.TrimSpace(localEndpoint) != "" {
+		if !terminalLocalRoutable(cli) {
+			return "", fmt.Errorf("%s can't be routed to a local endpoint from a terminal — start a Chat with this CLI instead (it supports local LLMs fully)", cli)
+		}
+		if localModel != "" {
+			model = localModel
+		}
+		env = terminalLocalEnv(cli, localEndpoint, localAPIKey, localModel)
 	}
 	name, args, err := terminalCommand(cli, model)
 	if err != nil {
@@ -202,7 +214,7 @@ func (a *App) StartTerminal(agentID, cli, model, cwd string) (string, error) {
 			_ = exportAgentContext(cwd, cli, agent)
 		}
 	}
-	return a.terms.start(a.ctx, name, args, cwd, nil)
+	return a.terms.start(a.ctx, name, args, cwd, env)
 }
 
 // WriteTerminal forwards a base64-encoded chunk of keystrokes to the
@@ -372,10 +384,10 @@ var modelHints = map[string]string{
 // a list command. They are SUGGESTIONS — the input stays free text, so
 // new models work without a PrAImate release.
 var staticModelSuggestions = map[string][]string{
-	"claude":     {"sonnet", "opus", "haiku"},
-	"openclaude": {"sonnet", "opus", "haiku"},
-	"codex":      {"gpt-5.1-codex", "gpt-5.1-codex-mini"},
-	"gemini":     {"gemini-2.5-pro", "gemini-2.5-flash"},
+	"claude":     {"sonnet", "opus", "haiku", "claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5"},
+	"openclaude": {"sonnet", "opus", "haiku", "claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5"},
+	"codex":      {"gpt-5.1-codex", "gpt-5.1-codex-mini", "gpt-5.1", "o4-mini"},
+	"gemini":     {"gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash"},
 }
 
 // ListCLIs returns every launchable CLI with availability probed

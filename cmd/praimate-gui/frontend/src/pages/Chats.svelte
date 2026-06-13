@@ -40,6 +40,11 @@
   let newTools = ''
   let modelSuggestions = []
   let starting = false
+  // Local LLM (Settings → Local LLM) injected into a new chat. Chats
+  // route local through the full launcher machinery, so every CLI works.
+  let localOpt = null // { configured, endpoint, apiKey, models[], error }
+  let newUseLocal = false
+  let newLocalModel = ''
 
   // Per-chat settings editor (CLI / model / tools), mirroring the TUI's
   // per-chat settings sheet. Works on the open thread AND from list rows.
@@ -71,7 +76,7 @@
   async function reopenStudio(chat) {
     error = ''
     try {
-      await api.openEditorWindow(chat.WorkspacePath, '', '', '', chat.ID)
+      await api.openEditorWindow(chat.WorkspacePath, '', '', '', chat.ID, '', '', '')
     } catch (e) {
       error = String(e)
     }
@@ -147,11 +152,14 @@
     creating = true
     newModel = ''
     newTools = ''
+    newUseLocal = false
+    newLocalModel = ''
     try {
       clis = (await api.listCLIs()) || []
       const firstAvailable = clis.find((c) => c.available)
       newCli = firstAvailable ? firstAvailable.id : (clis[0]?.id ?? '')
       await refreshModels()
+      try { localOpt = await api.localLLMModels() } catch { localOpt = null }
     } catch (e) {
       error = String(e)
     }
@@ -169,14 +177,26 @@
 
   $: selectedCliInfo = clis.find((c) => c.id === newCli)
   $: modelSupported = !!selectedCliInfo?.modelHint
+  // Per-chat local routing is honoured for claude/openclaude only (other
+  // CLIs read the global Local LLM config). Hide the toggle otherwise so
+  // it never silently no-ops.
+  $: newLocalRoutable = newCli === 'claude' || newCli === 'openclaude'
+  $: if (!newLocalRoutable && newUseLocal) newUseLocal = false
 
   async function startClean() {
     if (!newCli || starting) return
     starting = true
     error = ''
     try {
-      const chat = await api.startCleanChat(newCli, modelSupported ? newModel.trim() : '', '')
-      if (newTools) await api.setChatTools(chat.ID, newTools)
+      const useLocalNow = newUseLocal && localOpt?.configured
+      const chat = await api.startCleanChat(newCli, useLocalNow ? '' : (modelSupported ? newModel.trim() : ''), '')
+      if (useLocalNow) {
+        // Route the chat at the configured local endpoint — the launcher
+        // applies the per-CLI env/config when the chat runs.
+        await api.updateChatConfig(chat.ID, newCli, '', newTools || '', localOpt.endpoint, localOpt.apiKey, newLocalModel.trim())
+      } else if (newTools) {
+        await api.setChatTools(chat.ID, newTools)
+      }
       creating = false
       await load()
       const c = chats.find((x) => x.ID === chat.ID) || chat
@@ -607,17 +627,40 @@
           </option>
         {/each}
       </select>
-      <label class="lbl">Model {modelSupported ? `(${selectedCliInfo.modelHint})` : '(this CLI has no model flag — it uses its own config)'}</label>
-      <input
-        class="field mono"
-        style="max-width:420px"
-        list="model-suggestions"
-        placeholder={modelSupported ? 'blank = CLI default' : 'not supported'}
-        bind:value={newModel}
-        disabled={!modelSupported} />
-      <datalist id="model-suggestions">
-        {#each modelSuggestions as m}<option value={m}></option>{/each}
-      </datalist>
+      {#if localOpt?.configured && newLocalRoutable}
+        <label class="row" style="margin-top:12px; gap:8px; cursor:pointer">
+          <input type="checkbox" bind:checked={newUseLocal} />
+          <span>Use the local LLM from Settings <span class="card-sub mono">{localOpt.endpoint}</span></span>
+        </label>
+      {:else if localOpt?.configured}
+        <div class="card-sub" style="margin-top:10px">Local LLM routing in a chat applies to claude/openclaude — {newCli} uses its global config (Local LLM tab).</div>
+      {/if}
+
+      {#if newUseLocal && localOpt?.configured && newLocalRoutable}
+        <label class="lbl">Local model</label>
+        <input
+          class="field mono"
+          style="max-width:420px"
+          list="local-model-suggestions"
+          placeholder="model on your endpoint (e.g. llama3.1, qwen2.5-coder)"
+          bind:value={newLocalModel} />
+        <datalist id="local-model-suggestions">
+          {#each localOpt.models || [] as m}<option value={m}></option>{/each}
+        </datalist>
+        {#if localOpt.error}<div class="card-sub" style="color: var(--warn)">Couldn't list models from the endpoint: {localOpt.error}. You can still type a model name.</div>{/if}
+      {:else}
+        <label class="lbl">Model {modelSupported ? `(${selectedCliInfo.modelHint})` : '(this CLI has no model flag — it uses its own config)'}</label>
+        <input
+          class="field mono"
+          style="max-width:420px"
+          list="model-suggestions"
+          placeholder={modelSupported ? 'blank = CLI default' : 'not supported'}
+          bind:value={newModel}
+          disabled={!modelSupported} />
+        <datalist id="model-suggestions">
+          {#each modelSuggestions as m}<option value={m}></option>{/each}
+        </datalist>
+      {/if}
       <label class="lbl">Tools</label>
       <div class="row">
         {#each TOOL_LEVELS as lvl}

@@ -36,7 +36,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-VERSION="${VERSION:-1.1.19}"
+VERSION="${VERSION:-1.1.20}"
 EXTRA_LDFLAGS="${LDFLAGS:--s -w}"  # strip symbols by default — tiny binaries
 ARCHIVE=1
 WITH_GUI=0
@@ -143,8 +143,9 @@ build_one() {
   # self-contained — first-run can seed from the same directory.
   cp -R samples "$out/"
   # App icon at the bundle root — install.sh uses it for the Linux
-  # .desktop shortcuts (Windows/macOS get icons from the binaries).
-  cp cmd/praimate-gui/frontend/src/assets/praimate.png "$out/praimate.png" 2>/dev/null || true
+  # .desktop shortcuts (Windows shortcuts get the monke icon from the
+  # exes' embedded resources: cmd/praimate-gui + cmd/praimate .syso).
+  cp cmd/praimate-gui/frontend/src/assets/monke-icon.png "$out/praimate.png"
   mkdir -p "$out/docs"
   cp docs/ACTIVATION.md docs/TARGETS.md docs/SCHEMA.md docs/QUICKSTART.md "$out/docs/"
   cp README.md LICENSE "$out/"

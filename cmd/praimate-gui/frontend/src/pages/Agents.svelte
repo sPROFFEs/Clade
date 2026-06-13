@@ -35,6 +35,17 @@
   //       cliOptions: [{id,label,available}], suggestions, folder, busy}
   let dlg = null
   let allClis = []
+  let localOpt = null // { configured, endpoint, apiKey, models[], error }
+  // Terminals route a local endpoint by env (claude/openclaude/opencode/
+  // praimate-code); chat + studio route per-chat, honoured for claude/
+  // openclaude only (others read the global Local LLM config).
+  const LOCAL_ROUTABLE_TERMINAL = ['claude', 'openclaude', 'opencode', 'praimate-code']
+  function isLocalRoutable(surface, cli) {
+    return surface === 'terminal'
+      ? LOCAL_ROUTABLE_TERMINAL.includes(cli)
+      : (cli === 'claude' || cli === 'openclaude')
+  }
+  $: dlgLocalRoutable = !!dlg && isLocalRoutable(dlg.surface, dlg.cli)
 
   function cliOptionsFor(agent) {
     if (!agent) return allClis
@@ -62,6 +73,11 @@
       suggestions: [],
       folder: '',
       busy: false,
+      useLocal: false,
+      localModel: '',
+    }
+    if (localOpt === null) {
+      api.localLLMModels().then((r) => { localOpt = r }).catch(() => { localOpt = { configured: false } })
     }
     const fill = () => {
       if (!dlg) return
@@ -83,6 +99,8 @@
 
   async function dlgCliChanged() {
     if (!dlg) return
+    // Drop the local toggle if the new CLI can't route on this surface.
+    if (dlg.useLocal && !isLocalRoutable(dlg.surface, dlg.cli)) { dlg.useLocal = false; dlg = dlg }
     dlg.suggestions = (await api.listCLIModels(dlg.cli).catch(() => [])) || []
     dlg = dlg
   }
@@ -102,10 +120,20 @@
     error = ''
     const { agent, surface, cli, folder } = dlg
     const model = dlg.model.trim()
+    const local = dlg.useLocal && localOpt?.configured
+    const lEnd = local ? localOpt.endpoint : ''
+    const lKey = local ? localOpt.apiKey : ''
+    const lModel = local ? dlg.localModel.trim() : ''
+    if (local && surface === 'terminal' && !LOCAL_ROUTABLE_TERMINAL.includes(cli)) {
+      error = `${cli} can't route to a local endpoint from a terminal — use the Chat or Studio surface instead.`
+      dlg.busy = false
+      return
+    }
     try {
       if (surface === 'chat') {
         const c = await api.startChat(agent.id, cli, '')
-        if (model) await api.updateChatConfig(c.ID, cli, model, '', '', '', '')
+        if (local) await api.updateChatConfig(c.ID, cli, '', '', lEnd, lKey, lModel)
+        else if (model) await api.updateChatConfig(c.ID, cli, model, '', '', '', '')
         dlg = null
         openChatId.set(c.ID)
         activePage.set('chats')
@@ -117,14 +145,14 @@
         return
       }
       if (surface === 'terminal') {
-        const termId = await api.startTerminal(agent ? agent.id : '', cli, model, folder)
+        const termId = await api.startTerminal(agent ? agent.id : '', cli, local ? '' : model, folder, lEnd, lKey, lModel)
         dlg = null
-        pendingTerm.set({ termId, cli, cwd: folder, label: agent ? agent.name : cli, note: '' })
+        pendingTerm.set({ termId, cli, cwd: folder, label: (agent ? agent.name : cli) + (local ? ' · local' : ''), note: '' })
         activePage.set('code')
         return
       }
       // studio
-      await api.openEditorWindow(folder, agent ? agent.id : '', cli, model, '')
+      await api.openEditorWindow(folder, agent ? agent.id : '', cli, local ? '' : model, '', lEnd, lKey, lModel)
       dlg = null
       notice = 'Studio window opened.'
     } catch (e) {
@@ -572,11 +600,27 @@
           <option value={c.id} disabled={!c.available}>{c.label}{c.available ? '' : ' — not installed'}</option>
         {/each}
       </select>
-      <label class="lbl">Model (blank = CLI default)</label>
-      <input class="field mono" style="max-width:420px" list="launch-model-suggestions" bind:value={dlg.model} />
-      <datalist id="launch-model-suggestions">
-        {#each dlg.suggestions as m}<option value={m}></option>{/each}
-      </datalist>
+      {#if localOpt?.configured && dlgLocalRoutable}
+        <label class="row" style="margin-top:10px; gap:8px; cursor:pointer">
+          <input type="checkbox" bind:checked={dlg.useLocal} />
+          <span>Use the local LLM from Settings <span class="card-sub mono">{localOpt.endpoint}</span></span>
+        </label>
+      {:else if localOpt?.configured}
+        <div class="card-sub" style="margin-top:10px">{dlg.cli} can't route to the local endpoint on the {dlg.surface} surface{dlg.surface === 'terminal' ? '' : ' (chat/studio local routing is claude/openclaude only)'} — it uses its global config.</div>
+      {/if}
+
+      {#if dlg.useLocal && localOpt?.configured && dlgLocalRoutable}
+        <label class="lbl">Local model</label>
+        <input class="field mono" style="max-width:420px" list="launch-local-models" bind:value={dlg.localModel} placeholder="model on your endpoint" />
+        <datalist id="launch-local-models">{#each localOpt.models || [] as m}<option value={m}></option>{/each}</datalist>
+        {#if localOpt.error}<div class="card-sub" style="color: var(--warn)">Couldn't list models: {localOpt.error}. You can still type a model name.</div>{/if}
+      {:else}
+        <label class="lbl">Model (blank = CLI default)</label>
+        <input class="field mono" style="max-width:420px" list="launch-model-suggestions" bind:value={dlg.model} />
+        <datalist id="launch-model-suggestions">
+          {#each dlg.suggestions as m}<option value={m}></option>{/each}
+        </datalist>
+      {/if}
       {#if dlg.surface !== 'chat'}
         <label class="lbl">Project folder *</label>
         <div class="row">

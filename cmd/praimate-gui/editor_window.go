@@ -256,7 +256,7 @@ func (a *App) startEditorWatcher() {
 // spawns the studio window as a second process of this binary. model,
 // when non-empty, pins the chat's model. Returns the chat id backing
 // the studio's chat pane.
-func (a *App) OpenEditorWindow(folder, agentID, cli, model, chatID string) (string, error) {
+func (a *App) OpenEditorWindow(folder, agentID, cli, model, chatID, localEndpoint, localAPIKey, localModel string) (string, error) {
 	c, err := a.requireCore()
 	if err != nil {
 		return "", err
@@ -282,19 +282,27 @@ func (a *App) OpenEditorWindow(folder, agentID, cli, model, chatID string) (stri
 			if cli == "" {
 				cli = "claude"
 			}
-			chat, err := c.StartCleanChat(a.ctx, cli, model, folder)
+			startModel := model
+			if localEndpoint != "" {
+				startModel = "" // the local route carries the model
+			}
+			chat, err := c.StartCleanChat(a.ctx, cli, startModel, folder)
 			if err != nil {
 				return "", err
 			}
 			chatID = chat.ID
 		}
 		// Documents-first defaults: tag the chat as a studio session and
-		// let the agent edit files without a per-edit prompt; the user
-		// can lower it from the chat header.
+		// let the agent edit files without a per-edit prompt; the user can
+		// lower it from the chat header. A local endpoint, when given,
+		// routes the studio chat through the same per-CLI machinery as a
+		// regular chat (every CLI supported).
 		_ = c.UpdateChatSettings(a.ctx, chatID, func(s *core.ChatSettings) {
 			s.Tools = "edits"
 			s.Surface = "studio"
-			if model != "" {
+			if localEndpoint != "" {
+				s.Local = &core.ChatLocalEndpoint{Endpoint: localEndpoint, APIKey: localAPIKey, Model: localModel}
+			} else if model != "" {
 				s.Model = model
 			}
 		})

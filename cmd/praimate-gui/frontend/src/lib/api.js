@@ -86,9 +86,11 @@ export const api = {
   editorReadFile: (rel) => call('EditorReadFile', rel),
   editorWriteFile: (rel, content) => call('EditorWriteFile', rel, content),
   editorCreateFile: (rel) => call('EditorCreateFile', rel),
-  openEditorWindow: (folder, agentID, cli, model, chatID) =>
-    call('OpenEditorWindow', folder, agentID, cli, model || '', chatID),
-  startTerminal: (agentID, cli, model, cwd) => call('StartTerminal', agentID, cli, model || '', cwd),
+  openEditorWindow: (folder, agentID, cli, model, chatID, localEndpoint, localApiKey, localModel) =>
+    call('OpenEditorWindow', folder, agentID, cli, model || '', chatID, localEndpoint || '', localApiKey || '', localModel || ''),
+  startTerminal: (agentID, cli, model, cwd, localEndpoint, localApiKey, localModel) =>
+    call('StartTerminal', agentID, cli, model || '', cwd, localEndpoint || '', localApiKey || '', localModel || ''),
+  localLLMModels: () => call('LocalLLMModels'),
 
   pickFolder: () => call('PickFolder'),
   runWorkflow: (agentID, workflow, cli, cwd, inputs) =>

@@ -30,6 +30,16 @@
   $: selectedCliInfo = clis.find((c) => c.id === cli)
   $: modelSupported = !!selectedCliInfo?.modelHint
 
+  // Local LLM (Settings → Local LLM). useLocal routes the session at the
+  // configured endpoint; localModel picks from its live model list.
+  let localOpt = null // { configured, endpoint, apiKey, models[], error }
+  let useLocal = false
+  let localModel = ''
+  // CLIs a terminal can route to a local endpoint by env (matches the
+  // Go terminalLocalRoutable). codex/gemini need a Chat instead.
+  const LOCAL_ROUTABLE = ['claude', 'openclaude', 'opencode', 'praimate-code']
+  $: localRoutable = LOCAL_ROUTABLE.includes(cli)
+
   async function loadModels() {
     try { modelSuggestions = (await api.listCLIModels(cli)) || [] } catch { modelSuggestions = [] }
   }
@@ -79,6 +89,7 @@
         cli = firstAvail ? firstAvail.id : (clis[0]?.id ?? 'claude')
       }
     } catch { /* clis stay empty; the select still works with defaults */ }
+    try { localOpt = await api.localLLMModels() } catch { localOpt = null }
   }
 
   function pick(a) {
@@ -113,16 +124,29 @@
   async function launch() {
     if (!cwd) { error = 'Pick a project folder first.'; return }
     if (!cli) { error = 'Pick a CLI first.'; return }
+    const local = useLocal && localOpt?.configured
+    if (local && !localRoutable) {
+      error = `${cli} can't route to a local endpoint from a terminal — start a Chat with this CLI instead.`
+      return
+    }
     error = ''
     try {
       // agent.id when launched from an agent; '' for a clean session
       // (StartTerminal skips the persona/context-file write).
-      termId = await term.start(agent ? agent.id : '', cli, modelSupported ? model.trim() : '', cwd)
+      termId = await term.start(
+        agent ? agent.id : '',
+        cli,
+        local ? '' : (modelSupported ? model.trim() : ''),
+        cwd,
+        local ? localOpt.endpoint : '',
+        local ? localOpt.apiKey : '',
+        local ? localModel.trim() : '',
+      )
     } catch (e) {
       error = String(e)
       return
     }
-    sessionLabel = agent ? agent.name : `${cli} session`
+    sessionLabel = (agent ? agent.name : cli) + (local ? ' · local' : '')
     started = true
     await tick()
     mountXterm()
@@ -242,15 +266,32 @@
           <option value={c.id} disabled={!c.available}>{c.label || c.id}{c.available ? '' : ' — not installed'}</option>
         {/each}
       </select>
-      <label class="lbl">Model {modelSupported ? `(${selectedCliInfo.modelHint})` : '(this CLI has no model flag — it uses its own config)'}</label>
-      <input
-        class="field mono"
-        style="max-width:420px"
-        list="code-models"
-        placeholder={modelSupported ? 'blank = CLI default' : 'not supported'}
-        bind:value={model}
-        disabled={!modelSupported} />
-      <datalist id="code-models">{#each modelSuggestions as m}<option value={m}></option>{/each}</datalist>
+      {#if localOpt?.configured}
+        <label class="row" style="margin-top:12px; gap:8px; cursor:pointer">
+          <input type="checkbox" bind:checked={useLocal} disabled={!localRoutable} />
+          <span>Use the local LLM from Settings <span class="card-sub mono">{localOpt.endpoint}</span></span>
+        </label>
+        {#if useLocal && !localRoutable}
+          <div class="card-sub" style="color: var(--warn)">{cli} can't be routed to a local endpoint from a terminal — start a Chat with this CLI instead (Chats support local LLMs for every CLI).</div>
+        {/if}
+      {/if}
+
+      {#if useLocal && localOpt?.configured && localRoutable}
+        <label class="lbl">Local model</label>
+        <input class="field mono" style="max-width:420px" list="code-local-models" placeholder="model on your endpoint" bind:value={localModel} />
+        <datalist id="code-local-models">{#each localOpt.models || [] as m}<option value={m}></option>{/each}</datalist>
+        {#if localOpt.error}<div class="card-sub" style="color: var(--warn)">Couldn't list models from the endpoint: {localOpt.error}. You can still type a model name.</div>{/if}
+      {:else}
+        <label class="lbl">Model {modelSupported ? `(${selectedCliInfo.modelHint})` : '(this CLI has no model flag — it uses its own config)'}</label>
+        <input
+          class="field mono"
+          style="max-width:420px"
+          list="code-models"
+          placeholder={modelSupported ? 'blank = CLI default' : 'not supported'}
+          bind:value={model}
+          disabled={!modelSupported} />
+        <datalist id="code-models">{#each modelSuggestions as m}<option value={m}></option>{/each}</datalist>
+      {/if}
       <label class="lbl">Project folder</label>
       <div class="row">
         <input class="field grow" bind:value={cwd} placeholder="/path/to/your/project" />

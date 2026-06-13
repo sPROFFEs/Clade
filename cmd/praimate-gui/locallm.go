@@ -68,3 +68,44 @@ func (a *App) TestLocalLLM(endpoint, apiKey string) ([]string, error) {
 	defer cancel()
 	return ollama.ListModels(ctx, ollama.NormalizeEndpoint(endpoint), apiKey)
 }
+
+// LocalLLMOption bundles the saved default endpoint with its live model
+// list, so the new-chat / new-code-session pickers can offer the local
+// LLM in one call. Models is best-effort — Error carries a probe failure
+// without failing the whole call (the endpoint may just be offline).
+type LocalLLMOption struct {
+	Configured bool     `json:"configured"`
+	Endpoint   string   `json:"endpoint"`
+	APIKey     string   `json:"apiKey"`
+	WireAPI    string   `json:"wireApi"`
+	Models     []string `json:"models"`
+	Error      string   `json:"error,omitempty"`
+}
+
+// LocalLLMModels returns the configured global local endpoint and its
+// available models, for the new-chat and new-code-session model
+// pickers. Configured is false when no endpoint is set in Settings.
+func (a *App) LocalLLMModels() (*LocalLLMOption, error) {
+	d, err := a.GetLocalLLM()
+	if err != nil {
+		return nil, err
+	}
+	opt := &LocalLLMOption{
+		Configured: d.Endpoint != "",
+		Endpoint:   d.Endpoint,
+		APIKey:     d.APIKey,
+		WireAPI:    d.WireAPI,
+	}
+	if !opt.Configured {
+		return opt, nil
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 15*time.Second)
+	defer cancel()
+	models, err := ollama.ListModels(ctx, ollama.NormalizeEndpoint(d.Endpoint), d.APIKey)
+	if err != nil {
+		opt.Error = err.Error()
+		return opt, nil
+	}
+	opt.Models = models
+	return opt, nil
+}
