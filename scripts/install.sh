@@ -475,15 +475,27 @@ $icon_line
 Categories=Development;Utility;
 DESK
       fi
+      # Both files need the exec bit or Nautilus/GNOME Files renders
+      # them as plain text instead of resolving Icon=/Name= — and a
+      # well-formed .desktop without +x shows a generic gear icon.
+      chmod 755 "$apps/praimate.desktop" 2>/dev/null || true
+      [[ -f "$apps/praimate-gui.desktop" ]] && chmod 755 "$apps/praimate-gui.desktop" 2>/dev/null || true
       command -v update-desktop-database >/dev/null 2>&1 \
         && update-desktop-database "$apps" 2>/dev/null || true
-      # Mirror onto the Desktop when one exists.
+      # Mirror onto the Desktop when one exists. Each copy needs its
+      # own +x AND a gio "trusted" flag — otherwise the Desktop shows
+      # the file with a stop-sign overlay and the user has to right-
+      # click → "Allow Launching" before the icon resolves.
       local desk_dir
       desk_dir="$(command -v xdg-user-dir >/dev/null 2>&1 && xdg-user-dir DESKTOP || echo "$HOME/Desktop")"
       if [[ -d "$desk_dir" ]]; then
-        cp -f "$apps/praimate.desktop" "$desk_dir/" 2>/dev/null || true
-        [[ -f "$apps/praimate-gui.desktop" ]] && cp -f "$apps/praimate-gui.desktop" "$desk_dir/" 2>/dev/null || true
-        command -v gio >/dev/null 2>&1 && gio set "$desk_dir/praimate.desktop" metadata::trusted true 2>/dev/null || true
+        for f in praimate.desktop praimate-gui.desktop; do
+          [[ -f "$apps/$f" ]] || continue
+          cp -f "$apps/$f" "$desk_dir/" 2>/dev/null || true
+          chmod 755 "$desk_dir/$f" 2>/dev/null || true
+          command -v gio >/dev/null 2>&1 \
+            && gio set "$desk_dir/$f" metadata::trusted true 2>/dev/null || true
+        done
       fi
       c_grn "  desktop shortcuts created (app menu + Desktop)"
       ;;

@@ -131,6 +131,7 @@
 
 <div class="row" style="margin-bottom:4px">
   <h1 class="grow" style="margin:0">CLIs</h1>
+  <button class="btn" title="Re-scan PATH for tools installed in another terminal" on:click={async () => { await api.refreshPATH(); await load() }} disabled={loading}>Re-scan PATH</button>
   <button class="btn" on:click={load} disabled={loading}>{loading ? 'Probing…' : 'Re-detect'}</button>
 </div>
 <p class="subtitle">The third-party CLI agents PrAImate wraps. Install or repair them here — same detection and install methods as the TUI.</p>

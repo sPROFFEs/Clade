@@ -36,7 +36,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-VERSION="${VERSION:-1.0.2}"
+VERSION="${VERSION:-1.0.3}"
 EXTRA_LDFLAGS="${LDFLAGS:--s -w}"  # strip symbols by default — tiny binaries
 ARCHIVE=1
 WITH_GUI=0
@@ -136,6 +136,8 @@ build_one() {
     if command -v uv >/dev/null 2>&1; then
       echo "  + praimate-graphify (native, via build-graphify.sh)"
       OUT="$out" bash scripts/build-graphify.sh
+      # Copy for standalone release asset (names expected by tools.go)
+      cp "$out/praimate-graphify$ext" "dist/praimate-graphify-$triplet$ext"
     else
       echo "  (skipping praimate-graphify: uv not on PATH)" >&2
     fi

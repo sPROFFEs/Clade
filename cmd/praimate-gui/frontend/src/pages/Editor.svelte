@@ -21,6 +21,7 @@
   }
   import { api, onChatStream, onApproval } from '../lib/api.js'
   import CodeEditor from '../lib/CodeEditor.svelte'
+  import { langOf as fileLang } from '../lib/langOf.js'
 
   export let folder = ''
   export let chatId = ''
@@ -30,10 +31,9 @@
   let tabs = [] // [{path, content, dirty, ref, flushTimer, externalPending}]
   let active = '' // active tab path
 
-  function lang(path) {
-    if (/\.(md|markdown)$/i.test(path)) return 'markdown'
-    if (/\.(ya?ml)$/i.test(path)) return 'yaml'
-    return 'plain'
+  const lang = fileLang
+  async function revealFolder() {
+    try { await api.openEditorFolder() } catch (e) { error = String(e) }
   }
 
   async function loadTree() {
@@ -411,6 +411,7 @@
     <div class="tree-head">
       <button class="btn sm" title="Hide files" on:click={() => (treeOpen = false)}>◂</button>
       <span class="grow mono" title={folder}>{folder.split(/[\\/]/).pop()}</span>
+      <button class="btn sm" on:click={revealFolder} title="Open folder in file manager">🗂</button>
       <button class="btn sm" on:click={() => (showNewFile = !showNewFile)} title="New file">＋</button>
     </div>
     {#if showNewFile}
@@ -418,7 +419,7 @@
         <input
           class="field grow mono"
           style="font-size: 12px; padding: 4px 6px"
-          placeholder="notes.md"
+          placeholder="notes.md, script.py, app.sh, …"
           bind:value={newFileName}
           on:keydown={(e) => e.key === 'Enter' && newFile()} />
         <button class="btn sm primary" on:click={newFile}>OK</button>

@@ -12,6 +12,7 @@
   import { api, onChatStream, onApproval } from '../lib/api.js'
   import { agentStudio } from '../lib/stores.js'
   import CodeEditor from '../lib/CodeEditor.svelte'
+  import { langOf as fileLang } from '../lib/langOf.js'
 
   const DEF = '__definition__'
 
@@ -88,10 +89,10 @@
   let chatOpen = true
   $: gridCols = `${leftOpen ? '300px' : '34px'} 1fr ${chatOpen ? '360px' : '34px'}`
 
-  function langOf(rel) {
-    if (/\.(ya?ml)$/i.test(rel)) return 'yaml'
-    if (/\.(md|markdown)$/i.test(rel)) return 'markdown'
-    return 'plain'
+  const langOf = fileLang
+  async function revealKnowledgeFolder() {
+    if (!agentId) return
+    try { await api.openAgentKnowledgeFolder(agentId) } catch (e) { error = String(e) }
   }
 
   // --- load everything for an agent id ---
@@ -213,7 +214,7 @@
   }
   async function newFilePrompt() {
     if (!agentId) return
-    const name = window.prompt ? window.prompt('New file (e.g. notes.md or subdir/notes.md):', '') : ''
+    const name = window.prompt ? window.prompt('New file (e.g. notes.md, script.py, run.sh, or subdir/file):', '') : ''
     if (!name) return
     try {
       const rel = await api.agentCreateKnowledgeFile(agentId, name)
@@ -385,6 +386,7 @@
   <aside class="left">
     <div class="left-head">
       <strong class="grow">{agentName}</strong>
+      <button class="xbtn" title="Open knowledge folder in file manager" on:click={revealKnowledgeFolder}>🗂</button>
       <button class="xbtn" title="New file" on:click={newFilePrompt}>＋</button>
       <button class="xbtn" title="Hide" on:click={() => (leftOpen = false)}>◂</button>
     </div>

@@ -559,12 +559,30 @@ func (a *App) OpenWorkspaceChat(chatID string) (*OpenWorkspaceChatResult, error)
 
 // --- Agents ----------------------------------------------------------------
 
+// hiddenAgentIDs are built-in agents that exist in the DB (so the studio
+// helper / installer pipelines can use them) but should NOT show up in
+// the GUI's Agents list — embedding-only agents the user shouldn't open.
+var hiddenAgentIDs = map[string]bool{
+	"agent-builder": true, // drives the New-Agent studio's authoring assistant
+}
+
 func (a *App) ListAgents() ([]core.Agent, error) {
 	c, err := a.requireCore()
 	if err != nil {
 		return nil, err
 	}
-	return c.ListAgents(a.ctx)
+	all, err := c.ListAgents(a.ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := all[:0]
+	for _, ag := range all {
+		if hiddenAgentIDs[ag.ID] {
+			continue
+		}
+		out = append(out, ag)
+	}
+	return out, nil
 }
 
 // ImportAgentDialog opens a native file picker and imports the chosen

@@ -87,6 +87,9 @@ export const api = {
   editorReadFile: (rel) => call('EditorReadFile', rel),
   editorWriteFile: (rel, content) => call('EditorWriteFile', rel, content),
   editorCreateFile: (rel) => call('EditorCreateFile', rel),
+  refreshPATH: () => call('RefreshPATH'),
+  openEditorFolder: () => call('OpenEditorFolder'),
+  openAgentKnowledgeFolder: (id) => call('OpenAgentKnowledgeFolder', id),
   openEditorWindow: (folder, agentID, cli, model, chatID, localEndpoint, localApiKey, localModel) =>
     call('OpenEditorWindow', folder, agentID, cli, model || '', chatID, localEndpoint || '', localApiKey || '', localModel || ''),
   startTerminal: (agentID, cli, model, cwd, localEndpoint, localApiKey, localModel) =>

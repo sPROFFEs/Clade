@@ -122,6 +122,11 @@ func main() {
 	// And the managed standalone bin dir (<config>/praimate/bin) so
 	// praimate-code is found by agent detection and `praimate code`.
 	installer.ImportPraimateBinToPath()
+	// Well-known user-level CLI dirs (~/.local/bin, ~/.bun/bin,
+	// ~/.cargo/bin, ~/go/bin, …). Needed when launched from a desktop
+	// shortcut or any non-shell context that hasn't sourced the user's
+	// rc files.
+	installer.ImportUserBinDirs()
 
 	// One-shot config migrations. Codex 0.40+ hard-errors on
 	// wire_api="chat" — rewrite our managed block to "responses" so

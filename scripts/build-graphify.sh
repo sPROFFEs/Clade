@@ -35,6 +35,10 @@ VENDORED_GRAPHIFY="$REPO_ROOT/third_party/graphify"
 GOOS="$(go env GOOS 2>/dev/null || uname -s | tr '[:upper:]' '[:lower:]')"
 GOARCH="$(go env GOARCH 2>/dev/null || echo amd64)"
 OUT="${OUT:-$REPO_ROOT/dist/$GOOS-$GOARCH}"
+# Ensure OUT is absolute before we cd to $WORK
+if [[ "$OUT" != /* ]]; then
+  OUT="$REPO_ROOT/$OUT"
+fi
 EXT=""
 [ "$GOOS" = "windows" ] && EXT=".exe"
 

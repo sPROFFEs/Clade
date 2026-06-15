@@ -109,9 +109,21 @@ func (a *App) InstallCLI(cli, methodID string) error {
 // refreshManagedPaths re-imports the managed install dirs into PATH so
 // a tool/CLI installed seconds ago resolves without restarting the app
 // (and is inherited by every CLI child the GUI spawns from now on).
+// Covers both the PrAImate-managed prefixes AND the user-level dirs the
+// just-finished installer might have written to (pnpm/bun/cargo/…).
 func refreshManagedPaths() {
+	installer.ImportPnpmPathIfPresent()
 	installer.ImportManagedToolsToPath()
 	installer.ImportPraimateBinToPath()
+	installer.ImportUserBinDirs()
+}
+
+// RefreshPATH is the user-triggered version of refreshManagedPaths,
+// exposed to the frontend so a "Re-scan" button on the CLIs tab can
+// pick up tools the user installed in another terminal without
+// restarting PrAImate.
+func (a *App) RefreshPATH() {
+	refreshManagedPaths()
 }
 
 func errUnknownMethod(cli, id string) error {

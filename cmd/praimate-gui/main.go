@@ -19,6 +19,8 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	"github.com/wailsapp/wails/v2/pkg/options/linux"
+
+	"github.com/sPROFFEs/PrAImate/internal/installer"
 )
 
 //go:embed all:frontend/dist
@@ -56,6 +58,16 @@ func main() {
 	if runtime.GOOS == "linux" && os.Getenv("WEBKIT_DISABLE_COMPOSITING_MODE") == "" {
 		_ = os.Setenv("WEBKIT_DISABLE_COMPOSITING_MODE", "1")
 	}
+
+	// PATH hydration — when launched from a desktop shortcut / dock /
+	// Start menu, the process PATH is the desktop session's, not the
+	// user's shell. Eagerly prepend every known PrAImate-managed and
+	// user-level CLI install dir so exec.LookPath finds bun, pnpm,
+	// cargo, deno, claude, etc., without a shell relog.
+	installer.ImportPnpmPathIfPresent()
+	installer.ImportManagedToolsToPath()
+	installer.ImportPraimateBinToPath()
+	installer.ImportUserBinDirs()
 
 	// Studio mode: `praimate-gui -editor <folder> -editor-chat <id>`
 	// opens the document-studio window instead of the main app (Wails
