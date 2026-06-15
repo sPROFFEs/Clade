@@ -514,6 +514,28 @@ func EnsurePnpmReady(ctx context.Context, w io.Writer) ([]string, error) {
 	}
 
 	binDir := pnpmGlobalBinDir(ctx)
+	// If `pnpm config get` returned nothing, the user may still have a
+	// working pnpm install whose PNPM_HOME just hasn't been propagated
+	// to this process (common after `pnpm setup` in a prior session).
+	// Probe PNPM_HOME and the OS-default home dir BEFORE invoking
+	// `pnpm setup`, which on Node 20.x can crash with
+	// ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING through corepack's shim.
+	if binDir == "" {
+		if env := strings.TrimSpace(os.Getenv("PNPM_HOME")); env != "" {
+			if fi, err := os.Stat(env); err == nil && fi.IsDir() {
+				binDir = env
+				fmt.Fprintf(w, "→ using existing PNPM_HOME: %s\n", binDir)
+			}
+		}
+	}
+	if binDir == "" {
+		if def := defaultPnpmHome(); def != "" {
+			if fi, err := os.Stat(def); err == nil && fi.IsDir() {
+				binDir = def
+				fmt.Fprintf(w, "→ pnpm already set up at %s — skipping `pnpm setup`\n", binDir)
+			}
+		}
+	}
 	if binDir == "" {
 		fmt.Fprintln(w, "→ pnpm global bin dir not configured; running `pnpm setup`...")
 		var setupCap bytes.Buffer

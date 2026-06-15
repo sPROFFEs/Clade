@@ -119,6 +119,42 @@ func (a *App) AgentWriteKnowledgeFile(id, rel, content string) error {
 	return os.WriteFile(abs, []byte(content), 0o644)
 }
 
+// AgentRenameKnowledgeFile moves/renames a file inside the agent's
+// knowledge folder. Both src and dst are slash-relative paths; dst is
+// path-safety checked and must not escape the folder.
+func (a *App) AgentRenameKnowledgeFile(id, src, dst string) (string, error) {
+	src = strings.TrimSpace(src)
+	dst = strings.TrimSpace(dst)
+	if src == "" || dst == "" {
+		return "", fmt.Errorf("source and destination names are required")
+	}
+	_, srcAbs, err := resolveKnowPath(id, src)
+	if err != nil {
+		return "", err
+	}
+	dir, dstAbs, err := resolveKnowPath(id, dst)
+	if err != nil {
+		return "", err
+	}
+	if _, err := os.Stat(srcAbs); err != nil {
+		return "", fmt.Errorf("%s: %w", src, err)
+	}
+	if _, err := os.Stat(dstAbs); err == nil {
+		return "", fmt.Errorf("%s already exists", dst)
+	}
+	if err := os.MkdirAll(filepath.Dir(dstAbs), 0o755); err != nil {
+		return "", err
+	}
+	if err := os.Rename(srcAbs, dstAbs); err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel(dir, dstAbs)
+	if err != nil {
+		return "", err
+	}
+	return filepath.ToSlash(rel), nil
+}
+
 // AgentCreateKnowledgeFile creates a new empty file (or a directory when
 // rel ends in "/") in the knowledge folder and returns its rel path.
 func (a *App) AgentCreateKnowledgeFile(id, rel string) (string, error) {

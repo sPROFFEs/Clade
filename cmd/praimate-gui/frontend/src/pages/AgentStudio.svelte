@@ -222,6 +222,19 @@
       await openFile(rel)
     } catch (e) { error = String(e) }
   }
+  async function renameFile(rel) {
+    if (!agentId) return
+    const next = window.prompt ? window.prompt('Rename to (slash-relative path):', rel) : ''
+    if (!next || next === rel) return
+    try {
+      const dst = await api.agentRenameKnowledgeFile(agentId, rel, next)
+      // Update any open tab pointing at the old name so it tracks the new one.
+      const t = tabs.find((x) => x.key === rel)
+      if (t) { t.key = dst; t.label = dst.split('/').pop(); t.lang = langOf(dst); tabs = tabs }
+      if (active === rel) active = dst
+      await refreshTree(); await loadKnowledge()
+    } catch (e) { error = String(e) }
+  }
   async function rmFile(rel) {
     try {
       await api.deleteAgentKnowledgeFile(agentId, rel)
@@ -406,6 +419,7 @@
               <span class="tree-item dir" class:idx={n.isIndex}>{n.isIndex ? '🗂' : '📁'} {n.name}{#if n.isIndex} <span class="tag idx">RAG index</span>{/if}</span>
             {:else}
               <button class="tree-item file grow" class:on={active === n.rel} on:click={() => openFile(n.rel)}>{n.isIndex ? '◦' : '📄'} {n.name}</button>
+              {#if !n.isIndex}<button class="xbtn" title="Rename" on:click={() => renameFile(n.rel)}>✎</button>{/if}
               {#if !n.isIndex}<button class="xbtn danger" title="Delete" on:click={() => rmFile(n.rel)}>×</button>{/if}
             {/if}
           </div>
@@ -577,7 +591,9 @@
   /* CENTER */
   .center { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
   .center-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-  .tabbar { display: flex; gap: 4px; flex-wrap: wrap; overflow: hidden; }
+  .tabbar { display: flex; gap: 4px; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; min-width: 0; }
+  .tabbar .tab { flex: 0 0 auto; max-width: 220px; }
+  .tabbar .tab .tab-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
   .tab { display: flex; align-items: center; border: 1px solid var(--border); border-radius: 8px 8px 0 0; background: var(--bg-panel); font-size: 12px; }
   .tab.active { background: var(--bg); }
   .tab-name { background: none; border: none; color: var(--text); padding: 5px 4px 5px 10px; cursor: pointer; font-size: 12px; }

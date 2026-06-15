@@ -395,7 +395,12 @@ var staticModelSuggestions = map[string][]string{
 func (a *App) ListCLIs() []CLIInfo {
 	agents := launcher.KnownAgents()
 	out := make([]CLIInfo, len(agents))
-	ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
+	// 5s was too tight: a slow `opencode --version` (Bun cold start)
+	// or a stalled `codex --version` would race past the deadline and
+	// the CLI got rendered as "not installed" in the chat/agent
+	// selector even though the CLIs tab (30s budget) showed it
+	// installed. 20s leaves headroom for the slowest healthy probe.
+	ctx, cancel := context.WithTimeout(a.ctx, 20*time.Second)
 	defer cancel()
 	var wg sync.WaitGroup
 	for i, ag := range agents {

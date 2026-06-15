@@ -453,12 +453,17 @@ create_shortcuts() {
         cp -f "$icon_src" "$HOME/.local/share/icons/praimate.png" 2>/dev/null \
           && icon_line="Icon=$HOME/.local/share/icons/praimate.png"
       fi
+      # Exec wraps the binary in `bash -lc` so the desktop session's
+      # minimal PATH is replaced by the user's login PATH — ~/.profile /
+      # ~/.bashrc / ~/.zshrc additions for bun, pnpm, cargo, deno, etc.
+      # become visible to exec.LookPath without the user having to log
+      # out + back in after a CLI install.
       cat > "$apps/praimate.desktop" <<DESK
 [Desktop Entry]
 Type=Application
 Name=PrAImate
 Comment=Multi-CLI agent launcher (terminal UI)
-Exec=$DEST/praimate
+Exec=bash -lc 'exec "$DEST/praimate" "\$@"' --
 Terminal=true
 $icon_line
 Categories=Development;Utility;
@@ -469,7 +474,7 @@ DESK
 Type=Application
 Name=PrAImate GUI
 Comment=Multi-CLI agent launcher (desktop app)
-Exec=$DEST/praimate-gui
+Exec=bash -lc 'exec "$DEST/praimate-gui" "\$@"' --
 Terminal=false
 $icon_line
 Categories=Development;Utility;

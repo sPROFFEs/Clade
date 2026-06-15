@@ -166,6 +166,41 @@ func (a *App) EditorCreateFile(rel string) (string, error) {
 	return filepath.ToSlash(r), nil
 }
 
+// EditorRenameFile renames/moves a file inside the studio folder.
+// src and dst are slash-relative paths; both are path-safety checked.
+// Returns the normalized destination rel.
+func (a *App) EditorRenameFile(src, dst string) (string, error) {
+	src = strings.TrimSpace(src)
+	dst = strings.TrimSpace(dst)
+	if src == "" || dst == "" {
+		return "", errors.New("source and destination names are required")
+	}
+	srcAbs, err := editorPath(src)
+	if err != nil {
+		return "", err
+	}
+	dstAbs, err := editorPath(dst)
+	if err != nil {
+		return "", err
+	}
+	if _, err := os.Stat(srcAbs); err != nil {
+		return "", fmt.Errorf("%s: %w", src, err)
+	}
+	if _, err := os.Stat(dstAbs); err == nil {
+		return "", fmt.Errorf("%s already exists", dst)
+	}
+	a.editorMarkOwnWrite(srcAbs)
+	a.editorMarkOwnWrite(dstAbs)
+	if err := os.MkdirAll(filepath.Dir(dstAbs), 0o755); err != nil {
+		return "", err
+	}
+	if err := os.Rename(srcAbs, dstAbs); err != nil {
+		return "", err
+	}
+	r, _ := filepath.Rel(editorFolder, dstAbs)
+	return filepath.ToSlash(r), nil
+}
+
 // --- own-write echo suppression ---------------------------------------------
 
 func (a *App) editorMarkOwnWrite(abs string) {

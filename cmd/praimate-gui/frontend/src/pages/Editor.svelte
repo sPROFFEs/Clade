@@ -35,6 +35,17 @@
   async function revealFolder() {
     try { await api.openEditorFolder() } catch (e) { error = String(e) }
   }
+  async function renameFile(rel) {
+    const next = window.prompt ? window.prompt('Rename to (slash-relative path):', rel) : ''
+    if (!next || next === rel) return
+    try {
+      const dst = await api.editorRenameFile(rel, next)
+      await loadTree()
+      const t = tabs.find((x) => x.path === rel)
+      if (t) { t.path = dst; tabs = tabs }
+      if (active === rel) active = dst
+    } catch (e) { error = String(e) }
+  }
 
   async function loadTree() {
     try {
@@ -426,7 +437,10 @@
       </div>
     {/if}
     {#each files as f}
-      <button class="tree-item" class:active={f === active} on:click={() => open(f)} title={f}>{f}</button>
+      <div class="tree-row">
+        <button class="tree-item grow" class:active={f === active} on:click={() => open(f)} title={f}>{f}</button>
+        <button class="btn sm" title="Rename" on:click={() => renameFile(f)}>✎</button>
+      </div>
     {/each}
     {#if files.length === 0}<div class="card-sub" style="padding:8px">No editable files yet — create one.</div>{/if}
   </aside>
@@ -610,7 +624,9 @@
   .tree-item:hover { background: var(--bg-raised, rgba(255,255,255,0.06)); }
   .tree-item.active { background: var(--bg-raised, rgba(255,255,255,0.1)); }
   .editor-col { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
-  .tabbar { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px; }
+  .tabbar { display: flex; gap: 4px; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; min-width: 0; margin-bottom: 6px; }
+  .tabbar .tab { flex: 0 0 auto; max-width: 220px; }
+  .tabbar .tab .tab-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
   .tab {
     display: flex;
     align-items: center;
