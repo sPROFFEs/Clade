@@ -131,21 +131,23 @@ func toolCandidatePaths(id ToolID, binary string) []string {
 	if p, err := exec.LookPath(binary); err == nil {
 		paths = append(paths, p)
 	}
-	// PrAImate Code installs to <config>/praimate/bin, not the per-tool
-	// uv prefix — that's where the `praimate code` dispatcher looks.
-	if id == ToolPraimateCode {
-		if binDir, err := PraimateBinDir(); err == nil {
-			bins := []string{binary}
-			if runtime.GOOS == "windows" {
-				bins = append(bins, binary+".exe")
-			}
-			for _, b := range bins {
-				paths = append(paths, filepath.Join(binDir, b))
-			}
+
+	// Managed standalone bin dir second (bundled exes like praimate-code, graphify)
+	if binDir, err := PraimateBinDir(); err == nil {
+		bins := []string{binary}
+		if runtime.GOOS == "windows" {
+			bins = append(bins, binary+".exe")
 		}
-		return paths
+		for _, b := range bins {
+			paths = append(paths, filepath.Join(binDir, b))
+		}
 	}
-	// Managed prefixes second: current (praimate) then legacy (clade) —
+
+	if id == ToolPraimateCode {
+		return paths // praimate-code has no managed tool prefix (no node_modules/uv_tool_dir)
+	}
+
+	// Managed prefixes third: current (praimate) then legacy (clade) —
 	// tools installed before the rebrand must keep detecting.
 	bins := []string{binary}
 	if runtime.GOOS == "windows" {
@@ -314,7 +316,7 @@ func graphifyBundledMethod(current OS) *Method {
 	}
 	url := "https://github.com/sPROFFEs/PrAImate/releases/latest/download/" + graphifyAssetName()
 	if current == OSWindows {
-		dest := filepath.Join(binDir, "praimate-graphify.exe")
+		dest := filepath.Join(binDir, "graphify.exe")
 		return &Method{
 			ID:    "powershell",
 			Label: "Download PrAImate's bundled graphify (no Python needed)",
@@ -325,7 +327,7 @@ func graphifyBundledMethod(current OS) *Method {
 			Recommended: true,
 		}
 	}
-	dest := filepath.Join(binDir, "praimate-graphify")
+	dest := filepath.Join(binDir, "graphify")
 	return &Method{
 		ID:          "curl",
 		Label:       "Download PrAImate's bundled graphify (no Python needed)",
@@ -335,12 +337,57 @@ func graphifyBundledMethod(current OS) *Method {
 	}
 }
 
-// InstallBundledGraphify downloads the shipped standalone graphify into
-// the praimate bin dir. Used by the GUI's one-click install path.
 func InstallBundledGraphify(ctx context.Context, w io.Writer) error {
+	binDir, err := PraimateBinDir()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		return err
+	}
+
+	name := "graphify"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+
+	exe, err := os.Executable()
+	if err == nil {
+		// Look for bundled binary (e.g. from zip release)
+		// Note: bundled name in zip is praimate-graphify, but we install as graphify
+		localName := "praimate-graphify"
+		if runtime.GOOS == "windows" {
+			localName += ".exe"
+		}
+		localCand := filepath.Join(filepath.Dir(exe), localName)
+		if st, err := os.Stat(localCand); err == nil && !st.IsDir() {
+			fmt.Fprintf(w, "→ Found bundled binary at %s\n", localCand)
+			dest := filepath.Join(binDir, name)
+			fmt.Fprintf(w, "→ Copying to %s\n", dest)
+
+			srcFile, err := os.Open(localCand)
+			if err != nil {
+				return fmt.Errorf("open local binary: %w", err)
+			}
+			defer srcFile.Close()
+
+			dstFile, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+			if err != nil {
+				return fmt.Errorf("create destination: %w", err)
+			}
+			defer dstFile.Close()
+
+			if _, err := io.Copy(dstFile, srcFile); err != nil {
+				return fmt.Errorf("copy binary: %w", err)
+			}
+			fmt.Fprintln(w, "✓ Install finished")
+			return nil
+		}
+	}
+
 	m := graphifyBundledMethod(DetectOS())
 	if m == nil {
-		return fmt.Errorf("can't resolve the praimate bin dir")
+		return fmt.Errorf("graphify bundling is not supported on this platform")
 	}
 	return Run(ctx, *m, w, w)
 }

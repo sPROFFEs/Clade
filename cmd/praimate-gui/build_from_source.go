@@ -166,7 +166,7 @@ func (a *App) BuildToolFromSource(tool string) error {
 		dest = filepath.Join(binDir, "praimate-code"+ext)
 	case "graphify":
 		produced = filepath.Join(out, "praimate-graphify"+ext)
-		dest = filepath.Join(binDir, "praimate-graphify"+ext)
+		dest = filepath.Join(binDir, "graphify"+ext)
 	}
 	if _, err := os.Stat(produced); err != nil {
 		return fmt.Errorf("build finished but %s was not produced", filepath.Base(produced))
