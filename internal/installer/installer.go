@@ -295,9 +295,8 @@ func AutoInstallNodeWindows(ctx context.Context, w io.Writer) ([]string, error) 
 }
 
 // AutoInstallPnpm runs `corepack enable` so pnpm becomes available
-// without an extra global install. Requires Node ≥ 16.10, which ships
-// corepack. Returns a clear error if Node isn't on PATH or corepack
-// is broken on the user's Node build.
+// without an extra global install. It uses the PrAImate-managed bin dir
+// to avoid permission issues with the system Node directory.
 func AutoInstallPnpm(ctx context.Context, w io.Writer) error {
 	if _, err := exec.LookPath("node"); err != nil {
 		return fmt.Errorf("node is required to auto-install pnpm via corepack — install Node ≥ 20 first")
@@ -305,14 +304,45 @@ func AutoInstallPnpm(ctx context.Context, w io.Writer) error {
 	if _, err := exec.LookPath("corepack"); err != nil {
 		return fmt.Errorf("corepack not on PATH — install a Node version that bundles corepack (≥ 16.10)")
 	}
+
+	binDir, err := PraimateBinDir()
+	if err != nil {
+		return fmt.Errorf("resolve PrAImate bin dir: %w", err)
+	}
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		return fmt.Errorf("create PrAImate bin dir %s: %w", binDir, err)
+	}
+
+	fmt.Fprintf(w, "→ enabling pnpm into %s...\n", binDir)
 	var cap bytes.Buffer
-	cmd := exec.CommandContext(ctx, "corepack", "enable")
+	// corepack enable --install-directory puts shims into our managed bin dir
+	// instead of trying to write to Node's own bin dir (which usually
+	// requires sudo on Linux/macOS).
+	cmd := exec.CommandContext(ctx, "corepack", "enable", "--install-directory", binDir)
 	hideConsole(cmd)
 	cmd.Stdout = io.MultiWriter(w, &cap)
 	cmd.Stderr = io.MultiWriter(w, &cap)
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("%w\n%s", err, pnpmFailureHint(cap.String(), "corepack enable"))
+		return fmt.Errorf("corepack enable failed: %w\n%s", err, pnpmFailureHint(cap.String(), "corepack enable"))
 	}
+
+	// Add the new bin dir to the current process PATH so we can run the
+	// newly-created pnpm shim immediately for the config step.
+	sep := string(os.PathListSeparator)
+	_ = os.Setenv("PATH", binDir+sep+os.Getenv("PATH"))
+
+	// Configure pnpm to use the same dir as its global-bin-dir so future
+	// `pnpm add -g` commands (Gemini, DeepSeek, etc.) also land in our
+	// managed prefix instead of failing on system permissions.
+	fmt.Fprintln(w, "→ configuring pnpm global bin dir...")
+	cfgCmd := exec.CommandContext(ctx, "pnpm", "config", "set", "global-bin-dir", binDir)
+	hideConsole(cfgCmd)
+	if _, err := cfgCmd.CombinedOutput(); err != nil {
+		// Non-fatal: if this fails, EnsurePnpmReady will still try `pnpm setup`
+		// which is a slower but viable fallback.
+		fmt.Fprintf(w, "  (warning: pnpm config set failed: %v)\n", err)
+	}
+
 	return nil
 }
 

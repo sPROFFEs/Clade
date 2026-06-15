@@ -5,7 +5,7 @@
   import { onMount, onDestroy } from 'svelte'
   import { get } from 'svelte/store'
   import { api } from '../lib/api.js'
-  import { cliCache } from '../lib/stores.js'
+  import { cliCache, activePage } from '../lib/stores.js'
 
   let clis = []
   let error = ''
@@ -135,7 +135,41 @@
 </div>
 <p class="subtitle">The third-party CLI agents PrAImate wraps. Install or repair them here — same detection and install methods as the TUI.</p>
 
-{#if error}<div class="banner">{error}</div>{/if}
+{#if error}
+  {#if error.includes('install pnpm directly')}
+    <!-- svelte-ignore a11y-click-events-have-key-events -->
+    <!-- svelte-ignore a11y-no-static-element-interactions -->
+    <div class="modal-backdrop" on:click={() => error = ''}>
+      <div class="modal-content" on:click|stopPropagation>
+        <h2>pnpm installation failed</h2>
+        <p class="subtitle" style="margin-bottom:12px">
+          The automated installer couldn't set up pnpm (often due to missing permissions or a corepack bug in Node 20+).
+          To work around this, please install it directly:
+        </p>
+        
+        <div class="code-block">
+          <strong>macOS / Linux:</strong><br/>
+          <span class="mono">curl -fsSL https://get.pnpm.io/install.sh | sh -</span><br/>
+          <span class="mono">exec $SHELL</span><br/>
+          <br/>
+          <strong>Windows (PowerShell):</strong><br/>
+          <span class="mono">iwr https://get.pnpm.io/install.ps1 -useb | iex</span>
+        </div>
+        
+        <p class="subtitle" style="margin-top:12px; margin-bottom:0">
+          Once installed, PrAImate will detect it automatically.
+        </p>
+        
+        <div class="row" style="margin-top:16px; justify-content:flex-end">
+          <button class="btn" on:click={() => error = ''}>Close</button>
+        </div>
+      </div>
+    </div>
+  {:else}
+    <div class="banner">{error}</div>
+  {/if}
+{/if}
+
 {#if loading && clis.length === 0}<div class="empty">Probing installed CLIs…</div>{/if}
 
 {#each clis as c}
@@ -193,9 +227,14 @@
       <div class="card-sub">Our version-pinned, rebranded OpenCode build (~150MB download).</div>
     </div>
     {#if !codeInstalled}
-      <button class="btn primary" on:click={installCode} disabled={installing !== ''}>
-        {installing === 'praimate-code' ? 'Installing…' : 'Install'}
-      </button>
+      <div class="row">
+        <button class="btn primary" on:click={installCode} disabled={installing !== ''}>
+          {installing === 'praimate-code' ? 'Installing…' : 'Install'}
+        </button>
+        <button class="btn" on:click={() => activePage.set('settings')}>
+          Build from source…
+        </button>
+      </div>
     {/if}
   </div>
 </div>

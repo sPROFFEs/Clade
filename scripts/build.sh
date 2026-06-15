@@ -10,7 +10,7 @@
 #   scripts/build.sh --no-archive          # skip the zip/tar.gz step
 #   scripts/build.sh --version=1.0.1       # inject a specific version
 #   scripts/build.sh --with-gui            # also build praimate-gui (native target only)
-#   VERSION=1.0.1 scripts/build.sh         # same, via env var
+#   VERSION=1.0.2 scripts/build.sh         # same, via env var
 #
 # The version is stamped into the binary at link time via
 # `-X .../internal/version.Current=$VERSION`, so `praimate -version` and
@@ -36,7 +36,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-VERSION="${VERSION:-1.0.1}"
+VERSION="${VERSION:-1.0.2}"
 EXTRA_LDFLAGS="${LDFLAGS:--s -w}"  # strip symbols by default — tiny binaries
 ARCHIVE=1
 WITH_GUI=0
@@ -123,6 +123,8 @@ build_one() {
     if command -v bun >/dev/null 2>&1; then
       echo "  + praimate-code (native, via build-praimate-code.sh)"
       OUT="$out" bash scripts/build-praimate-code.sh
+      # Copy for standalone release asset (names expected by tools.go)
+      cp "$out/praimate-code$ext" "dist/praimate-code-$triplet$ext"
     else
       echo "  (skipping praimate-code: bun not on PATH)" >&2
     fi

@@ -173,6 +173,16 @@
   let buildLog = []
   let buildUnsub = () => {}
 
+  let prereqModal = null // { name, detail }
+
+  function showPrereqModal(r) {
+    prereqModal = r
+  }
+
+  function closePrereqModal() {
+    prereqModal = null
+  }
+
   async function loadBuildInfo() {
     const next = {}
     for (const t of ['praimate-code', 'graphify']) {
@@ -252,7 +262,14 @@
         {#if info}
           <div class="row" style="gap:6px; flex-wrap:wrap; margin-top:8px">
             {#each info.requirements as r}
-              <span class="pill {r.found ? 'ok' : 'err'}" title={r.detail}>
+              <!-- svelte-ignore a11y-click-events-have-key-events -->
+              <!-- svelte-ignore a11y-no-static-element-interactions -->
+              <span
+                class="pill {r.found ? 'ok' : 'err'}"
+                title={r.detail}
+                style="cursor: pointer"
+                on:click={() => showPrereqModal(r)}
+              >
                 {r.found ? '✓' : '✗'} {r.name}
               </span>
             {/each}
@@ -477,3 +494,40 @@
   <input class="field grow mono" placeholder="e.g. internal-\d{6}" bind:value={newPattern} />
   <button class="btn primary" on:click={addPattern}>Add</button>
 </div>
+
+{#if prereqModal}
+  <!-- svelte-ignore a11y-click-events-have-key-events -->
+  <!-- svelte-ignore a11y-no-static-element-interactions -->
+  <div class="modal-backdrop" on:click={closePrereqModal}>
+    <div class="modal-content" on:click|stopPropagation>
+      <h2>How to install {prereqModal.name}</h2>
+      <p class="subtitle" style="margin-bottom:12px">{prereqModal.detail}</p>
+      
+      {#if prereqModal.name === 'git'}
+        <div class="code-block">
+          <strong>macOS:</strong> <span class="mono">brew install git</span><br/>
+          <strong>Linux (Debian/Ubuntu):</strong> <span class="mono">sudo apt install git</span><br/>
+          <strong>Windows:</strong> <span class="mono">winget install --id Git.Git -e --source winget</span>
+        </div>
+      {:else if prereqModal.name === 'bun'}
+        <div class="code-block">
+          <strong>macOS / Linux:</strong> <span class="mono">curl -fsSL https://bun.sh/install | bash</span><br/>
+          <strong>Windows:</strong> <span class="mono">powershell -c "irm bun.sh/install.ps1 | iex"</span>
+        </div>
+      {:else if prereqModal.name === 'uv'}
+        <div class="code-block">
+          <strong>macOS / Linux:</strong> <span class="mono">curl -LsSf https://astral.sh/uv/install.sh | sh</span><br/>
+          <strong>Windows:</strong> <span class="mono">powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"</span>
+        </div>
+      {:else if prereqModal.name === 'bash'}
+        <div class="code-block">
+          <strong>Windows:</strong> Download Git for Windows and ensure "Git Bash" is in your PATH.
+        </div>
+      {/if}
+      
+      <div class="row" style="margin-top:16px; justify-content:flex-end">
+        <button class="btn" on:click={closePrereqModal}>Close</button>
+      </div>
+    </div>
+  </div>
+{/if}

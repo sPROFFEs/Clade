@@ -517,6 +517,46 @@ func praimateCodeMethods(current OS) []Method {
 // error if no method is available (e.g. curl missing) or the download
 // fails.
 func InstallPraimateCode(ctx context.Context, w io.Writer) error {
+	binDir, err := PraimateBinDir()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		return err
+	}
+
+	exe, err := os.Executable()
+	if err == nil {
+		name := "praimate-code"
+		if runtime.GOOS == "windows" {
+			name += ".exe"
+		}
+		localCand := filepath.Join(filepath.Dir(exe), name)
+		if st, err := os.Stat(localCand); err == nil && !st.IsDir() {
+			fmt.Fprintf(w, "→ Found bundled binary at %s\n", localCand)
+			dest := filepath.Join(binDir, name)
+			fmt.Fprintf(w, "→ Copying to %s\n", dest)
+
+			srcFile, err := os.Open(localCand)
+			if err != nil {
+				return fmt.Errorf("open local binary: %w", err)
+			}
+			defer srcFile.Close()
+
+			dstFile, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+			if err != nil {
+				return fmt.Errorf("create destination: %w", err)
+			}
+			defer dstFile.Close()
+
+			if _, err := io.Copy(dstFile, srcFile); err != nil {
+				return fmt.Errorf("copy binary: %w", err)
+			}
+			fmt.Fprintln(w, "✓ Install finished")
+			return nil
+		}
+	}
+
 	methods := ToolMethods(ToolPraimateCode, ActionInstall, DetectOS())
 	if len(methods) == 0 {
 		return fmt.Errorf("no install method available (need curl on Linux/macOS, or PowerShell on Windows)")
