@@ -130,18 +130,18 @@
       return
     }
     try {
+      if (!folder) {
+        error = 'Pick a project folder first.'
+        dlg.busy = false
+        return
+      }
       if (surface === 'chat') {
-        const c = await api.startChat(agent.id, cli, '')
+        const c = await api.startChat(agent.id, cli, folder)
         if (local) await api.updateChatConfig(c.ID, cli, '', '', lEnd, lKey, lModel)
         else if (model) await api.updateChatConfig(c.ID, cli, model, '', '', '', '')
         dlg = null
         openChatId.set(c.ID)
         activePage.set('chats')
-        return
-      }
-      if (!folder) {
-        error = 'Pick a project folder first.'
-        dlg.busy = false
         return
       }
       if (surface === 'terminal') {
@@ -622,7 +622,7 @@
           {#each dlg.suggestions as m}<option value={m}></option>{/each}
         </datalist>
       {/if}
-      {#if dlg.surface !== 'chat'}
+      {#if true}
         <label class="lbl">Project folder *</label>
         <div class="row">
           <input class="field grow mono" bind:value={dlg.folder} placeholder="pick the folder the agent works in" />

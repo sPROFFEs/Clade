@@ -13,8 +13,9 @@ import (
 )
 
 // StartAgentHelperChat opens a clean, throwaway chat for the agent studio's
-// assistant pane on the given CLI/model.
-func (a *App) StartAgentHelperChat(cli, model string) (*core.Chat, error) {
+// assistant pane on the given CLI/model. If cwd is empty, it attempts to
+// fall back to the editor folder or the system working directory.
+func (a *App) StartAgentHelperChat(cli, model, cwd string) (*core.Chat, error) {
 	c, err := a.requireCore()
 	if err != nil {
 		return nil, err
@@ -22,7 +23,13 @@ func (a *App) StartAgentHelperChat(cli, model string) (*core.Chat, error) {
 	if cli == "" {
 		cli = "claude"
 	}
-	cwd, _ := os.UserHomeDir()
+	if cwd == "" {
+		if editorFolder != "" {
+			cwd = editorFolder
+		} else {
+			cwd, _ = os.Getwd()
+		}
+	}
 	chat, err := c.StartCleanChat(a.ctx, cli, model, cwd)
 	if err != nil {
 		return nil, err

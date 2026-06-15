@@ -94,7 +94,7 @@ export const api = {
   localLLMModels: () => call('LocalLLMModels'),
   recordCodeSession: (cli, model, cwd, localEndpoint, localApiKey, localModel) =>
     call('RecordCodeSession', cli, model || '', cwd, localEndpoint || '', localApiKey || '', localModel || ''),
-  startAgentHelperChat: (cli, model) => call('StartAgentHelperChat', cli, model || ''),
+  startAgentHelperChat: (cli, model, cwd) => call('StartAgentHelperChat', cli, model || '', cwd || ''),
   createAgentFromName: (name) => call('CreateAgentFromName', name),
   agentKnowledgeTree: (id) => call('AgentKnowledgeTree', id),
   agentReadKnowledgeFile: (id, rel) => call('AgentReadKnowledgeFile', id, rel),

@@ -182,5 +182,9 @@ func (a *App) CreateAgentFromName(name string) (*core.Agent, error) {
 	if err != nil {
 		return nil, err
 	}
-	return c.ImportAgentYAML(a.ctx, raw, "")
+	saved, err := c.ImportAgentYAML(a.ctx, raw, "")
+	if err == nil && saved != nil {
+		_ = a.EnableAgentKnowledge(saved.ID)
+	}
+	return saved, err
 }
