@@ -21,6 +21,7 @@
   }
   import { api, onChatStream, onApproval } from '../lib/api.js'
   import CodeEditor from '../lib/CodeEditor.svelte'
+  import ContextMenu from '../lib/ContextMenu.svelte'
   import { langOf as fileLang } from '../lib/langOf.js'
 
   export let folder = ''
@@ -30,8 +31,37 @@
   let error = ''
   let tabs = [] // [{path, content, dirty, ref, flushTimer, externalPending}]
   let active = '' // active tab path
+  let cursorInfo = { line: 1, col: 1, selLen: 0 }
+  let quickOpen = false
+  let quickOpenQuery = ''
+  let quickOpenIndex = 0
+  let ctx = null
+
+  async function deleteFile(rel) {
+    if (!confirm(`Delete ${rel}? This can't be undone from inside the editor.`)) return
+    try {
+      await api.editorDeleteFile(rel)
+      const t = tabs.find((x) => x.path === rel)
+      if (t) close(rel)
+      await loadTree()
+    } catch (e) { error = String(e) }
+  }
+  function fileMenu(ev, f) {
+    ev.preventDefault()
+    ctx = {
+      x: ev.clientX,
+      y: ev.clientY,
+      items: [
+        { label: 'Open',   action: () => open(f) },
+        { label: 'Rename…', action: () => renameFile(f) },
+        { label: 'Delete',  danger: true, action: () => deleteFile(f) },
+      ],
+    }
+  }
 
   const lang = fileLang
+  const langLabel = (p) => fileLang(p).toUpperCase()
+  $: dirtyCount = tabs.filter((t) => t.dirty).length
   async function revealFolder() {
     try { await api.openEditorFolder() } catch (e) { error = String(e) }
   }
@@ -72,6 +102,19 @@
     if (t?.dirty) flush(t)
     tabs = tabs.filter((x) => x.path !== path)
     if (active === path) active = tabs[tabs.length - 1]?.path || ''
+  }
+  function closeOthers(keep) {
+    for (const t of tabs) if (t.path !== keep && t.dirty) flush(t)
+    tabs = tabs.filter((t) => t.path === keep)
+    active = keep
+  }
+  function closeAll() {
+    for (const t of tabs) if (t.dirty) flush(t)
+    tabs = []
+    active = ''
+  }
+  async function saveAll() {
+    for (const t of tabs) if (t.dirty) await flush(t)
   }
 
   function onEdit(t, content) {
@@ -389,7 +432,51 @@
   }
 
   function onWindowKey(e) {
-    if (e.key === 'Escape' && ask) closeAsk()
+    if (e.key === 'Escape') {
+      if (ask) { closeAsk(); return }
+      if (quickOpen) { quickOpen = false; return }
+    }
+    const ctrl = e.ctrlKey || e.metaKey
+    if (!ctrl) return
+    // Ctrl+S: save (flush) active tab now. Ctrl+Shift+S: save all.
+    if (e.key.toLowerCase() === 's') {
+      e.preventDefault()
+      if (e.shiftKey) saveAll()
+      else { const t = tabs.find((x) => x.path === active); if (t) flush(t) }
+      return
+    }
+    // Ctrl+W: close active tab.
+    if (e.key.toLowerCase() === 'w' && active) {
+      e.preventDefault()
+      close(active)
+      return
+    }
+    // Ctrl+P: quick-open palette.
+    if (e.key.toLowerCase() === 'p') {
+      e.preventDefault()
+      quickOpenQuery = ''
+      quickOpenIndex = 0
+      quickOpen = true
+    }
+  }
+
+  $: quickOpenMatches = (() => {
+    const q = quickOpenQuery.trim().toLowerCase()
+    const pool = files.filter((f) => !tabs.find((t) => t.path === f) || true) // include open files for fast switching
+    if (!q) return pool.slice(0, 30)
+    return pool.filter((f) => f.toLowerCase().includes(q)).slice(0, 30)
+  })()
+
+  async function quickOpenPick(rel) {
+    quickOpen = false
+    if (rel) await open(rel)
+  }
+
+  function quickOpenKey(e) {
+    if (e.key === 'ArrowDown') { e.preventDefault(); quickOpenIndex = Math.min(quickOpenIndex + 1, quickOpenMatches.length - 1) }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); quickOpenIndex = Math.max(quickOpenIndex - 1, 0) }
+    else if (e.key === 'Enter') { e.preventDefault(); quickOpenPick(quickOpenMatches[quickOpenIndex]) }
+    else if (e.key === 'Escape') { quickOpen = false }
   }
 
   let unsubFs = () => {}
@@ -414,6 +501,31 @@
 
 <svelte:window on:keydown={onWindowKey} />
 
+<ContextMenu menu={ctx} on:close={() => (ctx = null)} />
+
+{#if quickOpen}
+  <div class="qopen-backdrop" on:click={() => (quickOpen = false)} on:keydown={() => {}} role="presentation">
+    <div class="qopen" on:click|stopPropagation on:keydown|stopPropagation role="presentation">
+      <input
+        class="qopen-input mono"
+        placeholder="Go to file… (↑↓ to navigate, Enter to open, Esc to close)"
+        autofocus
+        bind:value={quickOpenQuery}
+        on:input={() => (quickOpenIndex = 0)}
+        on:keydown={quickOpenKey} />
+      <div class="qopen-list">
+        {#each quickOpenMatches as f, i}
+          <button class="qopen-item" class:on={i === quickOpenIndex} on:click={() => quickOpenPick(f)} on:mouseover={() => (quickOpenIndex = i)} on:focus={() => (quickOpenIndex = i)}>
+            <span class="mono grow">{f}</span>
+            {#if tabs.find((t) => t.path === f)}<span class="sb-item">open</span>{/if}
+          </button>
+        {/each}
+        {#if quickOpenMatches.length === 0}<div class="qopen-empty">No files match.</div>{/if}
+      </div>
+    </div>
+  </div>
+{/if}
+
 <div class="studio" style="grid-template-columns: {gridCols}">
   {#if !treeOpen}
     <button class="rail" title="Show files" on:click={() => (treeOpen = true)}>▸<span class="rail-label">Files</span></button>
@@ -437,10 +549,12 @@
       </div>
     {/if}
     {#each files as f}
-      <div class="tree-row">
-        <button class="tree-item grow" class:active={f === active} on:click={() => open(f)} title={f}>{f}</button>
-        <button class="btn sm" title="Rename" on:click={() => renameFile(f)}>✎</button>
-      </div>
+      <button
+        class="tree-item"
+        class:active={f === active}
+        on:click={() => open(f)}
+        on:contextmenu={(ev) => fileMenu(ev, f)}
+        title={`${f} — right-click for options`}>{f}</button>
     {/each}
     {#if files.length === 0}<div class="card-sub" style="padding:8px">No editable files yet — create one.</div>{/if}
   </aside>
@@ -448,13 +562,22 @@
 
   <section class="editor-col">
     {#if error}<div class="banner">{error}</div>{/if}
-    <div class="tabbar">
-      {#each tabs as t}
-        <div class="tab" class:active={t.path === active}>
-          <button class="tab-name" on:click={() => (active = t.path)}>{t.path.split('/').pop()}{t.dirty ? ' •' : ''}</button>
-          <button class="tab-x" on:click={() => close(t.path)}>×</button>
-        </div>
-      {/each}
+    <div class="tabrow">
+      <div class="tabbar grow">
+        {#each tabs as t}
+          <div class="tab" class:active={t.path === active}
+               on:auxclick={(e) => { if (e.button === 1) { e.preventDefault(); close(t.path) } }}
+               role="presentation">
+            <button class="tab-name" on:click={() => (active = t.path)} title={t.path}>{t.path.split('/').pop()}{t.dirty ? ' •' : ''}</button>
+            <button class="tab-x" title="Close (Ctrl+W) — middle-click also closes" on:click={() => close(t.path)}>×</button>
+          </div>
+        {/each}
+      </div>
+      {#if tabs.length > 0}
+        <button class="tb-btn" title="Save all dirty tabs (Ctrl+Shift+S)" on:click={saveAll} disabled={dirtyCount === 0}>💾 Save all{dirtyCount > 0 ? ` (${dirtyCount})` : ''}</button>
+        <button class="tb-btn" title="Close others" on:click={() => active && closeOthers(active)} disabled={tabs.length < 2}>↹</button>
+        <button class="tb-btn" title="Close all" on:click={closeAll}>✕</button>
+      {/if}
     </div>
     {#if activeTab}
       <div class="toolbar">
@@ -481,6 +604,7 @@
               value={t.content}
               lang={lang(t.path)}
               on:change={(e) => onEdit(t, e.detail)}
+              on:cursor={(e) => { if (t.path === active) cursorInfo = e.detail }}
               on:askctx={onAskCtx} />
           </div>
         {/each}
@@ -491,6 +615,16 @@
     </div>
     {#if tabs.length === 0}
       <div class="empty" style="margin-top:40px">Open a file from the tree — the agent's edits appear here live.</div>
+    {:else if activeTab}
+      <div class="statusbar">
+        <span class="sb-item mono" title={activeTab.path}>{activeTab.path}</span>
+        <span class="sb-sep"></span>
+        <span class="sb-item">{langLabel(activeTab.path)}</span>
+        <span class="sb-sep"></span>
+        <span class="sb-item">Ln {cursorInfo.line}, Col {cursorInfo.col}{cursorInfo.selLen ? ` (${cursorInfo.selLen} sel)` : ''}</span>
+        <span class="grow"></span>
+        {#if activeTab.dirty}<span class="sb-item warn">● Modified</span>{:else}<span class="sb-item ok">✓ Saved</span>{/if}
+      </div>
     {/if}
   </section>
 
@@ -624,9 +758,57 @@
   .tree-item:hover { background: var(--bg-raised, rgba(255,255,255,0.06)); }
   .tree-item.active { background: var(--bg-raised, rgba(255,255,255,0.1)); }
   .editor-col { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
-  .tabbar { display: flex; gap: 4px; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; min-width: 0; margin-bottom: 6px; }
+  .tabrow { display: flex; align-items: stretch; gap: 4px; margin-bottom: 6px; min-width: 0; }
+  .tabrow .tb-btn { flex: 0 0 auto; }
+  .tabbar { display: flex; gap: 4px; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; min-width: 0; }
   .tabbar .tab { flex: 0 0 auto; max-width: 220px; }
   .tabbar .tab .tab-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
+  .statusbar {
+    display: flex; gap: 10px; align-items: center;
+    border-top: 1px solid var(--border);
+    background: var(--bg-panel);
+    color: var(--text-dim);
+    font-size: 11px;
+    padding: 4px 10px;
+    flex: 0 0 auto;
+  }
+  .statusbar .sb-item { display: inline-flex; gap: 4px; align-items: center; }
+  .statusbar .sb-item.warn { color: var(--warn, #d4a72c); }
+  .statusbar .sb-item.ok   { color: var(--ok, #4ec9b0); }
+  .statusbar .sb-sep { width: 1px; height: 12px; background: var(--border); }
+  .qopen-backdrop {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.45);
+    display: flex; justify-content: center; align-items: flex-start;
+    padding-top: 10vh;
+    z-index: 9999;
+  }
+  .qopen {
+    width: min(620px, 90vw);
+    background: var(--bg-raised, var(--bg-panel));
+    border: 1px solid var(--border-bright, var(--border));
+    border-radius: 10px;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.4);
+    overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  .qopen-input {
+    border: none; outline: none;
+    background: transparent; color: var(--text);
+    padding: 12px 14px;
+    font-size: 13px;
+    border-bottom: 1px solid var(--border);
+  }
+  .qopen-list { max-height: 360px; overflow-y: auto; }
+  .qopen-item {
+    display: flex; gap: 8px; align-items: center;
+    width: 100%;
+    background: none; border: none; color: var(--text);
+    padding: 6px 12px; text-align: left;
+    cursor: pointer; font-size: 12px;
+  }
+  .qopen-item.on, .qopen-item:hover { background: var(--bg-panel); }
+  .qopen-empty { padding: 16px 14px; color: var(--text-dim); font-size: 12px; }
   .tab {
     display: flex;
     align-items: center;

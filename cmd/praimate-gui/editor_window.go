@@ -166,6 +166,29 @@ func (a *App) EditorCreateFile(rel string) (string, error) {
 	return filepath.ToSlash(r), nil
 }
 
+// EditorDeleteFile deletes a file inside the studio folder. The path
+// is safety-checked; refusing to descend through a symlink avoids
+// turning these bindings into a generic filesystem primitive.
+func (a *App) EditorDeleteFile(rel string) error {
+	rel = strings.TrimSpace(rel)
+	if rel == "" {
+		return errors.New("path required")
+	}
+	abs, err := editorPath(rel)
+	if err != nil {
+		return err
+	}
+	fi, err := os.Lstat(abs)
+	if err != nil {
+		return fmt.Errorf("%s: %w", rel, err)
+	}
+	if fi.IsDir() {
+		return fmt.Errorf("%s is a directory — refusing to recursively delete from here", rel)
+	}
+	a.editorMarkOwnWrite(abs)
+	return os.Remove(abs)
+}
+
 // EditorRenameFile renames/moves a file inside the studio folder.
 // src and dst are slash-relative paths; both are path-safety checked.
 // Returns the normalized destination rel.

@@ -167,6 +167,10 @@ html, body {
   display: none;
 }
 
+.sessions-slot {
+  padding: 4px 6px 0;
+  margin-top: 4px;
+}
 .sidebar-footer {
   display: flex;
   align-items: center;

@@ -189,6 +189,15 @@
             if (u.docChanged && !applyingExternal) {
               dispatch('change', u.state.doc.toString())
             }
+            if (u.selectionSet || u.docChanged) {
+              const sel = u.state.selection.main
+              const head = u.state.doc.lineAt(sel.head)
+              dispatch('cursor', {
+                line: head.number,
+                col: sel.head - head.from + 1,
+                selLen: Math.abs(sel.to - sel.from),
+              })
+            }
           }),
           // Right-click → "ask the agent about this text". Uses the
           // selection, or the current line when nothing is selected.
@@ -256,6 +265,8 @@
   export function getValue() {
     return view ? view.state.doc.toString() : value
   }
+
+  export function focus() { view?.focus() }
 
   // openAskMenu shows makeDOM()'s element as a CM tooltip anchored at
   // the end of the current selection (or cursor line). closeAskMenu

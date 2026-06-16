@@ -76,6 +76,19 @@ func (a *App) SendChatStream(chatID, message string, attachments []string) (*cor
 	return c.ContinueChatStream(ctx, chatID, message, chat.WorkspacePath, systemPrompt, attachments, onEvent)
 }
 
+// ActiveChatIDs returns the IDs of every chat that currently has an
+// in-flight streamed turn (something the user can switch back to without
+// losing it). Used by the Sessions panel's "live" indicator.
+func (a *App) ActiveChatIDs() []string {
+	a.chatCancelMu.Lock()
+	defer a.chatCancelMu.Unlock()
+	out := make([]string, 0, len(a.chatCancels))
+	for id := range a.chatCancels {
+		out = append(out, id)
+	}
+	return out
+}
+
 // CancelChatTurn interrupts the chat's in-flight streamed turn. No-op
 // when nothing is running. The interrupted turn persists whatever text
 // already streamed (flagged in the message meta).

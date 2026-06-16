@@ -453,17 +453,74 @@ create_shortcuts() {
         cp -f "$icon_src" "$HOME/.local/share/icons/praimate.png" 2>/dev/null \
           && icon_line="Icon=$HOME/.local/share/icons/praimate.png"
       fi
-      # Exec wraps the binary in `bash -lc` so the desktop session's
-      # minimal PATH is replaced by the user's login PATH — ~/.profile /
-      # ~/.bashrc / ~/.zshrc additions for bun, pnpm, cargo, deno, etc.
-      # become visible to exec.LookPath without the user having to log
-      # out + back in after a CLI install.
+
+      # Write a launcher script next to each binary that ALWAYS reproduces
+      # the user's shell PATH before exec'ing. The desktop session's PATH
+      # is minimal; embedding this work in a wrapper (instead of in the
+      # .desktop Exec line) means:
+      #   - it survives users who edit .desktop later by hand
+      #   - the same script is reusable from a terminal / from dock pins
+      #   - rc-file sourcing errors don't print into .desktop's debug log
+      # We source the user's rc files in a fixed order — most specific
+      # last so PATH additions there win — then walk a fixed list of
+      # well-known per-user CLI install dirs and prepend any that the rc
+      # files missed.
+      cat > "$DEST/praimate-launch" <<'WRAP'
+#!/usr/bin/env bash
+# PrAImate launch wrapper — sources the user's rc files so binaries
+# installed via shell installers (bun, pnpm, cargo, deno, …) are on
+# PATH even when launched from a desktop / dock shortcut.
+set -u
+__praimate_source() { [ -f "$1" ] && . "$1" 2>/dev/null || true; }
+# Order: most-general first, most-specific last (last source wins on PATH= overrides).
+__praimate_source "/etc/profile"
+__praimate_source "$HOME/.profile"
+__praimate_source "$HOME/.bash_profile"
+__praimate_source "$HOME/.bashrc"
+__praimate_source "$HOME/.zshenv"
+__praimate_source "$HOME/.zshrc"
+# Belt-and-braces: prepend well-known CLI dirs the rc files might have
+# missed (e.g. user has no rc files at all on a fresh Parrot/Debian VM).
+for __d in \
+    "$HOME/.local/bin" \
+    "$HOME/.bun/bin" \
+    "$HOME/.deno/bin" \
+    "$HOME/.cargo/bin" \
+    "$HOME/.rye/shims" \
+    "$HOME/.volta/bin" \
+    "$HOME/.foundry/bin" \
+    "$HOME/go/bin" \
+    "$HOME/.npm-global/bin" \
+    "$HOME/.local/share/pnpm" \
+    "$HOME/.config/praimate/bin" \
+    "$HOME/.config/clade/bin" \
+    "/opt/homebrew/bin" \
+    "/opt/homebrew/sbin" \
+    "/usr/local/bin" \
+; do
+  [ -d "$__d" ] || continue
+  case ":$PATH:" in *":$__d:"*) ;; *) PATH="$__d:$PATH" ;; esac
+done
+export PATH
+__praimate_self="$(readlink -f "$0" 2>/dev/null || echo "$0")"
+__praimate_dir="$(dirname "$__praimate_self")"
+__praimate_bin="${__praimate_self##*/}"
+__praimate_bin="${__praimate_bin%-launch}"
+exec "$__praimate_dir/$__praimate_bin" "$@"
+WRAP
+      chmod 755 "$DEST/praimate-launch"
+
+      # praimate-gui-launch is the same script, exec'd via a symlink so
+      # the wrapper resolves its target binary from its own basename
+      # (strip the "-launch" suffix). One script, both binaries.
+      ln -sf praimate-launch "$DEST/praimate-gui-launch"
+
       cat > "$apps/praimate.desktop" <<DESK
 [Desktop Entry]
 Type=Application
 Name=PrAImate
 Comment=Multi-CLI agent launcher (terminal UI)
-Exec=bash -lc 'exec "$DEST/praimate" "\$@"' --
+Exec=$DEST/praimate-launch %F
 Terminal=true
 $icon_line
 Categories=Development;Utility;
@@ -474,7 +531,7 @@ DESK
 Type=Application
 Name=PrAImate GUI
 Comment=Multi-CLI agent launcher (desktop app)
-Exec=bash -lc 'exec "$DEST/praimate-gui" "\$@"' --
+Exec=$DEST/praimate-gui-launch %F
 Terminal=false
 $icon_line
 Categories=Development;Utility;

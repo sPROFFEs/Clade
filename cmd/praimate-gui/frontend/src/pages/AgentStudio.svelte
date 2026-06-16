@@ -12,6 +12,7 @@
   import { api, onChatStream, onApproval } from '../lib/api.js'
   import { agentStudio } from '../lib/stores.js'
   import CodeEditor from '../lib/CodeEditor.svelte'
+  import ContextMenu from '../lib/ContextMenu.svelte'
   import { langOf as fileLang } from '../lib/langOf.js'
 
   const DEF = '__definition__'
@@ -88,6 +89,24 @@
   let leftOpen = true
   let chatOpen = true
   $: gridCols = `${leftOpen ? '300px' : '34px'} 1fr ${chatOpen ? '360px' : '34px'}`
+  let cursorInfo = { line: 1, col: 1, selLen: 0 }
+  let ctx = null
+
+  function fileMenu(ev, n) {
+    ev.preventDefault()
+    if (n.isIndex) return // RAG-index files are managed by graphify; don't expose dangerous ops
+    ctx = {
+      x: ev.clientX,
+      y: ev.clientY,
+      items: [
+        { label: 'Open',   action: () => openFile(n.rel) },
+        { label: 'Rename…', action: () => renameFile(n.rel) },
+        { label: 'Delete',  danger: true, action: () => rmFile(n.rel) },
+      ],
+    }
+  }
+  $: dirtyCount = tabs.filter((t) => t.dirty).length
+  const langLabel = (p) => fileLang(p).toUpperCase()
 
   const langOf = fileLang
   async function revealKnowledgeFolder() {
@@ -157,6 +176,39 @@
     if (key === DEF) return // definition tab stays
     tabs = tabs.filter((t) => t.key !== key)
     if (active === key) active = tabs[tabs.length - 1]?.key || DEF
+  }
+  function closeOtherTabs() {
+    tabs = tabs.filter((t) => t.isDef || t.key === active)
+  }
+  function closeAllTabs() {
+    tabs = tabs.filter((t) => t.isDef)
+    active = DEF
+  }
+  function onWindowKey(e) {
+    const ctrl = e.ctrlKey || e.metaKey
+    if (!ctrl) return
+    const k = e.key.toLowerCase()
+    if (k === 's') { e.preventDefault(); if (e.shiftKey) saveAllTabs(); else saveActive() }
+    else if (k === 'w' && active && active !== DEF) { e.preventDefault(); closeTab(active) }
+  }
+
+  async function saveAllTabs() {
+    for (const t of tabs) {
+      if (!t.dirty) continue
+      const body = t.ref?.getValue() ?? t.content
+      try {
+        if (t.isDef) {
+          const saved = await api.saveAgentYAML(body)
+          agentId = saved.id
+          agentName = saved.name
+        } else {
+          await api.agentWriteKnowledgeFile(agentId, t.key, body)
+        }
+        t.dirty = false
+      } catch (e) { error = String(e) }
+    }
+    tabs = tabs
+    await refreshTree(); await loadKnowledge()
   }
   function onEdit(tab, content) {
     tab.content = content
@@ -377,6 +429,10 @@
   onDestroy(() => { unsubStream(); unsubApproval(); unsubInstall(); if (ragTimer) clearInterval(ragTimer) })
 </script>
 
+<svelte:window on:keydown={onWindowKey} />
+
+<ContextMenu menu={ctx} on:close={() => (ctx = null)} />
+
 {#if needName}
   <div class="name-overlay">
     <div class="name-card">
@@ -418,9 +474,12 @@
             {#if n.isDir}
               <span class="tree-item dir" class:idx={n.isIndex}>{n.isIndex ? '🗂' : '📁'} {n.name}{#if n.isIndex} <span class="tag idx">RAG index</span>{/if}</span>
             {:else}
-              <button class="tree-item file grow" class:on={active === n.rel} on:click={() => openFile(n.rel)}>{n.isIndex ? '◦' : '📄'} {n.name}</button>
-              {#if !n.isIndex}<button class="xbtn" title="Rename" on:click={() => renameFile(n.rel)}>✎</button>{/if}
-              {#if !n.isIndex}<button class="xbtn danger" title="Delete" on:click={() => rmFile(n.rel)}>×</button>{/if}
+              <button
+                class="tree-item file grow"
+                class:on={active === n.rel}
+                on:click={() => openFile(n.rel)}
+                on:contextmenu={(ev) => fileMenu(ev, n)}
+                title={n.isIndex ? n.rel : `${n.rel} — right-click for options`}>{n.isIndex ? '◦' : '📄'} {n.name}</button>
             {/if}
           </div>
         {/each}
@@ -488,12 +547,17 @@
       <button class="xbtn" title="Back to Agents" on:click={close}>← Agents</button>
       <div class="tabbar grow">
         {#each tabs as t}
-          <div class="tab" class:active={t.key === active}>
-            <button class="tab-name" on:click={() => (active = t.key)}>{t.label}{t.dirty ? ' •' : ''}</button>
-            {#if !t.isDef}<button class="tab-x" on:click={() => closeTab(t.key)}>×</button>{/if}
+          <div class="tab" class:active={t.key === active}
+               on:auxclick={(e) => { if (e.button === 1 && !t.isDef) { e.preventDefault(); closeTab(t.key) } }}
+               role="presentation">
+            <button class="tab-name" on:click={() => (active = t.key)} title={t.key}>{t.label}{t.dirty ? ' •' : ''}</button>
+            {#if !t.isDef}<button class="tab-x" title="Close (Ctrl+W) — middle-click also closes" on:click={() => closeTab(t.key)}>×</button>{/if}
           </div>
         {/each}
       </div>
+      <button class="xbtn" title="Save all (Ctrl+Shift+S)" on:click={saveAllTabs} disabled={dirtyCount === 0}>💾·{dirtyCount}</button>
+      <button class="xbtn" title="Close other tabs" on:click={closeOtherTabs} disabled={tabs.length < 2}>↹</button>
+      <button class="xbtn" title="Close all tabs" on:click={closeAllTabs} disabled={tabs.length < 2}>✕</button>
       <button class="btn primary" on:click={saveActive}>{activeTab?.isDef ? 'Save agent' : 'Save file'}</button>
     </div>
     {#if error}<div class="banner">{error}</div>{/if}
@@ -501,10 +565,24 @@
     <div class="editor-stack">
       {#each tabs as t (t.key)}
         <div class="editor-host" style:display={t.key === active ? 'flex' : 'none'}>
-          <CodeEditor bind:this={t.ref} value={t.content} lang={t.lang} on:change={(e) => onEdit(t, e.detail)} on:askctx={onAskCtx} />
+          <CodeEditor bind:this={t.ref} value={t.content} lang={t.lang}
+            on:change={(e) => onEdit(t, e.detail)}
+            on:cursor={(e) => { if (t.key === active) cursorInfo = e.detail }}
+            on:askctx={onAskCtx} />
         </div>
       {/each}
     </div>
+    {#if activeTab}
+      <div class="statusbar">
+        <span class="sb-item mono" title={activeTab.key}>{activeTab.key}</span>
+        <span class="sb-sep"></span>
+        <span class="sb-item">{langLabel(activeTab.key)}</span>
+        <span class="sb-sep"></span>
+        <span class="sb-item">Ln {cursorInfo.line}, Col {cursorInfo.col}{cursorInfo.selLen ? ` (${cursorInfo.selLen} sel)` : ''}</span>
+        <span class="grow"></span>
+        {#if activeTab.dirty}<span class="sb-item warn">● Modified</span>{:else}<span class="sb-item ok">✓ Saved</span>{/if}
+      </div>
+    {/if}
   </section>
 
   <!-- RIGHT -->
@@ -594,6 +672,19 @@
   .tabbar { display: flex; gap: 4px; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; min-width: 0; }
   .tabbar .tab { flex: 0 0 auto; max-width: 220px; }
   .tabbar .tab .tab-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
+  .statusbar {
+    display: flex; gap: 10px; align-items: center;
+    border-top: 1px solid var(--border);
+    background: var(--bg-panel);
+    color: var(--text-dim);
+    font-size: 11px;
+    padding: 4px 10px;
+    flex: 0 0 auto;
+  }
+  .statusbar .sb-item { display: inline-flex; gap: 4px; align-items: center; }
+  .statusbar .sb-item.warn { color: var(--warn, #d4a72c); }
+  .statusbar .sb-item.ok   { color: var(--ok, #4ec9b0); }
+  .statusbar .sb-sep { width: 1px; height: 12px; background: var(--border); }
   .tab { display: flex; align-items: center; border: 1px solid var(--border); border-radius: 8px 8px 0 0; background: var(--bg-panel); font-size: 12px; }
   .tab.active { background: var(--bg); }
   .tab-name { background: none; border: none; color: var(--text); padding: 5px 4px 5px 10px; cursor: pointer; font-size: 12px; }

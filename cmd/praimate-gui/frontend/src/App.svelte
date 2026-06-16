@@ -16,6 +16,7 @@
   import Editor from './pages/Editor.svelte'
   import AgentStudio from './pages/AgentStudio.svelte'
   import Setup from './pages/Setup.svelte'
+  import SessionPanel from './lib/SessionPanel.svelte'
 
   // Lucide-style outline icon paths (24x24 viewBox, stroke-based).
   const icons = {
@@ -147,6 +148,9 @@
       </button>
     {/each}
     <div style="flex:1"></div>
+    {#if !collapsed}
+      <div class="sessions-slot"><SessionPanel /></div>
+    {/if}
     <div class="mascot" style="background-image:url({mascot})" aria-hidden="true"></div>
     <div class="sidebar-footer">
       {#if health}
