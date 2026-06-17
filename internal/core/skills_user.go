@@ -186,11 +186,19 @@ func DeleteUserSkill(id string) error {
 	return saveUserSkills(out)
 }
 
-// ImportSkillFromURL fetches a skill body from a URL — either a single
-// markdown file (text/markdown content) or a git URL / ZIP archive of
-// markdown files (concatenated). Returns a Skill seeded with the
-// fetched body and metadata derived from the URL; the caller fills in
-// CLIs + (optional) name overrides before calling AddUserSkill.
+// ImportSkillFromURL fetches a skill body from a URL. Accepted inputs:
+//
+//   - A GitHub repo URL — `https://github.com/<user>/<repo>` or
+//     `…/tree/<branch>` or `…/tree/<branch>/<subpath>`. Downloads the
+//     branch's zip archive (no `git` binary required), extracts all
+//     markdown files (optionally filtered to the subpath), concatenates
+//     them. Tries `main` → `master` for bare repo URLs.
+//   - A GitHub blob URL — `…/blob/<branch>/<path>` — rewritten to
+//     `raw.githubusercontent.com` and treated as a single file.
+//   - A GitHub gist URL — `https://gist.github.com/<user>/<id>`.
+//   - A direct `.md` / `.markdown` / `.txt` URL.
+//   - A direct `.zip` URL.
+//   - Any URL that HEAD-probes as markdown / plain-text content.
 //
 // The user-supplied URL is preserved on the Skill.Source so the GUI
 // can show provenance and offer a "Re-fetch" action.
@@ -200,8 +208,50 @@ func ImportSkillFromURL(ctx context.Context, rawURL string) (*Skill, error) {
 		return nil, errors.New("URL is empty")
 	}
 
-	// Single markdown file (Github raw, gist raw, plain http) — easiest
-	// path. Detect by extension OR by HEAD content-type.
+	// GitHub repo / tree / blob / gist handling — rewrites to one of
+	// {single-file fetch, zip-archive fetch + optional subpath filter}.
+	if rewritten, subpath, isZip, ok := normaliseGitHubURL(rawURL); ok {
+		if isZip {
+			zipBytes, err := fetchHTTPBody(ctx, rewritten)
+			if err != nil {
+				// `main` 404 → retry on `master`. GitHub returns 404 for
+				// branches that don't exist; rewritten always carries one
+				// or the other.
+				if rewritten2, ok2 := flipDefaultBranch(rewritten); ok2 {
+					if z2, err2 := fetchHTTPBody(ctx, rewritten2); err2 == nil {
+						zipBytes, err, rewritten = z2, nil, rewritten2
+					}
+				}
+				if err != nil {
+					return nil, fmt.Errorf("fetch %s: %w", rewritten, err)
+				}
+			}
+			body, err := concatMarkdownFromZipFiltered(zipBytes, subpath)
+			if err != nil {
+				return nil, err
+			}
+			return &Skill{
+				ID:          idSlug(deriveSkillNameFromURL(rawURL)),
+				Name:        deriveSkillNameFromURL(rawURL),
+				Description: "Imported from " + rawURL,
+				Body:        body,
+				Source:      rawURL,
+			}, nil
+		}
+		body, err := fetchHTTPBody(ctx, rewritten)
+		if err != nil {
+			return nil, fmt.Errorf("fetch %s: %w", rewritten, err)
+		}
+		return &Skill{
+			ID:          idSlug(deriveSkillNameFromURL(rawURL)),
+			Name:        deriveSkillNameFromURL(rawURL),
+			Description: "Imported from " + rawURL,
+			Body:        string(body),
+			Source:      rawURL,
+		}, nil
+	}
+
+	// Direct file URLs — detect by extension.
 	lower := strings.ToLower(rawURL)
 	if strings.HasSuffix(lower, ".md") || strings.HasSuffix(lower, ".markdown") || strings.HasSuffix(lower, ".txt") {
 		body, err := fetchHTTPBody(ctx, rawURL)
@@ -217,7 +267,6 @@ func ImportSkillFromURL(ctx context.Context, rawURL string) (*Skill, error) {
 		}, nil
 	}
 
-	// ZIP — download, extract markdown files, concat.
 	if strings.HasSuffix(lower, ".zip") {
 		zipBytes, err := fetchHTTPBody(ctx, rawURL)
 		if err != nil {
@@ -236,10 +285,8 @@ func ImportSkillFromURL(ctx context.Context, rawURL string) (*Skill, error) {
 		}, nil
 	}
 
-	// HEAD probe — if the server returns markdown content-type, treat as
-	// raw file. Otherwise refuse and tell the user to point at a .md or
-	// .zip URL (avoid blindly cloning an arbitrary git repo here — we'd
-	// have to figure out which file is the skill).
+	// HEAD probe — covers raw.githubusercontent.com plain markdown
+	// that doesn't end in .md, custom gist mounts, etc.
 	ct, err := probeContentType(ctx, rawURL)
 	if err == nil && (strings.Contains(ct, "markdown") || strings.HasPrefix(ct, "text/plain")) {
 		body, err := fetchHTTPBody(ctx, rawURL)
@@ -255,7 +302,164 @@ func ImportSkillFromURL(ctx context.Context, rawURL string) (*Skill, error) {
 		}, nil
 	}
 
-	return nil, errors.New("URL must point at a .md / .markdown / .txt file OR a .zip archive of markdown files")
+	return nil, errors.New("URL must point at a GitHub repo / blob / gist, a .md / .markdown / .txt file, or a .zip archive of markdown files")
+}
+
+// normaliseGitHubURL recognises a user-supplied GitHub URL and rewrites
+// it to a fetch-friendly form. Returns (rewritten URL, optional
+// subpath to keep when extracting a zip, isZip, ok).
+//
+// Examples:
+//
+//	https://github.com/u/r                       → archive of `main` (zip)
+//	https://github.com/u/r/tree/dev              → archive of `dev` (zip)
+//	https://github.com/u/r/tree/main/skills/foo  → archive of `main`, keep skills/foo/
+//	https://github.com/u/r/blob/main/x.md        → raw.githubusercontent.com (single file)
+//	https://gist.github.com/u/id                 → gist raw (single file)
+func normaliseGitHubURL(raw string) (string, string, bool, bool) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", "", false, false
+	}
+	host := strings.ToLower(u.Host)
+
+	if host == "gist.github.com" {
+		// /<user>/<id> or /<user>/<id>/...
+		parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+		if len(parts) >= 2 {
+			user, id := parts[0], parts[1]
+			rewritten := "https://gist.githubusercontent.com/" + user + "/" + id + "/raw/"
+			return rewritten, "", false, true
+		}
+		return "", "", false, false
+	}
+
+	if host != "github.com" && host != "www.github.com" {
+		return "", "", false, false
+	}
+
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(parts) < 2 {
+		return "", "", false, false
+	}
+	user, repo := parts[0], strings.TrimSuffix(parts[1], ".git")
+	if user == "" || repo == "" {
+		return "", "", false, false
+	}
+
+	// Bare repo URL — default to `main`, archive zip.
+	if len(parts) == 2 {
+		return "https://github.com/" + user + "/" + repo + "/archive/refs/heads/main.zip", "", true, true
+	}
+
+	switch parts[2] {
+	case "tree":
+		// /tree/<branch>[/subpath...]
+		if len(parts) < 4 {
+			return "https://github.com/" + user + "/" + repo + "/archive/refs/heads/main.zip", "", true, true
+		}
+		branch := parts[3]
+		subpath := ""
+		if len(parts) > 4 {
+			subpath = strings.Join(parts[4:], "/")
+		}
+		return "https://github.com/" + user + "/" + repo + "/archive/refs/heads/" + branch + ".zip", subpath, true, true
+	case "blob":
+		// /blob/<branch>/<path> → raw URL, single file.
+		if len(parts) < 5 {
+			return "", "", false, false
+		}
+		branch := parts[3]
+		path := strings.Join(parts[4:], "/")
+		return "https://raw.githubusercontent.com/" + user + "/" + repo + "/" + branch + "/" + path, "", false, true
+	case "raw":
+		// /raw/<branch>/<path> — already a raw-ish URL on github.com; rewrite to canonical raw host.
+		if len(parts) < 5 {
+			return "", "", false, false
+		}
+		branch := parts[3]
+		path := strings.Join(parts[4:], "/")
+		return "https://raw.githubusercontent.com/" + user + "/" + repo + "/" + branch + "/" + path, "", false, true
+	}
+	return "", "", false, false
+}
+
+// flipDefaultBranch swaps `main` ↔ `master` in an archive URL so the
+// caller can retry when the first try 404s. Returns ok=false when the
+// URL doesn't fit the GitHub archive pattern.
+func flipDefaultBranch(rewritten string) (string, bool) {
+	if strings.Contains(rewritten, "/archive/refs/heads/main.zip") {
+		return strings.Replace(rewritten, "/archive/refs/heads/main.zip", "/archive/refs/heads/master.zip", 1), true
+	}
+	if strings.Contains(rewritten, "/archive/refs/heads/master.zip") {
+		return strings.Replace(rewritten, "/archive/refs/heads/master.zip", "/archive/refs/heads/main.zip", 1), true
+	}
+	return rewritten, false
+}
+
+// concatMarkdownFromZipFiltered is concatMarkdownFromZipBytes with an
+// optional subpath filter — only zip entries whose path falls under
+// `<archive-root>/<subpath>/…` are kept. The archive-root is the
+// single top-level folder GitHub puts everything under
+// (`<repo>-<branch>/…`), so we strip the first path segment from each
+// entry before comparing.
+func concatMarkdownFromZipFiltered(zipBytes []byte, subpath string) (string, error) {
+	subpath = strings.Trim(subpath, "/")
+	if subpath == "" {
+		return concatMarkdownFromZipBytes(zipBytes)
+	}
+	const maxFile = 256 << 10
+	zr, err := zip.NewReader(bytesReaderAt(zipBytes), int64(len(zipBytes)))
+	if err != nil {
+		return "", fmt.Errorf("invalid zip: %w", err)
+	}
+	var files []*zip.File
+	for _, f := range zr.File {
+		if f.FileInfo().IsDir() {
+			continue
+		}
+		name := f.Name
+		lower := strings.ToLower(name)
+		if strings.HasPrefix(filepath.Base(lower), ".") || strings.Contains(lower, "__macosx") {
+			continue
+		}
+		if !(strings.HasSuffix(lower, ".md") || strings.HasSuffix(lower, ".markdown") || strings.HasSuffix(lower, ".txt")) {
+			continue
+		}
+		// Strip the archive root (`<repo>-<branch>/`).
+		stripped := name
+		if i := strings.Index(name, "/"); i >= 0 {
+			stripped = name[i+1:]
+		}
+		if !strings.HasPrefix(stripped, subpath+"/") && stripped != subpath {
+			continue
+		}
+		files = append(files, f)
+	}
+	if len(files) == 0 {
+		return "", fmt.Errorf("zip contains no markdown files under %q", subpath)
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].Name < files[j].Name })
+	var b strings.Builder
+	for _, f := range files {
+		rc, err := f.Open()
+		if err != nil {
+			return "", fmt.Errorf("open %s: %w", f.Name, err)
+		}
+		content, err := io.ReadAll(io.LimitReader(rc, int64(maxFile)))
+		rc.Close()
+		if err != nil {
+			return "", fmt.Errorf("read %s: %w", f.Name, err)
+		}
+		if b.Len() > 0 {
+			b.WriteString("\n\n---\n\n")
+		}
+		b.WriteString("<!-- ")
+		b.WriteString(f.Name)
+		b.WriteString(" -->\n\n")
+		b.Write(content)
+	}
+	return b.String(), nil
 }
 
 // ImportSkillFromZipFile reads a local .zip and concatenates the

@@ -256,14 +256,21 @@
     </div>
 
     {#if addSource === 'url'}
-      <label class="lbl">URL (markdown file OR .zip of markdown files)</label>
+      <label class="lbl">URL — paste a GitHub repo, a file URL, or a .zip</label>
       <div class="row">
-        <input class="field grow mono" placeholder="https://raw.githubusercontent.com/user/repo/main/skill.md" bind:value={addURL} />
+        <input class="field grow mono" placeholder="https://github.com/user/repo/tree/main/skills/debugger" bind:value={addURL} />
         <button class="btn" on:click={importFromURL} disabled={importing || !addURL.trim()}>{importing ? 'Fetching…' : 'Fetch'}</button>
       </div>
-      <div class="card-sub" style="margin-top:4px">
-        Single files: <span class="mono">.md</span> / <span class="mono">.markdown</span> / <span class="mono">.txt</span>.
-        Archives: <span class="mono">.zip</span> — every markdown file inside gets concatenated (sorted by path).
+      <div class="card-sub" style="margin-top:6px">
+        <strong>GitHub URLs are first-class</strong> — no `git` binary needed, we hit the archive endpoint:
+        <ul style="margin:4px 0 0 18px; padding:0; font-size:11px">
+          <li><span class="mono">github.com/user/repo</span> — whole repo (tries main, falls back to master)</li>
+          <li><span class="mono">github.com/user/repo/tree/dev</span> — a specific branch</li>
+          <li><span class="mono">github.com/user/repo/tree/main/skills/foo</span> — a subfolder only</li>
+          <li><span class="mono">github.com/user/repo/blob/main/skill.md</span> — a single file (rewritten to raw)</li>
+          <li><span class="mono">gist.github.com/user/id</span> — gist's first file</li>
+        </ul>
+        Also accepts a direct <span class="mono">.md</span> / <span class="mono">.markdown</span> / <span class="mono">.txt</span> URL, or a <span class="mono">.zip</span> of markdown files (concatenated, sorted by path).
       </div>
     {:else if addSource === 'zip'}
       <label class="lbl">Local ZIP path</label>
