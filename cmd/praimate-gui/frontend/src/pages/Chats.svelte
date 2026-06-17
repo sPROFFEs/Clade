@@ -2,6 +2,9 @@
   import { onMount, onDestroy, tick } from 'svelte'
   import { api, onChatStream, onApproval } from '../lib/api.js'
   import { activePage, openChatId, pendingTerm } from '../lib/stores.js'
+  import SkillsPicker from '../lib/SkillsPicker.svelte'
+
+  let skillsPickerOpen = false
 
   let chats = []
   let workspaceChats = []
@@ -443,6 +446,13 @@
 </script>
 
 {#if cfg}
+  <SkillsPicker
+    bind:open={skillsPickerOpen}
+    cli={cfg.cli}
+    selected={cfg.skills || []}
+    title={`Skills for "${cfg.chat.Title}"`}
+    on:change={(e) => (cfg.skills = e.detail)}
+    on:close={(e) => (cfg.skills = e.detail)} />
   <div class="card" style="border-color: var(--accent, #888)">
     <div class="card-title">Chat settings — {cfg.chat.Title}</div>
     <div class="card-sub">Same controls as the TUI's per-chat settings. Switching the CLI starts a fresh session on the next message; the history stays.</div>
@@ -480,26 +490,14 @@
     {/if}
 
     <label class="lbl" style="margin-top:10px">Skills <span class="card-sub" style="font-weight:400">— prepended to the chat's system prompt. Designed per-CLI; mixing across CLIs may produce odd output.</span></label>
-    {#if cfg.skillsCatalogue && cfg.skillsCatalogue.length > 0}
-      <div class="row" style="flex-wrap:wrap; gap:6px">
-        {#each cfg.skillsCatalogue as s}
-          {@const enabled = (cfg.skills || []).includes(s.id)}
-          {@const matchesCLI = (s.clis || []).includes(cfg.cli)}
-          <button
-            class="btn sm"
-            class:primary={enabled}
-            title={`${s.description}${matchesCLI ? '' : ' — NOT designed for ' + cfg.cli}`}
-            on:click={() => {
-              const next = enabled ? (cfg.skills || []).filter((x) => x !== s.id) : [...(cfg.skills || []), s.id]
-              cfg.skills = next
-            }}>
-            {s.name}{enabled && !matchesCLI ? ' ⚠' : ''}
-          </button>
-        {/each}
-      </div>
-    {:else}
-      <div class="card-sub">No skills in the catalogue (or still loading).</div>
-    {/if}
+    <div class="row">
+      <button class="btn" on:click={() => (skillsPickerOpen = true)}>
+        {cfg.skills?.length ? `★ ${cfg.skills.length} skill${cfg.skills.length === 1 ? '' : 's'} enabled` : '+ Choose skills…'}
+      </button>
+      {#if cfg.skills?.length}
+        <button class="btn sm" on:click={() => (cfg.skills = [])} title="Clear all skills for this chat">Clear</button>
+      {/if}
+    </div>
 
     <div class="row" style="margin-top:12px">
       <button class="btn primary" on:click={saveConfig} disabled={cfgSaving}>{cfgSaving ? 'Saving…' : 'Save'}</button>

@@ -20,6 +20,7 @@
     return html
   }
   import { api, onChatStream, onApproval } from '../lib/api.js'
+  import SkillsPicker from '../lib/SkillsPicker.svelte'
   import CodeEditor from '../lib/CodeEditor.svelte'
   import ContextMenu from '../lib/ContextMenu.svelte'
   import { langOf as fileLang } from '../lib/langOf.js'
@@ -326,6 +327,17 @@
   // --- chat pane ---------------------------------------------------------
 
   let chat = null
+  let editorSkills = []
+  let skillsPickerOpen = false
+  async function refreshEditorSkills() {
+    if (!chatId) return
+    try { editorSkills = (await api.chatSkills(chatId)) || [] } catch {}
+  }
+  async function saveEditorSkills(ids) {
+    editorSkills = ids
+    if (!chatId) return
+    try { await api.setChatSkills(chatId, ids) } catch {}
+  }
   let messages = []
   let draft = ''
   let sending = false
@@ -490,6 +502,7 @@
     await loadTree()
     await loadChat()
     try { chat = (await api.listChats())?.find((c) => c.ID === chatId) || null } catch {}
+    await refreshEditorSkills()
     // Open the first markdown file so the window isn't empty.
     const first = files.find((f) => /\.md$/i.test(f)) || files[0]
     if (first) await open(first)
@@ -632,10 +645,20 @@
   {#if !chatOpen}
     <button class="rail" title="Show agent chat" on:click={() => (chatOpen = true)}>◂<span class="rail-label">Chat</span></button>
   {:else}
+  <SkillsPicker
+    bind:open={skillsPickerOpen}
+    cli={chat?.CLIAgent || 'claude'}
+    selected={editorSkills}
+    title={`Skills for "${chat?.Title || 'editor chat'}"`}
+    on:close={(e) => saveEditorSkills(e.detail)}
+    on:change={(e) => (editorSkills = e.detail)} />
   <aside class="chatpane">
     <div class="chat-head">
       <strong class="grow">{chat?.Title || 'Agent chat'}</strong>
       <span class="pill">{chat?.CLIAgent || ''}</span>
+      <button class="btn sm" title={editorSkills.length ? `${editorSkills.length} skill${editorSkills.length === 1 ? '' : 's'} enabled` : 'Configure skills'} on:click={() => (skillsPickerOpen = true)}>
+        {editorSkills.length ? `★ ${editorSkills.length}` : '★'}
+      </button>
       <button class="btn sm" title="Hide chat" on:click={() => (chatOpen = false)}>▸</button>
     </div>
     <div class="thread" bind:this={threadEl}>

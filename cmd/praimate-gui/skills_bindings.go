@@ -12,12 +12,72 @@ import (
 	"os"
 	"path/filepath"
 
+	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
+
 	"github.com/sPROFFEs/PrAImate/internal/core"
 )
 
-// SkillsList returns the built-in catalogue.
+// SkillsList returns the combined catalogue (built-ins + user-added).
 func (a *App) SkillsList() []core.Skill {
 	return core.SkillCatalogue()
+}
+
+// SkillsUserList returns only the user-installed skills (for the
+// "your skills" section of the page).
+func (a *App) SkillsUserList() []core.Skill {
+	return core.LoadUserSkills()
+}
+
+// AddUserSkillInput is the input payload for AddUserSkill.
+type AddUserSkillInput struct {
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	CLIs        []string `json:"clis"`
+	Body        string   `json:"body"`
+	Source      string   `json:"source"`
+}
+
+// AddUserSkill inserts (or updates by id) a user skill. CLIs may be
+// empty to mark the skill universal.
+func (a *App) AddUserSkill(in AddUserSkillInput) (*core.Skill, error) {
+	return core.AddUserSkill(core.Skill{
+		ID:          in.ID,
+		Name:        in.Name,
+		Description: in.Description,
+		CLIs:        in.CLIs,
+		Body:        in.Body,
+		Source:      in.Source,
+	})
+}
+
+// DeleteUserSkill removes a user skill by id. No-op for built-in ids.
+func (a *App) DeleteUserSkill(id string) error {
+	return core.DeleteUserSkill(id)
+}
+
+// ImportSkillFromURL fetches a skill body from a URL (markdown file
+// or ZIP of markdown files). The user fills in CLIs + name before
+// calling AddUserSkill.
+func (a *App) ImportSkillFromURL(rawURL string) (*core.Skill, error) {
+	return core.ImportSkillFromURL(a.ctx, rawURL)
+}
+
+// ImportSkillFromZipFile reads a local ZIP and returns a seeded skill
+// the user can finalise via AddUserSkill.
+func (a *App) ImportSkillFromZipFile(path string) (*core.Skill, error) {
+	return core.ImportSkillFromZipFile(path)
+}
+
+// PickSkillZipFile opens a native file picker scoped to .zip files.
+// Returns "" if the user cancels.
+func (a *App) PickSkillZipFile() (string, error) {
+	return wruntime.OpenFileDialog(a.ctx, wruntime.OpenDialogOptions{
+		Title: "Choose a skill ZIP",
+		Filters: []wruntime.FileFilter{
+			{DisplayName: "Skill ZIPs (*.zip)", Pattern: "*.zip"},
+		},
+	})
 }
 
 // SkillsForCLI returns the catalogue filtered to entries that target

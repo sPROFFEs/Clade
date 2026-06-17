@@ -4,6 +4,7 @@
   import { FitAddon } from '@xterm/addon-fit'
   import '@xterm/xterm/css/xterm.css'
   import { api } from '../lib/api.js'
+  import SkillsPicker from '../lib/SkillsPicker.svelte'
   import { term, onTermData, onTermExit } from '../lib/terminal.js'
   import { pendingTerm } from '../lib/stores.js'
   import { get } from 'svelte/store'
@@ -66,6 +67,16 @@
 
   // running terminal
   let started = false
+  // Skills attached to the current Code chat (cached locally; persists
+  // to the chat row through SetChatSkills on Done).
+  let sessionChatId = ''
+  let sessionSkills = []
+  let skillsPickerOpen = false
+  async function saveSessionSkills(ids) {
+    sessionSkills = ids
+    if (!sessionChatId) return
+    try { await api.setChatSkills(sessionChatId, ids) } catch {}
+  }
   let exited = false
   let termId = null
   let el            // xterm host div
@@ -156,9 +167,12 @@
       local ? localOpt.endpoint : '',
       local ? localOpt.apiKey : '',
       local ? localModel.trim() : '',
-    ).then((chatId) => {
-      // Pair the running PTY with its chat row so Sessions can resume it.
+    ).then(async (chatId) => {
       if (chatId && termId) api.bindChatToTerminal(termId, chatId).catch(() => {})
+      sessionChatId = chatId || ''
+      if (sessionChatId) {
+        try { sessionSkills = (await api.chatSkills(sessionChatId)) || [] } catch {}
+      }
     }).catch(() => {})
     started = true
     await tick()
@@ -382,8 +396,20 @@
     </p>
   {/if}
 {:else}
+  <SkillsPicker
+    bind:open={skillsPickerOpen}
+    {cli}
+    selected={sessionSkills}
+    title={`Skills for ${sessionLabel}`}
+    on:close={(e) => saveSessionSkills(e.detail)}
+    on:change={(e) => (sessionSkills = e.detail)} />
   <div class="row" style="margin-bottom:10px">
     <div class="grow"><strong>{sessionLabel}</strong> <span class="pill">{cli}</span>{#if model}<span class="pill">{model}</span>{/if} <span class="card-sub mono">{cwd}</span></div>
+    {#if sessionChatId}
+      <button class="btn" on:click={() => (skillsPickerOpen = true)} title="Configure skills for this chat">
+        {sessionSkills.length ? `★ ${sessionSkills.length} skills` : 'Skills…'}
+      </button>
+    {/if}
     {#if exited}<button class="btn primary" on:click={reset}>New session</button>{/if}
     <button class="btn danger" on:click={reset}>Stop</button>
   </div>
