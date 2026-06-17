@@ -434,7 +434,10 @@
   async function stopChat() { try { await api.cancelChatTurn(helperChatId) } catch {} }
   async function applyHelperConfig() {
     if (!helperChatId) return
-    try { await api.updateChatConfig(helperChatId, helperCli, helperModelSupported ? helperModel.trim() : '', '', '', '', '') } catch (e) { error = String(e) }
+    // Keep tools="edits" pinned. The 4th arg is the per-chat Tools
+    // level — passing '' here would reset to read-only and the next
+    // turn would refuse to save agent.yaml ("read-only environment").
+    try { await api.updateChatConfig(helperChatId, helperCli, helperModelSupported ? helperModel.trim() : '', 'edits', '', '', '') } catch (e) { error = String(e) }
   }
   async function onHelperCli() {
     modelSuggestions = (await api.listCLIModels(helperCli).catch(() => [])) || []

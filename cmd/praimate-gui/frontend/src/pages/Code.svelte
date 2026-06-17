@@ -213,13 +213,35 @@
     exited = false
   }
 
-  // Attach to a PTY the Chats page already started (a reopened TUI
-  // workspace chat) instead of launching a fresh one.
+  // Attach to a PTY the Chats / Sessions page already started, OR
+  // launch a fresh one in the same folder when the prior PTY is gone.
+  // The Sessions panel signals "PTY is gone" by setting termId=''; we
+  // start the CLI from scratch in that case so the user gets a working
+  // editor, not an empty terminal.
   async function attachPending(p) {
-    termId = p.termId
     sessionLabel = p.label
     cli = p.cli
     cwd = p.cwd
+    if (p.termId) {
+      // Live PTY — just reattach xterm to the existing stream.
+      termId = p.termId
+      started = true
+      await tick()
+      mountXterm()
+      if (p.note) {
+        xterm.write(`\x1b[2m[${p.note}]\x1b[0m\r\n`)
+      }
+      return
+    }
+    // No live PTY — spawn a fresh one in the recorded folder + CLI.
+    // Mirrors the normal start() flow without the agent/local-LLM
+    // bells; those came off the original chat record.
+    try {
+      termId = await term.start('', cli, '', cwd, '', '', '')
+    } catch (e) {
+      error = String(e)
+      return
+    }
     started = true
     await tick()
     mountXterm()

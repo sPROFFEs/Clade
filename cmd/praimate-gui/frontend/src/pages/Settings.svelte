@@ -108,28 +108,14 @@
     }
   }
 
-  // Privacy patterns
-  let patterns = []
-  let newPattern = ''
-
   async function load() {
     try {
       agents = (await api.listAgents()) || []
-      patterns = (await api.listPrivacyPatterns()) || []
       error = ''
     } catch (e) {
       error = String(e)
     }
     await bkLoad()
-  }
-
-  async function addPattern() {
-    if (!newPattern.trim()) return
-    try {
-      await api.addPrivacyPattern(newPattern.trim())
-      newPattern = ''
-      await load()
-    } catch (e) { error = String(e) }
   }
 
   // Build tools from source — for platforms where we don't ship a
@@ -391,33 +377,6 @@
     {/if}
   </div>
 {/if}
-
-<h1 style="font-size:16px; margin-top:24px">Custom privacy patterns</h1>
-<p class="subtitle">
-  Extra regexes scanned alongside the built-in patterns (API keys, OAuth
-  tokens, SSNs, credit-card numbers, AWS access IDs). Every outgoing
-  prompt is redacted: matched substrings are replaced with a placeholder
-  before being handed to the wrapped CLI; the reply is un-redacted on
-  the way back in. Add patterns to protect strings PrAImate can't guess
-  — internal ticket IDs, customer codes, project codenames, etc. Use
-  Go's <span class="mono">regexp/syntax</span> (RE2) — no look-arounds.
-</p>
-<p class="subtitle" style="margin-top:6px">
-  Examples: <span class="mono">internal-\d{6}</span> (ticket IDs),
-  <span class="mono">[A-Z]{3}-PROJ-\d+</span> (project codes),
-  <span class="mono">CUST_[a-z0-9]{12}</span> (customer tokens).
-  Patterns are case-sensitive unless you prefix with <span class="mono">(?i)</span>.
-</p>
-{#each patterns as p, i}
-  <div class="card row">
-    <div class="grow mono">{p}</div>
-    <button class="btn danger" on:click={async () => { await api.deletePrivacyPattern(i); await load() }}>Delete</button>
-  </div>
-{/each}
-<div class="row">
-  <input class="field grow mono" placeholder="e.g. internal-\d{6}" bind:value={newPattern} />
-  <button class="btn primary" on:click={addPattern}>Add</button>
-</div>
 
 {#if prereqModal}
   <!-- svelte-ignore a11y-click-events-have-key-events -->

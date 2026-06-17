@@ -13,6 +13,7 @@
   // tooltip.
   import { onMount, onDestroy } from 'svelte'
   import { api } from './api.js'
+  import { term } from './terminal.js'
   import { activePage, openChatId, pendingTerm } from './stores.js'
 
   let chats = []
@@ -65,6 +66,18 @@
     const h = Math.round(m / 60)
     if (h < 24) return `${h}h ago`
     return `${Math.round(h / 24)}d ago`
+  }
+
+  async function closeSession(c) {
+    if (!confirm(`Close "${c.Title || c.ID}"? Any in-flight reply is cancelled, the PTY (if any) is killed, and the chat row is deleted.`)) return
+    // 1. Cancel any in-flight turn — no-op if nothing's running.
+    try { await api.cancelChatTurn(c.ID) } catch {}
+    // 2. Kill the bound PTY if it's still up.
+    const live = liveTerms.get(c.ID)
+    if (live) { try { await term.close(live.id) } catch {} }
+    // 3. Drop the chat row so it stops showing up.
+    try { await api.deleteChat(c.ID) } catch {}
+    await load()
   }
 
   async function jump(c) {
@@ -135,12 +148,15 @@
         {@const s = surfaceOf(c)}
         {@const liveStream = active.has(c.ID)}
         {@const liveTerm = s === 'code' && liveTerms.has(c.ID)}
-        <button class="row" on:click={() => jump(c)} title={liveTerm ? `${c.Title} (PTY running — click to reattach)` : `Jump to ${c.Title}`}>
-          <span class="pulse" class:live={liveStream || liveTerm}></span>
-          <span class="surf surf-{s}">{surfaceLabel(s)}</span>
-          <span class="title grow">{c.Title || c.ID}</span>
-          <span class="meta">{c.CLIAgent || ''} · {fmtAgo(c.UpdatedAt || c.CreatedAt)}</span>
-        </button>
+        <div class="row" role="presentation">
+          <button class="row-main grow" on:click={() => jump(c)} title={liveTerm ? `${c.Title} (PTY running — click to reattach)` : `Jump to ${c.Title}`}>
+            <span class="pulse" class:live={liveStream || liveTerm}></span>
+            <span class="surf surf-{s}">{surfaceLabel(s)}</span>
+            <span class="title grow">{c.Title || c.ID}</span>
+            <span class="meta">{c.CLIAgent || ''} · {fmtAgo(c.UpdatedAt || c.CreatedAt)}</span>
+          </button>
+          <button class="row-close" title="Close this session (stops the chat / kills the PTY and deletes the row)" on:click|stopPropagation={() => closeSession(c)}>×</button>
+        </div>
       {/each}
     </div>
   {/if}
@@ -181,15 +197,24 @@
   .empty { padding: 16px; color: var(--text-dim); font-size: 12px; }
 
   .row {
-    display: flex; align-items: center; gap: 8px;
-    width: 100%; text-align: left;
-    background: none; border: none; color: var(--text);
-    padding: 8px 10px; font-size: 12px;
+    display: flex; align-items: stretch;
     border-bottom: 1px solid var(--border);
-    cursor: pointer;
   }
   .row:last-child { border-bottom: none; }
   .row:hover { background: var(--bg-panel); }
+  .row-main {
+    display: flex; align-items: center; gap: 8px;
+    flex: 1; text-align: left;
+    background: none; border: none; color: var(--text);
+    padding: 8px 10px; font-size: 12px;
+    cursor: pointer; min-width: 0;
+  }
+  .row-close {
+    background: none; border: none; color: var(--text-dim);
+    cursor: pointer; padding: 0 12px; font-size: 16px;
+    border-left: 1px solid var(--border);
+  }
+  .row-close:hover { color: var(--err, #e85c5c); background: color-mix(in oklch, var(--err, #e85c5c) 12%, transparent); }
   .pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--border); flex: none; }
   .pulse.live { background: #4ec9b0; animation: pulse 1.6s infinite; }
   .surf {
