@@ -66,13 +66,22 @@
 </script>
 
 <h1>MCP</h1>
-<p class="subtitle">Connect MCP providers once; agents that declare them get per-CLI config written at launch.</p>
+<p class="subtitle">
+  Connect MCP providers once; agents that declare them get per-CLI
+  config written at launch. <strong>The recommended path is to add a
+  custom server</strong> pointing at a process you control (a local
+  binary, a docker container, your own HTTP endpoint) — that's the
+  configuration the maintainer dogfoods, and it avoids handing API keys
+  to third-party gateways. The catalogue further down is convenience
+  for hosted services; pick from it only when you actually want to
+  share credentials with that vendor.
+</p>
 
 {#if error}<div class="banner">{error}</div>{/if}
 
 <div class="row" style="margin-bottom:12px">
-  <button class="btn" on:click={() => (showCustom = !showCustom)}>
-    {showCustom ? 'Cancel' : '+ Add custom MCP server'}
+  <button class="btn primary" on:click={() => (showCustom = !showCustom)}>
+    {showCustom ? 'Cancel' : '+ Add custom MCP server (recommended)'}
   </button>
 </div>
 
@@ -136,7 +145,13 @@
   {/each}
 {/if}
 
-<h1 style="font-size:16px; margin-top:20px">Catalogue</h1>
+<h1 style="font-size:16px; margin-top:20px">Catalogue (third-party hosted)</h1>
+<p class="subtitle">
+  Hosted MCP servers PrAImate ships entries for. Each one means handing
+  your prompts (and any API key you paste) to the listed vendor.
+  Prefer the custom-server flow above when a self-hosted alternative
+  exists.
+</p>
 {#each catalogue as entry}
   <div class="card row">
     <div class="grow">

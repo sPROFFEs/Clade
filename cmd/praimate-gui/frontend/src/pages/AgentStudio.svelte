@@ -153,6 +153,10 @@
       // Load in place — do NOT change the agentStudio store, or the
       // {#key} in App.svelte would remount us and leak a 2nd helper chat.
       await loadAll(a.id)
+      // The agent now has a row + on-disk folder — boot the helper
+      // chat pinned to it so the CLI launches with cwd = the agent's
+      // dir (NOT /home/<user>) and can edit ./agent.yaml + ./knowledge/.
+      await bootHelperChat()
     } catch (e) {
       error = String(e)
     } finally {
@@ -214,6 +218,25 @@
     tab.content = content
     tab.dirty = true
     tabs = tabs
+  }
+
+  // bootHelperChat starts (or restarts) the authoring assistant's chat
+  // pinned to the current agent's on-disk folder. Idempotent — if a
+  // helper is already running on a STALE agentId it's torn down first
+  // so we don't leak chats or write into the wrong cwd.
+  async function bootHelperChat() {
+    if (!agentId) return
+    if (helperChatId) {
+      try { await api.deleteChat(helperChatId) } catch {}
+      helperChatId = ''
+      messages = []
+    }
+    try {
+      const c = await api.startAgentHelperChat(helperCli, helperModel, '', agentId)
+      helperChatId = c.ID
+    } catch (e) {
+      error = String(e)
+    }
   }
 
   async function reloadDefFromDisk() {
@@ -432,13 +455,15 @@
     const firstAvail = clis.find((c) => c.available)
     helperCli = firstAvail ? firstAvail.id : (clis[0]?.id ?? 'claude')
     modelSuggestions = (await api.listCLIModels(helperCli).catch(() => [])) || []
-    if (initCfg.id) await loadAll(initCfg.id)
-    // else: needName is already true from sync init — the prompt is shown.
-    // Pass agentId so the helper CLI's cwd is the agent's on-disk folder
-    // (<config>/praimate/agents/<id>/) and agent.yaml is mirrored to disk
-    // there. Without this, the CLI launches in /home/<user> with nothing
-    // to edit.
-    try { const c = await api.startAgentHelperChat(helperCli, helperModel, '', agentId); helperChatId = c.ID } catch (e) { error = String(e) }
+    if (initCfg.id) {
+      await loadAll(initCfg.id)
+      // Existing-agent flow: the agent already has a row + disk folder,
+      // so we can boot the helper now with cwd = AgentDir.
+      await bootHelperChat()
+    }
+    // New-agent flow: bootHelperChat() runs from createNamed() AFTER
+    // the user names the agent and the DB row exists. Booting earlier
+    // would launch the CLI in /home/<user> with no agent.yaml on disk.
     unsubStream = onChatStream(handleStreamEvent)
     unsubApproval = onApproval(handleApproval)
     if (typeof window !== 'undefined' && window.runtime?.EventsOn) {

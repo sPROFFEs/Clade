@@ -316,6 +316,11 @@
 
   async function stop() {
     if (!selected) return
+    // Immediate UI feedback — the backend cancellation can lag while
+    // the wrapped CLI tears down its own process tree; users don't
+    // want to wait for that to see the spinner disappear.
+    sending = false
+    stream = null
     try { await api.cancelChatTurn(selected.ID) } catch {}
   }
 

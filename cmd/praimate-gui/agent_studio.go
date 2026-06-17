@@ -71,12 +71,16 @@ func (a *App) StartAgentHelperChat(cli, model, cwd, targetAgentID string) (*core
 	}
 	title += " · " + time.Now().Format("Jan 2 15:04")
 
+	// "edits" auto-approves file edits — the helper's whole job is to
+	// rewrite `./agent.yaml` and the `./knowledge/` files for the user.
+	// Without this the wrapped CLI runs read-only and tells the user
+	// "I can't save agent.yaml from this environment".
 	chat, err := c.CreateChat(a.ctx, core.CreateChatRequest{
 		Title:         title,
 		AgentID:       agentID,
 		CLIAgent:      cli,
 		WorkspacePath: cwd,
-		Settings:      core.ChatSettings{Model: model, Surface: "agent-helper"},
+		Settings:      core.ChatSettings{Model: model, Surface: "agent-helper", Tools: "edits"},
 	})
 	if err != nil {
 		return nil, err
