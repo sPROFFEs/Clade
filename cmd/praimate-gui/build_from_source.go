@@ -24,6 +24,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/sPROFFEs/PrAImate/internal/installer"
@@ -125,10 +126,19 @@ func (a *App) BuildToolFromSource(tool string) error {
 		_, _ = fmt.Fprintf(w, format+"\n", args...)
 	}
 
-	work, err := os.MkdirTemp("", "praimate-build-*")
-	if err != nil {
-		return err
+	// /tmp is tmpfs on many Linux distros (RAM-backed, often 1–2 GB).
+	// PrAImate Code's Bun toolchain alone downloads ~2 GB, so default
+	// to a disk-backed cache dir per OS and let the user override with
+	// PRAIMATE_BUILD_DIR for non-standard layouts.
+	parent, parentNote := resolveBuildParent()
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return fmt.Errorf("create build cache %s: %w", parent, err)
 	}
+	work, err := os.MkdirTemp(parent, "praimate-build-*")
+	if err != nil {
+		return fmt.Errorf("scratch dir under %s: %w", parent, err)
+	}
+	emit("· scratch dir: %s (%s)", work, parentNote)
 	defer func() {
 		emit("· cleaning up temporary checkout")
 		_ = os.RemoveAll(work)
@@ -237,4 +247,48 @@ func copyFileSimple(src, dst string) error {
 		_ = os.Chmod(tmp, fi.Mode().Perm())
 	}
 	return os.Rename(tmp, dst)
+}
+
+// resolveBuildParent picks a disk-backed scratch parent for the
+// from-source builds. The default per OS is the standard cache root —
+// big, persistent across reboots, never tmpfs:
+//
+//	Linux:   $XDG_CACHE_HOME/praimate/build  (else ~/.cache/praimate/build)
+//	macOS:   ~/Library/Caches/praimate/build
+//	Windows: %LOCALAPPDATA%\praimate\build
+//
+// Users with non-standard layouts (encrypted home, slow disk, etc.)
+// override with PRAIMATE_BUILD_DIR. We also accept TMPDIR as a fallback
+// signal — if it's set and not the OS default, the user already pointed
+// the world at a custom temp dir and we respect it.
+//
+// Returns (parentDir, oneLineDescription) for the install-log banner.
+func resolveBuildParent() (string, string) {
+	if v := strings.TrimSpace(os.Getenv("PRAIMATE_BUILD_DIR")); v != "" {
+		return v, "PRAIMATE_BUILD_DIR override"
+	}
+	switch runtime.GOOS {
+	case "windows":
+		if local := os.Getenv("LOCALAPPDATA"); local != "" {
+			return filepath.Join(local, "praimate", "build"), "%LOCALAPPDATA%\\praimate\\build"
+		}
+	case "darwin":
+		if home, _ := os.UserHomeDir(); home != "" {
+			return filepath.Join(home, "Library", "Caches", "praimate", "build"), "~/Library/Caches/praimate/build"
+		}
+	default:
+		if xdg := strings.TrimSpace(os.Getenv("XDG_CACHE_HOME")); xdg != "" {
+			return filepath.Join(xdg, "praimate", "build"), "$XDG_CACHE_HOME/praimate/build"
+		}
+		if home, _ := os.UserHomeDir(); home != "" {
+			return filepath.Join(home, ".cache", "praimate", "build"), "~/.cache/praimate/build"
+		}
+	}
+	// Last resort — the OS default temp dir. Caller will likely run out
+	// of space on tmpfs-backed /tmp, but at least we won't panic on a
+	// system without a home dir.
+	if t := strings.TrimSpace(os.Getenv("TMPDIR")); t != "" {
+		return t, "$TMPDIR"
+	}
+	return os.TempDir(), "os.TempDir() — may be tmpfs, expect failures on large builds"
 }

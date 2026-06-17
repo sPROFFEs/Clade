@@ -101,7 +101,11 @@ export const api = {
   localLLMModels: () => call('LocalLLMModels'),
   recordCodeSession: (cli, model, cwd, localEndpoint, localApiKey, localModel) =>
     call('RecordCodeSession', cli, model || '', cwd, localEndpoint || '', localApiKey || '', localModel || ''),
-  startAgentHelperChat: (cli, model, cwd) => call('StartAgentHelperChat', cli, model || '', cwd || ''),
+  bindChatToTerminal: (termID, chatID) => call('BindChatToTerminal', termID, chatID),
+  listTerminalSessions: () => call('ListTerminalSessions'),
+  startAgentHelperChat: (cli, model, cwd, agentID) => call('StartAgentHelperChat', cli, model || '', cwd || '', agentID || ''),
+  syncAgentYAMLToDisk: (id) => call('SyncAgentYAMLToDisk', id),
+  readAgentYAMLFromDisk: (id) => call('ReadAgentYAMLFromDisk', id),
   createAgentFromName: (name) => call('CreateAgentFromName', name),
   agentKnowledgeTree: (id) => call('AgentKnowledgeTree', id),
   agentReadKnowledgeFile: (id, rel) => call('AgentReadKnowledgeFile', id, rel),

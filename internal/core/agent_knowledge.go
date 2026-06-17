@@ -29,17 +29,57 @@ import (
 	"strings"
 )
 
-// AgentKnowledgeDir returns the knowledge folder for an agent id. The
-// directory may not exist yet (callers MkdirAll on write paths).
-func AgentKnowledgeDir(id string) (string, error) {
+// AgentDir returns the agent's on-disk root: <config>/praimate/agents/<id>/.
+// The knowledge folder lives inside (AgentKnowledgeDir). When the studio
+// launches its authoring assistant, this is the directory the helper CLI
+// runs in — and the directory `agent.yaml` is mirrored to so the helper
+// can read / edit the YAML the same way it reads the knowledge files.
+func AgentDir(id string) (string, error) {
 	if id == "" {
-		return "", fmt.Errorf("AgentKnowledgeDir: empty agent id")
+		return "", fmt.Errorf("AgentDir: empty agent id")
 	}
 	base, err := os.UserConfigDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(base, "praimate", "agents", id, "knowledge"), nil
+	return filepath.Join(base, "praimate", "agents", id), nil
+}
+
+// AgentKnowledgeDir returns the knowledge folder for an agent id. The
+// directory may not exist yet (callers MkdirAll on write paths).
+func AgentKnowledgeDir(id string) (string, error) {
+	dir, err := AgentDir(id)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "knowledge"), nil
+}
+
+// WriteAgentYAMLToDisk renders the agent as YAML into <AgentDir>/agent.yaml
+// so the studio's helper CLI can read + edit it as a regular file. Used
+// at helper-chat launch; the file is the helper's source of truth for the
+// session, and SaveAgentYAML pulls back into the DB when the user clicks
+// Save in the editor pane.
+func WriteAgentYAMLToDisk(a *Agent) (string, error) {
+	if a == nil {
+		return "", fmt.Errorf("WriteAgentYAMLToDisk: nil agent")
+	}
+	dir, err := AgentDir(a.ID)
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	body, err := MarshalAgentYAML(a)
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, "agent.yaml")
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 // ListAgentKnowledge returns the knowledge files (slash-relative,

@@ -156,7 +156,10 @@
       local ? localOpt.endpoint : '',
       local ? localOpt.apiKey : '',
       local ? localModel.trim() : '',
-    ).catch(() => {})
+    ).then((chatId) => {
+      // Pair the running PTY with its chat row so Sessions can resume it.
+      if (chatId && termId) api.bindChatToTerminal(termId, chatId).catch(() => {})
+    }).catch(() => {})
     started = true
     await tick()
     mountXterm()

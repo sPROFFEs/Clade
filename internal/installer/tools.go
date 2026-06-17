@@ -3,6 +3,7 @@ package installer
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -558,11 +559,36 @@ func praimateCodeMethods(current OS) []Method {
 	}}
 }
 
+// ErrNoPrebuiltAsset signals to the caller that the requested binary is
+// neither bundled in the install dir NOR published as a release asset
+// for the current OS/arch — the right next step is to build from source
+// (BuildToolFromSource) instead of retrying the download.
+var ErrNoPrebuiltAsset = errors.New("no prebuilt asset available for this OS/arch")
+
+// looksLikeMissingAsset checks captured downloader output for the typical
+// "release asset not found" / "HTTP 404" signature so we can convert it
+// into ErrNoPrebuiltAsset.
+func looksLikeMissingAsset(captured string) bool {
+	c := strings.ToLower(captured)
+	switch {
+	case strings.Contains(c, "404") && (strings.Contains(c, "not found") || strings.Contains(c, "the requested url")):
+		return true
+	case strings.Contains(c, "http error 404"):
+		return true
+	case strings.Contains(c, "the remote name could not be resolved"):
+		return false // DNS failure is real network down, not "asset missing"
+	case strings.Contains(c, "curl: (22)"): // -fSL turns >=400 into exit 22
+		return true
+	}
+	return false
+}
+
 // InstallPraimateCode runs the recommended download install for the
 // current OS, streaming output to w. One-call helper for surfaces that
-// don't drive the generic tool-method picker (e.g. the GUI). Returns an
-// error if no method is available (e.g. curl missing) or the download
-// fails.
+// don't drive the generic tool-method picker (e.g. the GUI). Returns
+// ErrNoPrebuiltAsset when GitHub doesn't ship a praimate-code asset for
+// the current OS/arch — callers should treat that as "compile from
+// source" instead of "retry".
 func InstallPraimateCode(ctx context.Context, w io.Writer) error {
 	binDir, err := PraimateBinDir()
 	if err != nil {
@@ -608,7 +634,20 @@ func InstallPraimateCode(ctx context.Context, w io.Writer) error {
 	if len(methods) == 0 {
 		return fmt.Errorf("no install method available (need curl on Linux/macOS, or PowerShell on Windows)")
 	}
-	return Run(ctx, methods[0], w, w)
+	// Capture the downloader's output too so we can spot HTTP 404 /
+	// curl "(22)" and translate it into ErrNoPrebuiltAsset — the GUI
+	// uses that to redirect the user to "Compile from source" instead
+	// of looping on the missing asset.
+	var cap bytes.Buffer
+	mw := io.MultiWriter(w, &cap)
+	if err := Run(ctx, methods[0], mw, mw); err != nil {
+		if looksLikeMissingAsset(cap.String()) {
+			return fmt.Errorf("praimate-code prebuilt for %s/%s isn't on the release page: %w",
+				runtime.GOOS, runtime.GOARCH, ErrNoPrebuiltAsset)
+		}
+		return err
+	}
+	return nil
 }
 
 // praimateCodeAssetName is the release asset filename for the host.

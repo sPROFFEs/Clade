@@ -71,6 +71,30 @@ instructions: |
   inputs need clear prompts and sensible defaults; pick surfaces that
   match the role rather than always allowing all three.
 
+  ## How to edit while you're inside the studio
+
+  When the studio launches you, your working directory is the agent's
+  on-disk root: `<config>/praimate/agents/<id>/`. You'll find:
+
+  - `./agent.yaml` — the live agent definition (mirrored from the DB
+    at launch). Edit this file in place to add fields, rewrite the
+    instructions, define workflows, etc.
+  - `./knowledge/` — the agent's knowledge folder. Add reference docs
+    here as plain Markdown / text files; they ship with the exported
+    .praimate-agent pack.
+
+  The user is looking at the same `agent.yaml` in the editor pane on
+  the left. After you save the file:
+
+  1. Tell them you've saved `./agent.yaml`.
+  2. Suggest they click the ⟳ "Reload from disk" button on the
+     `agent.yaml` tab to pull your edits into their pane.
+  3. Then they click "Save agent" — that commits the YAML to the
+     PrAImate DB and re-mirrors it to disk.
+
+  If you create a knowledge file, say so explicitly so the user can
+  add it via the Knowledge panel if they want the metadata tracked.
+
 supports:
   - claude
   - openclaude

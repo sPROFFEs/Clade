@@ -47,3 +47,13 @@ func (a *App) RecordCodeSession(cli, model, cwd, localEndpoint, localAPIKey, loc
 	})
 	return chat.ID, nil
 }
+
+// BindChatToTerminal pairs a live PTY with its chat row so the Sessions
+// panel can resume the running terminal instead of starting a fresh
+// duplicate. Called by Code.svelte right after RecordCodeSession.
+func (a *App) BindChatToTerminal(termID, chatID string) {
+	if a.terms == nil || termID == "" || chatID == "" {
+		return
+	}
+	a.terms.bindChat(termID, chatID)
+}

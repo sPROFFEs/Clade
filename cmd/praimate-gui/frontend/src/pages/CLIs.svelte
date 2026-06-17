@@ -95,14 +95,37 @@
     }
   }
 
+  let compileOffer = null // { tool, label } when the prebuilt asset isn't available
   async function installCode() {
     installing = 'praimate-code'
     log = []
     try {
-      await api.installPraimateCode()
+      const res = await api.installPraimateCode()
+      if (res && res.ok === false) {
+        if (res.noPrebuiltAsset) {
+          compileOffer = { tool: 'praimate-code', label: 'PrAImate Code' }
+        } else {
+          error = res.error || 'install failed'
+        }
+      }
       await load()
     } catch (e) {
       error = String(e)
+    } finally {
+      installing = ''
+    }
+  }
+  async function compileNow() {
+    if (!compileOffer) return
+    const tool = compileOffer.tool
+    compileOffer = null
+    installing = tool
+    log = []
+    try {
+      await api.buildToolFromSource(tool)
+      await load()
+    } catch (e) {
+      error = `Compile failed: ${e}`
     } finally {
       installing = ''
     }
@@ -169,6 +192,27 @@
   {:else}
     <div class="banner">{error}</div>
   {/if}
+{/if}
+
+{#if compileOffer}
+  <!-- svelte-ignore a11y-click-events-have-key-events -->
+  <!-- svelte-ignore a11y-no-static-element-interactions -->
+  <div class="modal-backdrop" on:click={() => (compileOffer = null)}>
+    <div class="modal-content" on:click|stopPropagation>
+      <h2>No prebuilt {compileOffer.label} for this platform</h2>
+      <p class="subtitle" style="margin-bottom:12px">
+        The release page doesn't ship a {compileOffer.label} binary for {''+''+''}your OS/architecture, so the download returned 404.
+        Building from source takes a few minutes but produces a binary tuned to this machine. The temporary checkout is deleted afterwards.
+      </p>
+      <p class="subtitle" style="margin-top:0">
+        Required tools (bun for PrAImate Code, uv for Graphify) must already be on PATH. Settings → Build from source shows the prerequisites and progress.
+      </p>
+      <div class="row" style="margin-top:16px; justify-content:flex-end; gap:8px">
+        <button class="btn" on:click={() => (compileOffer = null)}>Not now</button>
+        <button class="btn primary" on:click={compileNow}>Compile from source</button>
+      </div>
+    </div>
+  </div>
 {/if}
 
 {#if loading && clis.length === 0}<div class="empty">Probing installed CLIs…</div>{/if}

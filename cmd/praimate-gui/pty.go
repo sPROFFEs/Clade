@@ -26,10 +26,21 @@ import (
 )
 
 type termSession struct {
-	id   string
-	pty  pty.Pty
-	cmd  *pty.Cmd
-	once sync.Once
+	id     string
+	chatID string // empty for terminals not bound to a chat row
+	cwd    string
+	name   string
+	pty    pty.Pty
+	cmd    *pty.Cmd
+	once   sync.Once
+}
+
+// TermInfo is a snapshot of one live PTY session for the Sessions panel.
+type TermInfo struct {
+	ID     string `json:"id"`
+	ChatID string `json:"chatId,omitempty"`
+	Cwd    string `json:"cwd,omitempty"`
+	Name   string `json:"name,omitempty"`
 }
 
 type termManager struct {
@@ -40,6 +51,30 @@ type termManager struct {
 
 func newTermManager() *termManager {
 	return &termManager{sessions: map[string]*termSession{}}
+}
+
+// list returns a snapshot of every live PTY session so the Sessions
+// panel can match chats to their running terminals and offer "resume"
+// instead of "open new".
+func (tm *termManager) list() []TermInfo {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	out := make([]TermInfo, 0, len(tm.sessions))
+	for _, s := range tm.sessions {
+		out = append(out, TermInfo{ID: s.id, ChatID: s.chatID, Cwd: s.cwd, Name: s.name})
+	}
+	return out
+}
+
+// bindChat associates a live PTY with a chat row. Called after a chat is
+// created for a terminal session so the Sessions panel can resume the
+// PTY by chat ID.
+func (tm *termManager) bindChat(id, chatID string) {
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	if s, ok := tm.sessions[id]; ok {
+		s.chatID = chatID
+	}
 }
 
 // start spawns name with args in cwd inside a new PTY. env adds to the
@@ -63,7 +98,7 @@ func (tm *termManager) start(emitCtx context.Context, name string, args []string
 	tm.mu.Lock()
 	tm.seq++
 	id := fmt.Sprintf("term-%d", tm.seq)
-	tm.sessions[id] = &termSession{id: id, pty: p, cmd: c}
+	tm.sessions[id] = &termSession{id: id, pty: p, cmd: c, cwd: cwd, name: name}
 	tm.mu.Unlock()
 
 	go func() {

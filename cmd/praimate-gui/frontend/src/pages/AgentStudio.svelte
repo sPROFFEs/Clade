@@ -216,6 +216,21 @@
     tabs = tabs
   }
 
+  async function reloadDefFromDisk() {
+    if (!agentId) return
+    try {
+      const body = await api.readAgentYAMLFromDisk(agentId)
+      const def = tabs.find((t) => t.isDef)
+      if (def) {
+        def.content = body
+        def.dirty = false
+        await tick()
+        def.ref?.setExternal(body)
+        tabs = tabs
+        notice = 'Reloaded agent.yaml from disk'
+      }
+    } catch (e) { error = String(e) }
+  }
   async function saveActive() {
     const t = activeTab
     if (!t) return
@@ -225,6 +240,9 @@
         const saved = await api.saveAgentYAML(body)
         agentId = saved.id
         agentName = saved.name
+        // Mirror the new YAML to <AgentDir>/agent.yaml so the helper CLI
+        // continues to see the authoritative copy.
+        try { await api.syncAgentYAMLToDisk(saved.id) } catch {}
         notice = `Saved ${saved.name}`
         await refreshTree()
         await loadKnowledge()
@@ -416,7 +434,11 @@
     modelSuggestions = (await api.listCLIModels(helperCli).catch(() => [])) || []
     if (initCfg.id) await loadAll(initCfg.id)
     // else: needName is already true from sync init — the prompt is shown.
-    try { const c = await api.startAgentHelperChat(helperCli, helperModel); helperChatId = c.ID } catch (e) { error = String(e) }
+    // Pass agentId so the helper CLI's cwd is the agent's on-disk folder
+    // (<config>/praimate/agents/<id>/) and agent.yaml is mirrored to disk
+    // there. Without this, the CLI launches in /home/<user> with nothing
+    // to edit.
+    try { const c = await api.startAgentHelperChat(helperCli, helperModel, '', agentId); helperChatId = c.ID } catch (e) { error = String(e) }
     unsubStream = onChatStream(handleStreamEvent)
     unsubApproval = onApproval(handleApproval)
     if (typeof window !== 'undefined' && window.runtime?.EventsOn) {
@@ -555,6 +577,9 @@
           </div>
         {/each}
       </div>
+      {#if activeTab?.isDef && agentId}
+        <button class="xbtn" title="Reload agent.yaml from disk (pull helper-CLI edits)" on:click={reloadDefFromDisk}>⟳</button>
+      {/if}
       <button class="xbtn" title="Save all (Ctrl+Shift+S)" on:click={saveAllTabs} disabled={dirtyCount === 0}>💾·{dirtyCount}</button>
       <button class="xbtn" title="Close other tabs" on:click={closeOtherTabs} disabled={tabs.length < 2}>↹</button>
       <button class="xbtn" title="Close all tabs" on:click={closeAllTabs} disabled={tabs.length < 2}>✕</button>

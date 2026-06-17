@@ -17,6 +17,7 @@
 
   let chats = []
   let active = new Set()
+  let liveTerms = new Map() // chatID → termID (live PTY we can resume)
   let open = false
   let loading = false
   let timer = null
@@ -25,12 +26,16 @@
     if (loading) return
     loading = true
     try {
-      const [cs, ids] = await Promise.all([
+      const [cs, ids, terms] = await Promise.all([
         api.listChats().catch(() => []),
         api.activeChatIDs().catch(() => []),
+        api.listTerminalSessions().catch(() => []),
       ])
       chats = (cs || []).slice(0, 40)
       active = new Set(ids || [])
+      const m = new Map()
+      for (const t of (terms || [])) if (t.chatId) m.set(t.chatId, t)
+      liveTerms = m
     } finally {
       loading = false
     }
@@ -75,15 +80,19 @@
       return
     }
     if (s === 'code') {
-      // Code TUI chats live on the Code page (PTY). Reopen via
-      // pendingTerm + activePage handoff (the Chats page itself does
-      // this when clicking a code chat — same primitive).
+      // Code TUI chats live on the Code page. If we have a live PTY
+      // for this chat, reattach to its existing stream — no second
+      // process. If not (GUI was restarted or the process died),
+      // start a fresh one in the same folder. The presence of a
+      // live term is also what the green "live" dot in the row
+      // signals to the user.
+      const live = liveTerms.get(c.ID)
       pendingTerm.set({
-        termId: '',
+        termId: live ? live.id : '',
         cli: c.CLIAgent || '',
         cwd: c.WorkspacePath || '',
         label: c.Title || '',
-        note: '',
+        note: live ? '' : '(previous PTY is gone — starting a fresh session in the same folder)',
       })
       activePage.set('code')
       return
@@ -124,8 +133,10 @@
       {/if}
       {#each chats as c}
         {@const s = surfaceOf(c)}
-        <button class="row" on:click={() => jump(c)} title="Jump to {c.Title}">
-          <span class="pulse" class:live={active.has(c.ID)}></span>
+        {@const liveStream = active.has(c.ID)}
+        {@const liveTerm = s === 'code' && liveTerms.has(c.ID)}
+        <button class="row" on:click={() => jump(c)} title={liveTerm ? `${c.Title} (PTY running — click to reattach)` : `Jump to ${c.Title}`}>
+          <span class="pulse" class:live={liveStream || liveTerm}></span>
           <span class="surf surf-{s}">{surfaceLabel(s)}</span>
           <span class="title grow">{c.Title || c.ID}</span>
           <span class="meta">{c.CLIAgent || ''} · {fmtAgo(c.UpdatedAt || c.CreatedAt)}</span>

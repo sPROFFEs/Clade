@@ -11,6 +11,7 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -235,15 +236,32 @@ func (a *App) CloseTerminal(id string) {
 	a.terms.close(id)
 }
 
+// InstallPraimateCodeResult tells the frontend whether the download
+// succeeded, failed for a fixable network reason, or failed because no
+// prebuilt asset exists for this OS/arch (in which case the GUI offers
+// "Compile from source" instead of letting the user retry forever).
+type InstallPraimateCodeResult struct {
+	OK              bool   `json:"ok"`
+	Log             string `json:"log"`
+	Error           string `json:"error,omitempty"`
+	NoPrebuiltAsset bool   `json:"noPrebuiltAsset,omitempty"`
+}
+
 // InstallPraimateCode downloads the prebuilt PrAImate Code binary into
-// the managed bin dir. Returns the install log on success so the
-// frontend can show what happened. Synchronous — it's a single download.
-func (a *App) InstallPraimateCode() (string, error) {
+// the managed bin dir. Returns a structured result so the frontend can
+// distinguish "404 / asset missing" (offer compile) from a generic
+// failure (offer retry).
+func (a *App) InstallPraimateCode() InstallPraimateCodeResult {
 	var buf strings.Builder
-	if err := installer.InstallPraimateCode(a.ctx, &buf); err != nil {
-		return buf.String(), err
+	err := installer.InstallPraimateCode(a.ctx, &buf)
+	res := InstallPraimateCodeResult{OK: err == nil, Log: buf.String()}
+	if err != nil {
+		res.Error = err.Error()
+		if errors.Is(err, installer.ErrNoPrebuiltAsset) {
+			res.NoPrebuiltAsset = true
+		}
 	}
-	return buf.String(), nil
+	return res
 }
 
 // PraimateCodeInstalled reports whether praimate-code resolves on this
@@ -553,6 +571,7 @@ func (a *App) OpenWorkspaceChat(chatID string) (*OpenWorkspaceChatResult, error)
 	if err != nil {
 		return nil, err
 	}
+	a.terms.bindChat(termID, chatID)
 	return &OpenWorkspaceChatResult{
 		TermID: termID,
 		CLI:    string(chat.AgentID),
@@ -560,6 +579,16 @@ func (a *App) OpenWorkspaceChat(chatID string) (*OpenWorkspaceChatResult, error)
 		Label:  chat.Label,
 		Note:   resume.Note,
 	}, nil
+}
+
+// ListTerminalSessions returns the live PTYs the GUI is managing. The
+// Sessions panel uses this to offer "resume" for terminal chats whose
+// PTY is still alive (instead of starting a duplicate).
+func (a *App) ListTerminalSessions() []TermInfo {
+	if a.terms == nil {
+		return nil
+	}
+	return a.terms.list()
 }
 
 // --- Agents ----------------------------------------------------------------
