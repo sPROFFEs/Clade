@@ -47,6 +47,16 @@ func (a *App) SendChatStream(chatID, message string, attachments []string) (*cor
 			systemPrompt = core.AgentSystemPrompt(agent)
 		}
 	}
+	// Prepend enabled skills (CLI-agnostic at the prompt level; the
+	// catalogue's per-skill CLI tag is advisory in the UI). Skills add
+	// to whatever the agent itself contributes, never replace it.
+	if prefix := core.ResolveSkillsPrefix(chat.Settings.Skills); prefix != "" {
+		if systemPrompt != "" {
+			systemPrompt = prefix + "\n\n---\n\n" + systemPrompt
+		} else {
+			systemPrompt = prefix
+		}
+	}
 
 	ctx, cancel := context.WithCancel(a.ctx)
 	a.chatCancelMu.Lock()

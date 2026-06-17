@@ -131,12 +131,17 @@
       localApiKey: chat.Settings?.local?.api_key || '',
       localModel: chat.Settings?.local?.model || '',
       suggestions: [],
+      skills: (chat.Settings?.skills || []).slice(),
+      skillsCatalogue: [],
     }
     if (clis.length === 0) {
       api.listCLIs().then((r) => { clis = r || [] }).catch(() => {})
     }
     api.listCLIModels(chat.CLIAgent)
       .then((r) => { if (cfg && cfg.chat.ID === chat.ID) { cfg.suggestions = r || []; cfg = cfg } })
+      .catch(() => {})
+    api.skillsList()
+      .then((r) => { if (cfg && cfg.chat.ID === chat.ID) { cfg.skillsCatalogue = r || []; cfg = cfg } })
       .catch(() => {})
   }
 
@@ -154,6 +159,7 @@
       await api.updateChatConfig(
         cfg.chat.ID, cfg.cli, cfg.model.trim(), cfg.tools,
         cfg.localEndpoint.trim(), cfg.localApiKey, cfg.localModel.trim())
+      try { await api.setChatSkills(cfg.chat.ID, cfg.skills || []) } catch (e) { /* non-fatal */ }
       const id = cfg.chat.ID
       cfg = null
       await load()
@@ -472,6 +478,29 @@
     {:else if cfg.localEndpoint}
       <div class="card-sub" style="margin-top:8px">Per-chat local routing applies to claude/openclaude only — {cfg.cli} reads its global config (Local LLM tab).</div>
     {/if}
+
+    <label class="lbl" style="margin-top:10px">Skills <span class="card-sub" style="font-weight:400">— prepended to the chat's system prompt. Designed per-CLI; mixing across CLIs may produce odd output.</span></label>
+    {#if cfg.skillsCatalogue && cfg.skillsCatalogue.length > 0}
+      <div class="row" style="flex-wrap:wrap; gap:6px">
+        {#each cfg.skillsCatalogue as s}
+          {@const enabled = (cfg.skills || []).includes(s.id)}
+          {@const matchesCLI = (s.clis || []).includes(cfg.cli)}
+          <button
+            class="btn sm"
+            class:primary={enabled}
+            title={`${s.description}${matchesCLI ? '' : ' — NOT designed for ' + cfg.cli}`}
+            on:click={() => {
+              const next = enabled ? (cfg.skills || []).filter((x) => x !== s.id) : [...(cfg.skills || []), s.id]
+              cfg.skills = next
+            }}>
+            {s.name}{enabled && !matchesCLI ? ' ⚠' : ''}
+          </button>
+        {/each}
+      </div>
+    {:else}
+      <div class="card-sub">No skills in the catalogue (or still loading).</div>
+    {/if}
+
     <div class="row" style="margin-top:12px">
       <button class="btn primary" on:click={saveConfig} disabled={cfgSaving}>{cfgSaving ? 'Saving…' : 'Save'}</button>
       <button class="btn" on:click={() => (cfg = null)}>Cancel</button>

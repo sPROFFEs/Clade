@@ -16,6 +16,7 @@
   import Editor from './pages/Editor.svelte'
   import AgentStudio from './pages/AgentStudio.svelte'
   import Setup from './pages/Setup.svelte'
+  import Skills from './pages/Skills.svelte'
   import SessionPanel from './lib/SessionPanel.svelte'
 
   // Lucide-style outline icon paths (24x24 viewBox, stroke-based).
@@ -54,6 +55,7 @@
     { id: 'code', label: 'Code', icon: icons.code, component: Code },
     { id: 'chats', label: 'Chats', icon: icons.chats, component: Chats },
     { id: 'agents', label: 'Agents', icon: icons.run, component: Agents },
+    { id: 'skills', label: 'Skills', icon: icons.mcp, component: Skills },
     { id: 'clis', label: 'CLI & Tools', icon: icons.agents, component: CLIs },
     { id: 'localllm', label: 'Local LLM', icon: icons.monitor, component: LocalLLM },
     { id: 'mcp', label: 'MCP', icon: icons.mcp, component: MCP },

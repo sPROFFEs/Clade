@@ -68,6 +68,16 @@ type ChatSettings struct {
 	// SingleShotOpts.Tools for the per-CLI flag mapping.
 	Tools string `json:"tools,omitempty"`
 
+	// Skills lists the IDs of skills (system-prompt fragments shipped
+	// in the catalogue) that should be prepended to this chat's
+	// system prompt on every turn. Per-chat — new chats inherit the
+	// global default-skills list from the Skills page, then diverge
+	// as the user toggles them per-chat. Skills are CLI-specific by
+	// content; the catalogue tags each skill with the CLIs it targets
+	// so the Skills page can group them and the chat can warn when a
+	// skill isn't designed for the current CLI.
+	Skills []string `json:"skills,omitempty"`
+
 	// Surface records which GUI surface owns the chat ("studio" for
 	// document-studio chats). The Chats page uses it to list studio
 	// sessions separately and offer "reopen studio".

@@ -84,6 +84,28 @@ func (a *App) startup(ctx context.Context) {
 	installer.ImportManagedToolsToPath()
 	installer.ImportPraimateBinToPath()
 
+	// Live PATH rescan — periodically check the well-known per-user CLI
+	// dirs in case the user installed bun/pnpm/cargo/uv in another
+	// terminal while the GUI was already running. Cheap: just os.Stat
+	// per dir, no fork. Goroutine ends when ctx is canceled (i.e. on
+	// shutdown). The interval is wide enough not to be a busy loop and
+	// tight enough that "I just ran `curl … | bash`" feels immediate.
+	go func() {
+		t := time.NewTicker(8 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				installer.ImportPnpmPathIfPresent()
+				installer.ImportManagedToolsToPath()
+				installer.ImportPraimateBinToPath()
+				installer.ImportUserBinDirs()
+			}
+		}
+	}()
+
 	dbPath, err := store.DefaultDBPath()
 	if err != nil {
 		a.initErr = err.Error()
@@ -335,7 +357,12 @@ func (a *App) StartChat(agentID, cli, cwd string) (*core.Chat, error) {
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}
-	return c.StartInteractiveChat(a.ctx, agentID, cli, cwd)
+	chat, err := c.StartInteractiveChat(a.ctx, agentID, cli, cwd)
+	if err != nil {
+		return nil, err
+	}
+	a.applyDefaultSkills(chat.ID)
+	return chat, nil
 }
 
 // SendChat sends one message into an interactive chat and returns the
@@ -354,6 +381,13 @@ func (a *App) SendChat(chatID, message string) (*core.ChatTurn, error) {
 	if chat.AgentID != "" {
 		if agent, err := c.GetAgent(a.ctx, chat.AgentID); err == nil {
 			systemPrompt = core.AgentSystemPrompt(agent)
+		}
+	}
+	if prefix := core.ResolveSkillsPrefix(chat.Settings.Skills); prefix != "" {
+		if systemPrompt != "" {
+			systemPrompt = prefix + "\n\n---\n\n" + systemPrompt
+		} else {
+			systemPrompt = prefix
 		}
 	}
 	return c.ContinueChat(a.ctx, chatID, message, chat.WorkspacePath, systemPrompt)
@@ -483,7 +517,12 @@ func (a *App) StartCleanChat(cli, model, cwd string) (*core.Chat, error) {
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}
-	return c.StartCleanChat(a.ctx, cli, model, cwd)
+	chat, err := c.StartCleanChat(a.ctx, cli, model, cwd)
+	if err != nil {
+		return nil, err
+	}
+	a.applyDefaultSkills(chat.ID)
+	return chat, nil
 }
 
 // --- Workspace (TUI) chats -------------------------------------------------

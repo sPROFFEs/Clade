@@ -467,20 +467,58 @@ create_shortcuts() {
       # files missed.
       cat > "$DEST/praimate-launch" <<'WRAP'
 #!/usr/bin/env bash
-# PrAImate launch wrapper — sources the user's rc files so binaries
-# installed via shell installers (bun, pnpm, cargo, deno, …) are on
-# PATH even when launched from a desktop / dock shortcut.
+# PrAImate launch wrapper — reproduces the user's shell PATH so binaries
+# installed via shell installers (bun, pnpm, cargo, deno, …) resolve
+# even when the app is launched from a desktop / dock / Start-menu
+# shortcut (where the session's PATH is the minimal one systemd/launchd
+# inherits, NOT the user's interactive shell PATH).
 set -u
+
+# 1. Ask the user's own interactive login shell for its PATH directly.
+#    This is the most reliable way to pick up nvm / fnm / fish-style
+#    environments that don't follow the bash rc convention. We capture
+#    PATH only — never the rest of the env — to avoid leaking
+#    interactive-shell side-effects (PROMPT, fzf, etc.).
+__praimate_shell_path() {
+  local sh="${SHELL:-/bin/bash}"
+  [ -x "$sh" ] || return 0
+  local base
+  base="$(basename "$sh")"
+  case "$base" in
+    bash|zsh)
+      "$sh" -ilc 'printf "%s" "$PATH"' 2>/dev/null
+      ;;
+    fish)
+      "$sh" -ilc 'printf "%s" $PATH | string join :' 2>/dev/null
+      ;;
+    *)
+      "$sh" -lc 'printf "%s" "$PATH"' 2>/dev/null
+      ;;
+  esac
+}
+
+__USER_PATH="$(__praimate_shell_path || true)"
+if [ -n "${__USER_PATH:-}" ]; then
+  # Prepend the user's interactive PATH, keeping the existing one as
+  # a fallback. Splice in front so the user's choices win.
+  PATH="$__USER_PATH:$PATH"
+fi
+
+# 2. Belt-and-braces: also source the common rc files directly. Covers
+#    users whose installer wrote PATH= to .bashrc / .profile but whose
+#    $SHELL invocation above produced nothing (unusual locked-down
+#    setups).
 __praimate_source() { [ -f "$1" ] && . "$1" 2>/dev/null || true; }
-# Order: most-general first, most-specific last (last source wins on PATH= overrides).
 __praimate_source "/etc/profile"
 __praimate_source "$HOME/.profile"
 __praimate_source "$HOME/.bash_profile"
 __praimate_source "$HOME/.bashrc"
 __praimate_source "$HOME/.zshenv"
 __praimate_source "$HOME/.zshrc"
-# Belt-and-braces: prepend well-known CLI dirs the rc files might have
-# missed (e.g. user has no rc files at all on a fresh Parrot/Debian VM).
+
+# 3. Final fallback: prepend well-known CLI dirs the rc files might
+#    have missed (e.g. user has no rc files at all on a fresh
+#    Parrot/Debian VM).
 for __d in \
     "$HOME/.local/bin" \
     "$HOME/.bun/bin" \
@@ -501,7 +539,12 @@ for __d in \
   [ -d "$__d" ] || continue
   case ":$PATH:" in *":$__d:"*) ;; *) PATH="$__d:$PATH" ;; esac
 done
+
+# 4. Collapse duplicates and export, so the child binary's PATH is
+#    clean. (Order-preserving dedupe.)
+PATH="$(awk -v RS=: -v ORS=: '!seen[$0]++ {print}' <<<"$PATH" | sed 's/:$//')"
 export PATH
+
 __praimate_self="$(readlink -f "$0" 2>/dev/null || echo "$0")"
 __praimate_dir="$(dirname "$__praimate_self")"
 __praimate_bin="${__praimate_self##*/}"

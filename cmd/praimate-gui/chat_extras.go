@@ -180,6 +180,13 @@ func (a *App) SendChatWithAttachments(chatID, message string, attachments []stri
 			systemPrompt = core.AgentSystemPrompt(agent)
 		}
 	}
+	if prefix := core.ResolveSkillsPrefix(chat.Settings.Skills); prefix != "" {
+		if systemPrompt != "" {
+			systemPrompt = prefix + "\n\n---\n\n" + systemPrompt
+		} else {
+			systemPrompt = prefix
+		}
+	}
 	return c.ContinueChatWithAttachments(a.ctx, chatID, message, chat.WorkspacePath, systemPrompt, attachments)
 }
 
