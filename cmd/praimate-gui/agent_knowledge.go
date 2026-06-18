@@ -198,17 +198,23 @@ func (a *App) BuildAgentRAG(id, backend, apiKey, model string) error {
 		if cfg == nil || strings.TrimSpace(cfg.DefaultLocalEndpoint) == "" {
 			return fmt.Errorf("no Local LLM endpoint configured — set one in the Local LLM tab first")
 		}
+		if strings.TrimSpace(model) == "" {
+			return fmt.Errorf("local backend needs a model name — fill in the Model field with the model your local endpoint serves (e.g. `qwen2.5-coder:7b`, `llama3.1`). Without it graphify defaults to an OpenAI model name and your local server returns 404")
+		}
 		key := cfg.DefaultLocalAPIKey
 		if strings.TrimSpace(key) == "" {
 			key = "local" // openai client rejects an empty key
 		}
-		args = append(args, "--backend", "openai")
-		if strings.TrimSpace(model) != "" {
-			args = append(args, "--model", strings.TrimSpace(model))
-		}
+		args = append(args, "--backend", "openai", "--model", strings.TrimSpace(model))
+		// Push our env LAST so it wins over anything the user has in
+		// their shell rc (e.g. an OPENAI_BASE_URL pointed at OpenAI's
+		// production endpoint). Same for the API key — local servers
+		// usually accept any non-empty value, so a leftover real key
+		// from the user's env shouldn't reach the local backend.
 		env = append(env,
 			"OPENAI_BASE_URL="+openAIBaseURL(cfg.DefaultLocalEndpoint),
 			"OPENAI_API_KEY="+key,
+			"OPENAI_API_BASE="+openAIBaseURL(cfg.DefaultLocalEndpoint), // some clients use the older var name
 		)
 	default:
 		args = append(args, "--backend", backend)

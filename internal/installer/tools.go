@@ -630,24 +630,15 @@ func InstallPraimateCode(ctx context.Context, w io.Writer) error {
 		}
 	}
 
-	methods := ToolMethods(ToolPraimateCode, ActionInstall, DetectOS())
-	if len(methods) == 0 {
-		return fmt.Errorf("no install method available (need curl on Linux/macOS, or PowerShell on Windows)")
-	}
-	// Capture the downloader's output too so we can spot HTTP 404 /
-	// curl "(22)" and translate it into ErrNoPrebuiltAsset — the GUI
-	// uses that to redirect the user to "Compile from source" instead
-	// of looping on the missing asset.
-	var cap bytes.Buffer
-	mw := io.MultiWriter(w, &cap)
-	if err := Run(ctx, methods[0], mw, mw); err != nil {
-		if looksLikeMissingAsset(cap.String()) {
-			return fmt.Errorf("praimate-code prebuilt for %s/%s isn't on the release page: %w",
-				runtime.GOOS, runtime.GOARCH, ErrNoPrebuiltAsset)
-		}
-		return err
-	}
-	return nil
+	// No bundled binary AND no published release asset (the project does
+	// not publish praimate-code prebuilts to GitHub Releases). Skip the
+	// download attempt entirely — surface ErrNoPrebuiltAsset directly so
+	// the GUI redirects the user to "Compile from source" instead of
+	// burning 2-3 seconds on a guaranteed 404.
+	fmt.Fprintf(w, "→ No praimate-code bundle next to the install AND no published prebuilt for %s/%s. Compile from source instead.\n",
+		runtime.GOOS, runtime.GOARCH)
+	return fmt.Errorf("praimate-code prebuilt for %s/%s isn't published: %w",
+		runtime.GOOS, runtime.GOARCH, ErrNoPrebuiltAsset)
 }
 
 // praimateCodeAssetName is the release asset filename for the host.

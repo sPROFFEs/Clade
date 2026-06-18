@@ -54,6 +54,17 @@
   let ragBackend = 'claude-cli'
   let ragKey = ''
   let ragModel = ''
+  let ragLocalModels = []
+  async function refreshLocalModels() {
+    if (ragBackend !== 'local') return
+    try {
+      const cfg = await api.getLocalLLM()
+      if (cfg?.endpoint) {
+        ragLocalModels = (await api.testLocalLLM(cfg.endpoint, cfg.apiKey || '')) || []
+      }
+    } catch { ragLocalModels = [] }
+  }
+  $: if (ragBackend === 'local' && ragLocalModels.length === 0) refreshLocalModels()
   let ragRunning = false
   let ragLog = []
   let ragElapsed = 0
@@ -567,6 +578,18 @@
           {#if keyNeeded}
             <input class="field sm mono" type="password" placeholder="API key" bind:value={ragKey} />
             <input class="field sm mono" placeholder="model (optional)" bind:value={ragModel} />
+          {:else if ragBackend === 'local'}
+            <input
+              class="field sm mono"
+              placeholder="local model name — REQUIRED (e.g. qwen2.5-coder:7b)"
+              list="rag-local-models"
+              bind:value={ragModel} />
+            <datalist id="rag-local-models">
+              {#each ragLocalModels as m}<option value={m}></option>{/each}
+            </datalist>
+            <div class="hint" style="font-size:11px; color:var(--text-dim)">
+              The local endpoint must serve this model under its OpenAI-compatible API. Without an explicit name, graphify defaults to an OpenAI model and your local server returns 404.
+            </div>
           {/if}
           <button class="btn sm primary" disabled={ragRunning} on:click={buildRAG}>{ragRunning ? 'Indexing…' : (know.hasIndex ? 'Re-index' : 'Build RAG index')}</button>
           {#if ragRunning || ragLog.length}
