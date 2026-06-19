@@ -83,6 +83,11 @@ func (a *App) startup(ctx context.Context) {
 	// "graphify installs but isn't detected".
 	installer.ImportManagedToolsToPath()
 	installer.ImportPraimateBinToPath()
+	// Windows: merge HKCU\Environment\Path + HKLM\…\Environment\Path
+	// into our PATH so user-installer registry edits made after the
+	// GUI launched (npm prefix, pnpm setup, bun installer, …) reach
+	// exec.LookPath. No-op on non-Windows.
+	importWindowsRegistryPath()
 
 	// Live PATH rescan — periodically check the well-known per-user CLI
 	// dirs in case the user installed bun/pnpm/cargo/uv in another
@@ -102,6 +107,7 @@ func (a *App) startup(ctx context.Context) {
 				installer.ImportManagedToolsToPath()
 				installer.ImportPraimateBinToPath()
 				installer.ImportUserBinDirs()
+				importWindowsRegistryPath()
 			}
 		}
 	}()

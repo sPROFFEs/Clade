@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"os/exec"
 	"sync"
 
 	"github.com/aymanbagabas/go-pty"
@@ -81,11 +82,22 @@ func (tm *termManager) bindChat(id, chatID string) {
 // inherited environment. PTY output streams to the frontend over Wails
 // events on emitCtx until the child exits.
 func (tm *termManager) start(emitCtx context.Context, name string, args []string, cwd string, env []string) (string, error) {
+	// Resolve to an absolute path BEFORE handing it to go-pty / Cmd.
+	// Go's exec on Windows joins Cmd.Dir + bare name first when
+	// resolving — so a bare `opencode` with Cmd.Dir set to the project
+	// folder produces errors like
+	//   exec: "C:\…\<project>\opencode": not found in %PATH%
+	// even though opencode IS on PATH, just not in <project>. Pre-
+	// resolving collapses the ambiguity on every platform.
+	resolved, lpErr := exec.LookPath(name)
+	if lpErr != nil {
+		return "", fmt.Errorf("%s not on PATH — install it (CLIs tab) or click 'Re-scan PATH' if you just installed it in another terminal", name)
+	}
 	p, err := pty.New()
 	if err != nil {
 		return "", fmt.Errorf("open pty: %w", err)
 	}
-	c := p.Command(name, args...)
+	c := p.Command(resolved, args...)
 	c.Dir = cwd
 	if len(env) > 0 {
 		c.Env = append(c.Env, env...)
