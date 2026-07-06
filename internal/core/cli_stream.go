@@ -3,13 +3,14 @@ package core
 // Streaming layer — what makes the GUI chat feel like the Codex /
 // Claude desktop apps instead of "send and wait". CLIs that expose an
 // event stream in headless mode (claude/openclaude: --output-format
-// stream-json; codex: exec --json) implement streamingAdapter; the
+// stream-json; codex: exec --json; opencode: run --format json)
+// implement streamingAdapter; the
 // chat layer forwards StreamEvents to the UI as they arrive: text
 // deltas render token-by-token, tool calls show as a live activity
 // feed, and the in-flight process can be interrupted via context
 // cancellation.
 //
-// Adapters without an event stream (gemini, opencode, deepseek) simply
+// Adapters without an event stream (gemini, deepseek) simply
 // don't implement the interface (or return ErrStreamUnsupported) and
 // the chat falls back to the buffered single-shot path — same behavior
 // as before, just without live updates.
@@ -26,10 +27,14 @@ import (
 // StreamEvent is one live update emitted while a turn is running.
 type StreamEvent struct {
 	// Type is one of:
-	//   "text"       — Text holds an assistant output delta (append it)
-	//   "tool_start" — the agent began a tool call (Tool + Detail set)
-	//   "tool_end"   — a tool call finished (ID matches its start; OK
-	//                  reports success)
+	//   "text"        — Text holds an assistant output delta (append it)
+	//   "reasoning"   — Text holds a visible thinking/reasoning update
+	//   "step_start"  — one OpenCode agent step started
+	//   "step_finish" — one OpenCode agent step finished
+	//   "tool_start"  — the agent began a tool call (Tool + Detail set)
+	//   "tool_end"    — a tool call finished (ID matches its start; OK
+	//                   reports success)
+	//   "error"       — Detail holds a recoverable runtime error
 	Type string `json:"type"`
 	// Text is the output delta for "text" events.
 	Text string `json:"text,omitempty"`
@@ -44,6 +49,9 @@ type StreamEvent struct {
 	ID string `json:"id,omitempty"`
 	// OK is meaningful on tool_end: false when the tool errored.
 	OK bool `json:"ok,omitempty"`
+	// Raw carries the original backend event/part when preserving it is
+	// useful for later UI upgrades. It is intentionally opaque.
+	Raw map[string]any `json:"raw,omitempty"`
 }
 
 // StreamHandler receives events as the turn runs. Called from the

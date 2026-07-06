@@ -44,6 +44,25 @@ func TestExecAdapter_StdoutReply(t *testing.T) {
 	}
 }
 
+func TestOpenCodeAdapter_StreamErrorFailsTurn(t *testing.T) {
+	skipOnWindows(t)
+	fakeBinOnPath(t, "opencode", `
+printf '%s\n' '{"type":"text","part":{"text":"partial reply"}}'
+printf '%s\n' '{"type":"error","error":{"message":"tool failed"}}'
+`)
+	a := NewOpenCodeAdapter()
+	r, err := a.SingleShot(context.Background(), SingleShotOpts{Cwd: t.TempDir(), Message: "hello"})
+	if err == nil {
+		t.Fatal("expected OpenCode stream error to fail the turn")
+	}
+	if !strings.Contains(err.Error(), "tool failed") {
+		t.Fatalf("error did not include OpenCode message: %v", err)
+	}
+	if r == nil || r.Text != "partial reply" {
+		t.Fatalf("partial reply should be preserved for callers that can use it, got %+v", r)
+	}
+}
+
 func TestExecAdapter_SystemPromptPrepended(t *testing.T) {
 	skipOnWindows(t)
 	fakeBinOnPath(t, "opencode", `cat -`)
@@ -174,18 +193,34 @@ func TestExecAdapter_ToolsFlagShapes(t *testing.T) {
 	if full[len(full)-1] != "-" {
 		t.Errorf("codex full: stdin sentinel must stay last, got %v", full)
 	}
-	// Safe default adds NO sandbox flag.
+	// Safe must not inherit Codex's own default, which can be writable.
 	safe, _ := NewCodexAdapter().build(buildIn{Message: "msg", TmpDir: t.TempDir()})
-	if got := strings.Join(safe, " "); strings.Contains(got, "sandbox") {
-		t.Errorf("codex safe: unexpected sandbox flag in %q", got)
+	if got := strings.Join(safe, " "); !strings.Contains(got, "--sandbox read-only") {
+		t.Errorf("codex safe: argv %q lacks --sandbox read-only", got)
 	}
-	// CLIs without permission flags must not leak the level into argv.
+	// CLIs without permission flags in their legacy build functions must
+	// not leak the level into argv. OpenCode permission flags are applied
+	// in runOpenCodeJSON, not in build().
 	for _, a := range []*execAdapter{NewOpenCodeAdapter(), NewPraimateCodeAdapter(), NewGeminiAdapter(), NewDeepSeekAdapter()} {
 		args, _ := a.build(buildIn{Message: "msg", Tools: "full", TmpDir: t.TempDir()})
 		for _, arg := range args {
 			if arg == "full" || strings.Contains(arg, "dangerously") {
 				t.Errorf("%s: tools level leaked into argv: %v", a.name, args)
 			}
+		}
+	}
+}
+
+func TestOpenCodeModeArgs(t *testing.T) {
+	if got := strings.Join(openCodeModeArgs("plan"), " "); got != "--agent plan" {
+		t.Fatalf("plan tools args = %q", got)
+	}
+	if got := strings.Join(openCodeModeArgs("full"), " "); got != "--dangerously-skip-permissions" {
+		t.Fatalf("full tools args = %q", got)
+	}
+	for _, tools := range []string{"", "safe", "ask", "edits"} {
+		if got := openCodeModeArgs(tools); got != nil {
+			t.Fatalf("%q tools should not add opencode permission flags, got %v", tools, got)
 		}
 	}
 }

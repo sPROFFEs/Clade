@@ -12,7 +12,7 @@
 # binary and writes a NOTICE recording the upstream source + commit.
 # Do NOT remove those. We rebrand the product NAME, not the attribution.
 #
-# Requires: bun (>=1.3), ~2GB disk, network (bun pulls the JS dep tree).
+# Requires: bun (>=1.3), ~8GB disk, network (bun pulls the JS dep tree).
 # The OpenCode SOURCE is vendored in-repo (third_party/opencode), so no
 # git clone of upstream is needed — bun install fetches node_modules from
 # npm, reproducible from the committed bun.lock.
@@ -42,9 +42,40 @@ EXT=""
 
 command -v bun >/dev/null 2>&1 || { echo "error: bun not found on PATH (install from https://bun.sh)"; exit 1; }
 
-WORK="$(mktemp -d)"
+resolve_work_parent() {
+  if [ -n "${PRAIMATE_BUILD_DIR:-}" ]; then
+    printf '%s\n' "$PRAIMATE_BUILD_DIR"
+    return
+  fi
+  if [ -n "${XDG_CACHE_HOME:-}" ]; then
+    printf '%s\n' "$XDG_CACHE_HOME/praimate/build"
+    return
+  fi
+  printf '%s\n' "$HOME/.cache/praimate/build"
+}
+
+require_work_space() {
+  local dir="$1"
+  local min_kib=$((8 * 1024 * 1024))
+  local avail_kib
+  avail_kib="$(df -Pk "$dir" | awk 'NR==2 {print $4}')"
+  if [ -n "$avail_kib" ] && [ "$avail_kib" -lt "$min_kib" ]; then
+    echo "error: not enough free space for PrAImate Code build under $dir" >&2
+    echo "       available: $((avail_kib / 1024)) MiB; required: $((min_kib / 1024)) MiB" >&2
+    echo "       set PRAIMATE_BUILD_DIR=/path/on/a/larger/disk and retry" >&2
+    exit 1
+  fi
+}
+
+WORK_PARENT="$(resolve_work_parent)"
+mkdir -p "$WORK_PARENT"
+require_work_space "$WORK_PARENT"
+WORK="$(mktemp -d "$WORK_PARENT/praimate-code-XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
 SRC="$WORK/opencode"
+mkdir -p "$WORK/tmp"
+export TMPDIR="$WORK/tmp"
+echo "→ scratch dir: $WORK"
 
 # bun install mutates the tree, so always build from a scratch copy —
 # never touch the committed vendored source in place.

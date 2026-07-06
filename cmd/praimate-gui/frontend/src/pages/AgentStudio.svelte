@@ -38,6 +38,7 @@
 
   // --- file tree (left-top) ---
   let tree = [] // AgentFileNode[]
+  let treeLoading = false
 
   // --- knowledge / RAG (left-bottom) ---
   let know = null
@@ -78,6 +79,8 @@
   let helperModel = ''
   let clis = []
   let modelSuggestions = []
+  let modelLoading = false
+  let modelLoadSeq = 0
   let messages = []
   let draft = ''
   let sending = false
@@ -153,6 +156,11 @@
   async function loadKnowledge() {
     if (!agentId) { know = null; return }
     try { know = await api.getAgentKnowledge(agentId) } catch (e) { error = String(e) }
+  }
+  async function refreshLeftTree() {
+    treeLoading = true
+    try { await refreshTree(); await loadKnowledge() }
+    finally { treeLoading = false }
   }
 
   async function createNamed() {
@@ -409,8 +417,10 @@
   // --- helper chat ---
   function handleStreamEvent(ev) {
     if (!sending || ev.chatId !== helperChatId) return
-    if (!stream) stream = { text: '', tools: [] }
+    if (!stream) stream = { text: '', tools: [], reasoning: [], steps: [] }
     if (ev.type === 'text') stream.text += ev.text
+    else if (ev.type === 'reasoning') stream.reasoning = [...(stream.reasoning || []), ev.text]
+    else if (ev.type === 'step_start' || ev.type === 'step_finish' || ev.type === 'error') stream.steps = [...(stream.steps || []), { type: ev.type, detail: ev.detail, ok: ev.type !== 'error' && ev.ok !== false }]
     else if (ev.type === 'tool_start') stream.tools = [...stream.tools, { id: ev.id || '', tool: ev.tool, detail: ev.detail, done: false, ok: true }]
     else if (ev.type === 'tool_end') {
       const t = [...stream.tools]
@@ -445,19 +455,26 @@
   async function stopChat() { try { await api.cancelChatTurn(helperChatId) } catch {} }
   async function applyHelperConfig() {
     if (!helperChatId) return
-    // Keep tools="edits" pinned. The 4th arg is the per-chat Tools
-    // level — passing '' here would reset to read-only and the next
-    // turn would refuse to save agent.yaml ("read-only environment").
-    try { await api.updateChatConfig(helperChatId, helperCli, helperModelSupported ? helperModel.trim() : '', 'edits', '', '', '') } catch (e) { error = String(e) }
+    // Keep write-capable tools pinned. OpenCode plan/build modes may reject
+    // edits in run mode, so helper chats need full when using it.
+    const tools = helperCli === 'opencode' || helperCli === 'praimate-code' ? 'full' : 'edits'
+    try { await api.updateChatConfig(helperChatId, helperCli, helperModelSupported ? helperModel.trim() : '', tools, '', '', '') } catch (e) { error = String(e) }
   }
   async function onHelperCli() {
+    const seq = ++modelLoadSeq
+    modelLoading = true
     modelSuggestions = (await api.listCLIModels(helperCli).catch(() => [])) || []
+    if (seq === modelLoadSeq) modelLoading = false
     helperModel = ''
     await applyHelperConfig()
   }
   async function scrollChat() { await tick(); if (threadEl) threadEl.scrollTop = threadEl.scrollHeight }
   function fmtDate(ts) { try { return new Date(ts).toLocaleTimeString() } catch { return '' } }
   function cleanMsg(s) { return (s || '').replace(/\n{3,}/g, '\n\n').trim() }
+  function activityTitle(activity) { const n = activity?.length || 0; return `Activity · ${n} event${n === 1 ? '' : 's'}` }
+  function activityStatus(t) { if (t.type === 'reasoning') return '?'; if (t.type === 'step_start') return '◌'; if (t.type === 'step_finish') return '✓'; if (t.type === 'error' || t.ok === false) return '✗'; return '✓' }
+  function activityName(t) { if (t.type === 'reasoning') return 'reasoning'; if (t.type === 'step_start') return 'step'; if (t.type === 'step_finish') return 'step done'; if (t.type === 'error') return 'error'; return t.tool || t.type || 'tool' }
+  function activityDetail(t) { return t.type === 'reasoning' ? t.text : t.detail }
 
   async function close() {
     if (helperChatId) { try { await api.deleteChat(helperChatId) } catch {} }
@@ -468,7 +485,9 @@
     try { clis = (await api.listCLIs()) || [] } catch {}
     const firstAvail = clis.find((c) => c.available)
     helperCli = firstAvail ? firstAvail.id : (clis[0]?.id ?? 'claude')
+    modelLoading = true
     modelSuggestions = (await api.listCLIModels(helperCli).catch(() => [])) || []
+    modelLoading = false
     if (initCfg.id) {
       await loadAll(initCfg.id)
       // Existing-agent flow: the agent already has a row + disk folder,
@@ -516,6 +535,7 @@
   <aside class="left">
     <div class="left-head">
       <strong class="grow">{agentName}</strong>
+      <button class="xbtn" title="Refresh file tree" on:click={refreshLeftTree} disabled={treeLoading}>{treeLoading ? '…' : '↻'}</button>
       <button class="xbtn" title="Open knowledge folder in file manager" on:click={revealKnowledgeFolder}>🗂</button>
       <button class="xbtn" title="New file" on:click={newFilePrompt}>＋</button>
       <button class="xbtn" title="Hide" on:click={() => (leftOpen = false)}>◂</button>
@@ -675,15 +695,31 @@
       <input class="field sm mono grow" list="helper-models" placeholder={helperModelSupported ? 'model (blank = default)' : 'no model flag'} bind:value={helperModel} on:change={applyHelperConfig} disabled={!helperModelSupported} />
       <datalist id="helper-models">{#each modelSuggestions as m}<option value={m}></option>{/each}</datalist>
     </div>
+    {#if modelLoading}<div class="hint" style="padding:0 2px 6px">Loading models...</div>{/if}
     <div class="thread" bind:this={threadEl}>
       {#if messages.length === 0 && !sending}<div class="hint">Ask me to draft instructions, suggest workflows, pick CLIs/tools, or review your YAML — or right-click a selection in the editor. I'm not saved to the agent.</div>{/if}
       {#each messages as m}
         <div class="msg {m.Role === 'user' ? 'user' : 'assistant'}" class:pending={m._pending}>
-          <div class="who">{m.Role}{m.TS ? ' · ' + fmtDate(m.TS) : ''}</div>{cleanMsg(m.Content)}
+          <div class="who">{m.Role}{m.TS ? ' · ' + fmtDate(m.TS) : ''}</div>
+          {#if m.Meta?.activity?.length}
+            <details class="activity-block">
+              <summary>{activityTitle(m.Meta.activity)}</summary>
+              <div class="tool-feed">
+                {#each m.Meta.activity as t}
+                  <div class="tool-line" class:err={t.ok === false || t.type === 'error'} class:reasoning-line={t.type === 'reasoning'}>
+                    {activityStatus(t)} {activityName(t)} {activityDetail(t) || ''}
+                  </div>
+                {/each}
+              </div>
+            </details>
+          {/if}
+          {cleanMsg(m.Content)}
         </div>
       {/each}
       {#if sending}
         <div class="msg assistant"><div class="who">assistant</div>
+          {#if stream?.reasoning?.length}<div class="tool-feed">{#each stream.reasoning as r}<div class="tool-line reasoning-line">? reasoning {r}</div>{/each}</div>{/if}
+          {#if stream?.steps?.length}<div class="tool-feed">{#each stream.steps as s}<div class="tool-line" class:err={!s.ok}>{s.ok ? (s.type === 'step_finish' ? '✓' : '◌') : '✗'} {s.type === 'error' ? 'error' : s.type === 'step_finish' ? 'step done' : 'step'} {s.detail || ''}</div>{/each}</div>{/if}
           {#if stream?.tools?.length}<div class="tool-feed">{#each stream.tools as t}<div>{t.done ? (t.ok ? '✓' : '✗') : '◌'} {t.tool}</div>{/each}</div>{/if}
           {#if stream?.text}{stream.text}<span class="cursor">▍</span>{:else}<span class="typing">…thinking</span>{/if}
         </div>
@@ -780,6 +816,12 @@
   .msg.pending { opacity: 0.6; }
   .who { font-size: 10.5px; color: var(--text-dim); margin-bottom: 3px; }
   .tool-feed { font-size: 11px; color: var(--text-dim); border-left: 2px solid var(--border); padding: 3px 8px; margin-bottom: 6px; }
+  .activity-block { margin: 3px 0 6px; }
+  .activity-block summary { cursor: pointer; color: var(--text-dim); font-size: 11px; user-select: none; }
+  .activity-block .tool-feed { margin-bottom: 0; }
+  .tool-line { white-space: pre-wrap; }
+  .tool-line.err { color: var(--danger, #e5484d); }
+  .reasoning-line { color: var(--accent, #7c6cf2); }
   .typing { color: var(--text-dim); font-style: italic; }
   .cursor { animation: blink 1s steps(1) infinite; }
   @keyframes blink { 50% { opacity: 0; } }

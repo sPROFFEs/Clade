@@ -283,6 +283,27 @@ func TestPrepareMCPForRun_WritesCodexAndOpenCodeConfigs(t *testing.T) {
 	if strings.Contains(openText, "Bearer secret") || strings.Contains(openText, `"secret"`) {
 		t.Fatalf("opencode config leaked secret:\n%s", openText)
 	}
+
+	praimateCodeDir := t.TempDir()
+	praimateCodeEnv, err := c.prepareMCPForRun(ctx, a, "praimate-code", praimateCodeDir)
+	if err != nil {
+		t.Fatalf("prepare praimate-code: %v", err)
+	}
+	if praimateCodeEnv["PRAIMATE_MCP_REMOTE_AUTHORIZATION"] != "secret" {
+		t.Fatalf("praimate-code env mismatch: %+v", praimateCodeEnv)
+	}
+	praimateCodeRaw, err := os.ReadFile(filepath.Join(praimateCodeDir, "opencode.json"))
+	if err != nil {
+		t.Fatalf("read praimate-code opencode config: %v", err)
+	}
+	praimateCodeText := string(praimateCodeRaw)
+	if !strings.Contains(praimateCodeText, `"type": "remote"`) ||
+		!strings.Contains(praimateCodeText, `"Authorization": "Bearer {env:PRAIMATE_MCP_REMOTE_AUTHORIZATION}"`) {
+		t.Fatalf("unexpected praimate-code config:\n%s", praimateCodeText)
+	}
+	if strings.Contains(praimateCodeText, "Bearer secret") || strings.Contains(praimateCodeText, `"secret"`) {
+		t.Fatalf("praimate-code config leaked secret:\n%s", praimateCodeText)
+	}
 }
 
 func TestPrepareMCPForRun_MissingDeclaredServerErrors(t *testing.T) {
@@ -294,6 +315,88 @@ func TestPrepareMCPForRun_MissingDeclaredServerErrors(t *testing.T) {
 	_, err := c.prepareMCPForRun(context.Background(), a, "claude", t.TempDir())
 	if !errors.Is(err, ErrMCPServerNotFound) {
 		t.Fatalf("expected ErrMCPServerNotFound, got %v", err)
+	}
+}
+
+func TestPrepareEnabledMCPForRun_WritesPraimateCodeConfig(t *testing.T) {
+	s := openTempStore(t)
+	defer s.Close()
+	c, _ := New(Options{Store: s})
+	ctx := context.Background()
+
+	_, err := c.ConnectMCP(ctx, ConnectMCPRequest{
+		ID:        "remote",
+		Name:      "Remote",
+		Transport: MCPTransportHTTP,
+		URL:       "https://mcp.example.test/mcp",
+		Auth:      map[string]string{"header": "Authorization", "token": "secret"},
+	})
+	if err != nil {
+		t.Fatalf("ConnectMCP enabled: %v", err)
+	}
+	disabled := false
+	_, err = c.ConnectMCP(ctx, ConnectMCPRequest{
+		ID:        "disabled",
+		Name:      "Disabled",
+		Transport: MCPTransportHTTP,
+		URL:       "https://disabled.example.test/mcp",
+		Enabled:   &disabled,
+	})
+	if err != nil {
+		t.Fatalf("ConnectMCP disabled: %v", err)
+	}
+
+	dir := t.TempDir()
+	env, err := c.PrepareEnabledMCPForRun(ctx, "praimate-code", dir)
+	if err != nil {
+		t.Fatalf("PrepareEnabledMCPForRun: %v", err)
+	}
+	if env["PRAIMATE_MCP_REMOTE_AUTHORIZATION"] != "secret" {
+		t.Fatalf("praimate-code env mismatch: %+v", env)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "opencode.json"))
+	if err != nil {
+		t.Fatalf("read opencode config: %v", err)
+	}
+	text := string(raw)
+	if !strings.Contains(text, `"remote"`) || strings.Contains(text, `"disabled"`) {
+		t.Fatalf("enabled MCP config mismatch:\n%s", text)
+	}
+}
+
+func TestPrepareMCPForRun_ExpandsStoredStdioCommandPaths(t *testing.T) {
+	t.Setenv("PRAIMATE_MCP_ROOT", "/tmp/ghidra root")
+
+	s := openTempStore(t)
+	defer s.Close()
+	c, _ := New(Options{Store: s})
+	ctx := context.Background()
+
+	_, err := c.ConnectMCP(ctx, ConnectMCPRequest{
+		ID:        "ghidra1132",
+		Name:      "Ghidra1132",
+		Transport: MCPTransportStdio,
+		Command:   "$PRAIMATE_MCP_ROOT/.venv/bin/python",
+		Args:      []string{"$PRAIMATE_MCP_ROOT/bridge_mcp_ghidra.py", "--ghidra-server", "http://127.0.0.1:8080/"},
+	})
+	if err != nil {
+		t.Fatalf("ConnectMCP: %v", err)
+	}
+
+	dir := t.TempDir()
+	a := &Agent{ID: "a", Name: "A", Instructions: "x", Supports: []string{"opencode"}, MCPServers: []string{"ghidra1132"}}
+	if _, err := c.prepareMCPForRun(ctx, a, "praimate-code", dir); err != nil {
+		t.Fatalf("prepare praimate-code: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "opencode.json"))
+	if err != nil {
+		t.Fatalf("read opencode config: %v", err)
+	}
+	text := string(raw)
+	if !strings.Contains(text, `"/tmp/ghidra root/.venv/bin/python"`) ||
+		!strings.Contains(text, `"/tmp/ghidra root/bridge_mcp_ghidra.py"`) ||
+		strings.Contains(text, "$PRAIMATE_MCP_ROOT") {
+		t.Fatalf("stdio command was not expanded:\n%s", text)
 	}
 }
 
@@ -319,6 +422,44 @@ func TestAddCustomMCP_Stdio(t *testing.T) {
 	}
 	if srv.CatalogueKey != "" {
 		t.Fatalf("custom server should have no catalogue key, got %q", srv.CatalogueKey)
+	}
+}
+
+func TestAddCustomMCP_StdioQuotedAndExpanded(t *testing.T) {
+	t.Setenv("GHIDRA_MCP_HOME", "/opt/Ghidra MCP")
+
+	c, _ := New(Options{Store: openTempStore(t)})
+	srv, err := c.AddCustomMCP(context.Background(), AddCustomMCPRequest{
+		Name:      "Ghidra1132",
+		Transport: "stdio",
+		Command:   `"$GHIDRA_MCP_HOME/.venv/bin/python" "$GHIDRA_MCP_HOME/bridge mcp ghidra.py" --ghidra-server http://127.0.0.1:8080/`,
+	})
+	if err != nil {
+		t.Fatalf("AddCustomMCP: %v", err)
+	}
+	if srv.Command != "/opt/Ghidra MCP/.venv/bin/python" {
+		t.Fatalf("command = %q", srv.Command)
+	}
+	wantArgs := []string{"/opt/Ghidra MCP/bridge mcp ghidra.py", "--ghidra-server", "http://127.0.0.1:8080/"}
+	if len(srv.Args) != len(wantArgs) {
+		t.Fatalf("args len = %d, want %d (%v)", len(srv.Args), len(wantArgs), srv.Args)
+	}
+	for i := range wantArgs {
+		if srv.Args[i] != wantArgs[i] {
+			t.Fatalf("arg[%d] = %q, want %q (all: %v)", i, srv.Args[i], wantArgs[i], srv.Args)
+		}
+	}
+}
+
+func TestAddCustomMCP_StdioRejectsUnterminatedQuote(t *testing.T) {
+	c, _ := New(Options{Store: openTempStore(t)})
+	_, err := c.AddCustomMCP(context.Background(), AddCustomMCPRequest{
+		Name:      "bad",
+		Transport: "stdio",
+		Command:   `"python server.py`,
+	})
+	if err == nil || !strings.Contains(err.Error(), "unterminated quote") {
+		t.Fatalf("expected unterminated quote error, got %v", err)
 	}
 }
 

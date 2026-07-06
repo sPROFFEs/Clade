@@ -128,8 +128,10 @@ export const api = {
   disableLocalForCLI: (cli) => call('DisableLocalForCLI', cli),
 
   pickFolder: () => call('PickFolder'),
-  runWorkflow: (agentID, workflow, cli, cwd, inputs) =>
-    call('RunWorkflow', agentID, workflow, cli, cwd, inputs),
+  runWorkflow: (agentID, workflow, cli, model, cwd, inputs, localEndpoint, localApiKey, localModel) =>
+    call('RunWorkflow', agentID, workflow, cli, model || '', cwd, inputs || {}, localEndpoint || '', localApiKey || '', localModel || ''),
+  runAllWorkflows: (agentID, cli, model, cwd, inputsByWorkflow, localEndpoint, localApiKey, localModel) =>
+    call('RunAllWorkflows', agentID, cli, model || '', cwd, inputsByWorkflow || {}, localEndpoint || '', localApiKey || '', localModel || ''),
   privacyPreview: (text) => call('PrivacyPreview', text),
 
   getMemory: () => call('GetMemory'),
@@ -188,6 +190,16 @@ export function onTurn(handler) {
   if (typeof window !== 'undefined' && window.runtime?.EventsOn) {
     window.runtime.EventsOn('praimate:turn', handler)
     return () => window.runtime.EventsOff('praimate:turn')
+  }
+  return () => {}
+}
+
+// onWorkflowStream subscribes to live workflow events (state, text deltas
+// and tool activity). Returns an unsubscribe function. No-op outside Wails.
+export function onWorkflowStream(handler) {
+  if (typeof window !== 'undefined' && window.runtime?.EventsOn) {
+    window.runtime.EventsOn('praimate:workflow-stream', handler)
+    return () => window.runtime.EventsOff('praimate:workflow-stream')
   }
   return () => {}
 }

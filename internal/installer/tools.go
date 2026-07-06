@@ -13,6 +13,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/sPROFFEs/PrAImate/internal/gitutil"
+	"github.com/sPROFFEs/PrAImate/internal/version"
 )
 
 // ToolID names a non-agent capability PrAImate can install — a CLI the
@@ -315,15 +318,12 @@ func graphifyBundledMethod(current OS) *Method {
 	if err != nil {
 		return nil
 	}
-	url := "https://github.com/sPROFFEs/PrAImate/releases/latest/download/" + graphifyAssetName()
 	if current == OSWindows {
 		dest := filepath.Join(binDir, "graphify.exe")
 		return &Method{
-			ID:    "powershell",
-			Label: "Download PrAImate's bundled graphify (no Python needed)",
-			Command: fmt.Sprintf(
-				"New-Item -ItemType Directory -Force -Path '%s' | Out-Null; "+
-					"Invoke-WebRequest -Uri '%s' -OutFile '%s'", binDir, url, dest),
+			ID:          "powershell",
+			Label:       "Download PrAImate's bundled graphify (no Python needed)",
+			Command:     forgeAssetDownloadPowerShell(graphifyAssetName(), binDir, dest),
 			Shell:       ShellPowerShell,
 			Recommended: true,
 		}
@@ -332,7 +332,7 @@ func graphifyBundledMethod(current OS) *Method {
 	return &Method{
 		ID:          "curl",
 		Label:       "Download PrAImate's bundled graphify (no Python needed)",
-		Command:     fmt.Sprintf("mkdir -p %q && curl -fSL %q -o %q && chmod +x %q", binDir, url, dest, dest),
+		Command:     forgeAssetDownloadBash(graphifyAssetName(), binDir, dest),
 		Shell:       ShellBash,
 		Recommended: true,
 	}
@@ -511,9 +511,8 @@ func allToolMethods(tool ToolID, action Action, current OS) []Method {
 }
 
 // praimateCodeMethods builds the download install for PrAImate Code. It
-// fetches the prebuilt standalone for the host OS/arch from our GitHub
-// release's "latest/download" alias (a stable URL GitHub resolves to the
-// newest release's asset) into <config>/praimate/bin. No toolchain
+// resolves the latest GitHub release tag and fetches the prebuilt standalone
+// for the host OS/arch into <config>/praimate/bin. No toolchain
 // needed — it's a single self-contained binary.
 func praimateCodeMethods(current OS) []Method {
 	binDir, err := PraimateBinDir()
@@ -521,18 +520,13 @@ func praimateCodeMethods(current OS) []Method {
 		return nil
 	}
 	asset := praimateCodeAssetName()
-	const base = "https://github.com/sPROFFEs/PrAImate/releases/latest/download/"
-	url := base + asset
 
 	if current == OSWindows {
 		dest := filepath.Join(binDir, "praimate-code.exe")
 		// Single-quoted PowerShell literals: '\' is NOT an escape char in
 		// PS single-quotes, so Windows paths pass through verbatim (unlike
 		// Go's %q, which would double the backslashes).
-		cmd := fmt.Sprintf(
-			"New-Item -ItemType Directory -Force -Path '%s' | Out-Null; "+
-				"Invoke-WebRequest -Uri '%s' -OutFile '%s'",
-			binDir, url, dest)
+		cmd := forgeAssetDownloadPowerShell(asset, binDir, dest)
 		// ID must name the runner methodAvailable() probes on PATH —
 		// powershell here (the Windows case in methodAvailable).
 		return []Method{{
@@ -544,9 +538,7 @@ func praimateCodeMethods(current OS) []Method {
 		}}
 	}
 	dest := filepath.Join(binDir, "praimate-code")
-	cmd := fmt.Sprintf(
-		"mkdir -p %q && curl -fSL %q -o %q && chmod +x %q",
-		binDir, url, dest, dest)
+	cmd := forgeAssetDownloadBash(asset, binDir, dest)
 	// ID "curl" so methodAvailable keeps it visible only when curl is on
 	// PATH; the command itself runs through bash (Shell).
 	return []Method{{
@@ -557,6 +549,29 @@ func praimateCodeMethods(current OS) []Method {
 		Recommended: true,
 		Prereqs:     []string{"curl"},
 	}}
+}
+
+func forgeAssetDownloadBash(asset, binDir, dest string) string {
+	api := version.ReleaseLatestAPIURL
+	base := version.RepoURL + "/releases/download/"
+	return fmt.Sprintf(
+		"tag=$(curl -fsSL -H 'User-Agent: praimate-installer' %q | sed -n 's/.*\"tag_name\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p' | head -1) && "+
+			"test -n \"$tag\" && "+
+			"url=%q\"$tag\"/%q && "+
+			"mkdir -p %q && curl -fSL \"$url\" -o %q && chmod +x %q",
+		api, base, asset, binDir, dest, dest)
+}
+
+func forgeAssetDownloadPowerShell(asset, binDir, dest string) string {
+	api := version.ReleaseLatestAPIURL
+	base := version.RepoURL + "/releases/download/"
+	return fmt.Sprintf(
+		"$r = Invoke-RestMethod -Uri '%s' -UseBasicParsing -Headers @{ 'User-Agent' = 'praimate-installer' }; "+
+			"$tag = $r.tag_name; if (-not $tag) { throw 'GitHub API response had no tag_name' }; "+
+			"$url = '%s' + $tag + '/%s'; "+
+			"New-Item -ItemType Directory -Force -Path '%s' | Out-Null; "+
+			"Invoke-WebRequest -Uri $url -OutFile '%s'",
+		api, base, asset, binDir, dest)
 }
 
 // ErrNoPrebuiltAsset signals to the caller that the requested binary is
@@ -930,6 +945,9 @@ func installScrapeGraphIntoManagedVenv(ctx context.Context, m Method, extraEnv [
 }
 
 func runToolCommand(ctx context.Context, stdout, stderr io.Writer, dir string, env []string, name string, args ...string) error {
+	if name == "git" {
+		args = gitutil.DisableSSLVerifyForInternalHostOrOrigin(ctx, dir, args...)
+	}
 	fmt.Fprintf(stdout, "$ %s\n", strings.Join(append([]string{name}, args...), " "))
 	var cap bytes.Buffer
 	cmd := exec.CommandContext(ctx, name, args...)

@@ -46,9 +46,10 @@ type Asset struct {
 var httpClient = &http.Client{Timeout: 60 * time.Second}
 
 // LatestURL is the GitHub API endpoint queried for the most recent
-// release of the configured repo.
+// release of the configured repo. Note the api.github.com host — GitHub
+// keeps its API on a separate hostname from the browser web UI.
 func LatestURL() string {
-	return "https://api.github.com/repos/" + version.Repo + "/releases/latest"
+	return version.ReleaseLatestAPIURL
 }
 
 // FetchLatest hits the GitHub API and returns the most recent release.

@@ -56,7 +56,10 @@ func TestToolCatalog_GraphifyBundledMethod(t *testing.T) {
 	if !bundled.Recommended {
 		t.Error("bundled method should be recommended")
 	}
-	if !strings.Contains(bundled.Command, "releases/latest/download/") {
+	// The API URL is the GitHub releases/latest endpoint on api.github.com;
+	// the asset URL is on github.com/<owner>/<repo>/releases/download.
+	if !strings.Contains(bundled.Command, "api.github.com/repos/sPROFFEs/PrAImate/releases/latest") ||
+		!strings.Contains(bundled.Command, "releases/download/") {
 		t.Errorf("bundled command not a release download: %q", bundled.Command)
 	}
 }

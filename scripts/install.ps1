@@ -31,10 +31,14 @@ param(
 $ErrorActionPreference = "Stop"
 
 $Repo = "sPROFFEs/PrAImate"
+$ForgeURL = "https://github.com"
+$RepoURL = "$ForgeURL/$Repo"
+# GitHub's API lives on api.github.com under /repos/<owner>/<repo>/…
+$ReleaseApiURL = "https://api.github.com/repos/$Repo/releases/latest"
 $SourceBranch = "main"
 # Release tag to pull assets from. When unset we resolve "latest" via
 # the GitHub API at download time so the installer keeps working as
-# the operator publishes new versioned tags (0.1.7, 0.1.8, ...).
+# the operator publishes new versioned tags (1.0.8, 1.0.9, ...).
 # Override with $env:RELEASE_TAG=<tag> to pin a specific release.
 $ReleaseTag = $env:RELEASE_TAG
 
@@ -146,9 +150,8 @@ if ($AllUsers -and -not (Test-IsAdmin)) {
 
 # ---------- binary path: GitHub release ----------
 function Resolve-LatestTag {
-    $api = "https://api.github.com/repos/$Repo/releases/latest"
     try {
-        $r = Invoke-RestMethod -Uri $api -UseBasicParsing -Headers @{ "User-Agent" = "praimate-installer" } -ErrorAction Stop
+        $r = Invoke-RestMethod -Uri $ReleaseApiURL -UseBasicParsing -Headers @{ "User-Agent" = "praimate-installer" } -ErrorAction Stop
     } catch {
         Fail "couldn't query GitHub for the latest release ($($_.Exception.Message)). Set `$env:RELEASE_TAG to pin a version and re-run."
     }
@@ -164,7 +167,7 @@ function Install-Binary {
         $ReleaseTag = Resolve-LatestTag
     }
     $fname = "praimate-$Triplet.zip"
-    $url   = "https://github.com/$Repo/releases/download/$ReleaseTag/$fname"
+    $url   = "$RepoURL/releases/download/$ReleaseTag/$fname"
     Info "tag:   $ReleaseTag"
     Info "asset: $fname"
     Info "url:   $url"
@@ -261,7 +264,7 @@ function Install-Source {
     Step "Cloning repo"
     $tmp = New-Item -ItemType Directory -Force -Path (Join-Path $env:TEMP ("praimate-src-" + [Guid]::NewGuid().ToString("N")))
     try {
-        & git clone --depth 1 --branch $SourceBranch "https://github.com/$Repo.git" (Join-Path $tmp.FullName "PrAImate")
+        & git clone --depth 1 --branch $SourceBranch "$RepoURL.git" (Join-Path $tmp.FullName "PrAImate")
         if ($LASTEXITCODE -ne 0) { Fail "git clone failed" }
 
         Step "Building"

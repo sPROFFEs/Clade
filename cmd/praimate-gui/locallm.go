@@ -17,7 +17,7 @@ import (
 type LocalLLMDefaults struct {
 	Endpoint      string `json:"endpoint"`
 	APIKey        string `json:"apiKey"`
-	WireAPI       string `json:"wireApi"`        // "", "responses", "chat"
+	WireAPI       string `json:"wireApi"` // "", "responses", "chat"
 	ContextTokens int    `json:"contextTokens"`
 	OutputTokens  int    `json:"outputTokens"`
 }

@@ -15,10 +15,25 @@ const Name = "PrAImate"
 // override it at link time with `-ldflags "-X .../internal/version.Current=X.Y.Z"`.
 // The literal here is the fallback when nothing is injected (e.g.
 // `go run`, `go install`, or `go build` without our scripts).
-var Current = "1.0.6"
+var Current = "1.0.7"
 
-// Repo is the GitHub slug the updater queries for releases.
+// ForgeBaseURL is the canonical browser URL for the GitHub host.
+const ForgeBaseURL = "https://github.com"
+
+// Repo is the GitHub owner/repository path the updater queries for releases.
 const Repo = "sPROFFEs/PrAImate"
+
+// RepoURL is the canonical browser URL for the repository (e.g. for the
+// updater's "release notes" link).
+const RepoURL = ForgeBaseURL + "/" + Repo
+
+// RepoCloneURL is the canonical HTTPS clone URL.
+const RepoCloneURL = RepoURL + ".git"
+
+// ReleaseLatestAPIURL is the GitHub API endpoint for the latest release.
+// Note the api.github.com host — GitHub's API lives on a separate
+// hostname, unlike Gitea forks that reuse ForgeBaseURL for both.
+const ReleaseLatestAPIURL = "https://api.github.com/repos/" + Repo + "/releases/latest"
 
 // Banner is the PRAIMATE wordmark with the monkey mascot on the left.
 // Rendered on -version and mirrored by the boot splash

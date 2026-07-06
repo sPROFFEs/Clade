@@ -19,7 +19,7 @@ import (
 // "praimate:chat-stream" event channel.
 type ChatStreamEvent struct {
 	ChatID string `json:"chatId"`
-	Type   string `json:"type"` // "text" | "tool_start" | "tool_end"
+	Type   string `json:"type"` // "text" | "reasoning" | "step_*" | "tool_*" | "error"
 	Text   string `json:"text,omitempty"`
 	Tool   string `json:"tool,omitempty"`
 	Detail string `json:"detail,omitempty"`
@@ -57,6 +57,9 @@ func (a *App) SendChatStream(chatID, message string, attachments []string) (*cor
 			systemPrompt = prefix
 		}
 	}
+	if chat.Settings.Surface == "workflow" {
+		systemPrompt = appendPromptContext(systemPrompt, core.WorkflowSystemContext(chat.WorkspacePath))
+	}
 
 	ctx, cancel := context.WithCancel(a.ctx)
 	a.chatCancelMu.Lock()
@@ -84,6 +87,16 @@ func (a *App) SendChatStream(chatID, message string, attachments []string) (*cor
 		})
 	}
 	return c.ContinueChatStream(ctx, chatID, message, chat.WorkspacePath, systemPrompt, attachments, onEvent)
+}
+
+func appendPromptContext(systemPrompt, context string) string {
+	if context == "" {
+		return systemPrompt
+	}
+	if systemPrompt == "" {
+		return context
+	}
+	return systemPrompt + "\n\n---\n\n" + context
 }
 
 // ActiveChatIDs returns the IDs of every chat that currently has an

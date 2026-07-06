@@ -28,6 +28,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/sPROFFEs/PrAImate/internal/gitutil"
 )
 
 // FetchResult records what happened to one skill URL.
@@ -75,7 +77,8 @@ func fetchOne(ctx context.Context, raw, targetRoot string) FetchResult {
 	}
 
 	// Default transport: git clone.
-	cmd := exec.CommandContext(ctx, "git", "clone", "--depth=1", raw, dst)
+	gitArgs := gitutil.DisableSSLVerifyForInternalHost("clone", "--depth=1", raw, dst)
+	cmd := exec.CommandContext(ctx, "git", gitArgs...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		// Clean up partial clone if any so a retry doesn't get stuck on
 		// "already exists".
@@ -265,10 +268,11 @@ func extractZipEntry(f *zip.File, dstRoot, relName string) error {
 // repo's last path segment with `.git` stripped.
 //
 // Examples:
-//   https://github.com/juliusbrussee/caveman.git → caveman
-//   git@github.com:org/Some-Repo.git            → some-repo
-//   file:///tmp/myrepo                          → myrepo
-//   C:\Users\me\repos\myrepo                    → myrepo
+//
+//	https://github.com/juliusbrussee/caveman.git → caveman
+//	git@github.com:org/Some-Repo.git            → some-repo
+//	file:///tmp/myrepo                          → myrepo
+//	C:\Users\me\repos\myrepo                    → myrepo
 func DeriveName(raw string) (string, error) {
 	raw = strings.TrimSpace(raw)
 	// Handle scp-style git@host:path

@@ -31,10 +31,14 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
 func (a *execAdapter) SingleShotStream(ctx context.Context, opts SingleShotOpts, emit StreamHandler) (*Reply, error) {
+	if isOpenCodeLikeAdapter(a.name) {
+		return a.openCodeSingleShotStream(ctx, opts, emit)
+	}
 	if a.name != "codex" {
 		return nil, ErrStreamUnsupported
 	}
@@ -90,7 +94,7 @@ func (a *execAdapter) SingleShotStream(ctx context.Context, opts SingleShotOpts,
 
 	// Final text: the --output-last-message file is authoritative (same
 	// as the buffered path); streamed agent messages are the fallback.
-	text := streamed
+	text := streamed.Text
 	if replyFile != "" {
 		if b, rerr := os.ReadFile(replyFile); rerr == nil && len(bytes.TrimSpace(b)) > 0 {
 			text = string(b)
@@ -98,42 +102,124 @@ func (a *execAdapter) SingleShotStream(ctx context.Context, opts SingleShotOpts,
 	}
 	text = strings.TrimRight(text, "\n")
 	if ctx.Err() != nil {
-		return &Reply{Text: text, ExitCode: exitCode}, ctx.Err()
+		return &Reply{Text: text, SessionID: streamed.SessionID, ExitCode: exitCode}, ctx.Err()
 	}
 	if text == "" && exitCode != 0 {
 		text = strings.TrimSpace(stderr.String())
 	}
-	return &Reply{Text: text, ExitCode: exitCode}, nil
+	return &Reply{Text: text, SessionID: streamed.SessionID, ExitCode: exitCode}, nil
 }
 
 func (a *execAdapter) ResumeStream(ctx context.Context, sessionID string, opts ResumeOpts, emit StreamHandler) (*Reply, error) {
+	if isOpenCodeLikeAdapter(a.name) {
+		return a.openCodeResumeStream(ctx, sessionID, opts, emit)
+	}
+	if a.name == "codex" {
+		return a.codexResumeStream(ctx, sessionID, opts, emit)
+	}
 	return nil, ErrStreamUnsupported
+}
+
+func (a *execAdapter) codexResumeStream(ctx context.Context, sessionID string, opts ResumeOpts, emit StreamHandler) (*Reply, error) {
+	if strings.TrimSpace(sessionID) == "" {
+		return nil, fmt.Errorf("%s.ResumeStream: empty sessionID", a.name)
+	}
+	path, err := a.resolveBin()
+	if err != nil {
+		return nil, fmt.Errorf("%s CLI not on PATH", a.bin)
+	}
+	tmpDir, err := os.MkdirTemp("", "praimate-"+a.name+"-")
+	if err != nil {
+		return nil, fmt.Errorf("%s: scratch dir: %w", a.name, err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	replyFile := filepath.Join(tmpDir, "reply.txt")
+	args := []string{"exec", "resume", "--skip-git-repo-check", "--json", "--output-last-message", replyFile}
+	if opts.Model != "" {
+		args = append(args, "-m", opts.Model)
+	}
+	args = append(args, codexPermissionArgs(opts.Tools, true)...)
+	args = append(args, sessionID, "-")
+
+	cmd := exec.CommandContext(ctx, path, args...)
+	hideConsole(cmd)
+	if opts.Cwd != "" {
+		cmd.Dir = opts.Cwd
+	}
+	cmd.Env = mergeEnv(os.Environ(), opts.Env)
+	cmd.Stdin = strings.NewReader(opts.Message)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("codex resume stream: stdout pipe: %w", err)
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("codex resume stream: start: %w", err)
+	}
+
+	streamed := parseCodexStream(stdout, emit)
+	waitErr := cmd.Wait()
+	exitCode := 0
+	if waitErr != nil {
+		var ee *exec.ExitError
+		if errors.As(waitErr, &ee) {
+			exitCode = ee.ExitCode()
+		} else if ctx.Err() == nil {
+			return nil, fmt.Errorf("codex resume stream: %w (stderr=%s)", waitErr, truncate(stderr.String(), 400))
+		}
+	}
+
+	text := streamed.Text
+	if b, rerr := os.ReadFile(replyFile); rerr == nil && len(bytes.TrimSpace(b)) > 0 {
+		text = string(b)
+	}
+	text = strings.TrimRight(text, "\n")
+	if ctx.Err() != nil {
+		return &Reply{Text: text, SessionID: streamed.SessionID, ExitCode: exitCode}, ctx.Err()
+	}
+	if text == "" && exitCode != 0 {
+		text = strings.TrimSpace(stderr.String())
+	}
+	if streamed.SessionID == "" {
+		streamed.SessionID = sessionID
+	}
+	return &Reply{Text: text, SessionID: streamed.SessionID, ExitCode: exitCode}, nil
 }
 
 // codexStreamLine tolerantly covers both codex event schemas. Item is
 // kept as a raw map because its field names have shifted between
 // releases.
 type codexStreamLine struct {
-	Type string         `json:"type"`
-	Item map[string]any `json:"item"`
-	Msg  *struct {
-		Type    string          `json:"type"`
-		Delta   string          `json:"delta"`
-		Message string          `json:"message"`
-		Command json.RawMessage `json:"command"`
-		ExitCode *int           `json:"exit_code"`
+	Type     string         `json:"type"`
+	ThreadID string         `json:"thread_id"`
+	Item     map[string]any `json:"item"`
+	Msg      *struct {
+		Type      string          `json:"type"`
+		SessionID string          `json:"session_id"`
+		Delta     string          `json:"delta"`
+		Message   string          `json:"message"`
+		Command   json.RawMessage `json:"command"`
+		ExitCode  *int            `json:"exit_code"`
 	} `json:"msg"`
+}
+
+type codexStreamResult struct {
+	Text      string
+	SessionID string
 }
 
 // parseCodexStream consumes the JSONL stream, emitting StreamEvents,
 // and returns the accumulated assistant text (used as fallback when the
 // --output-last-message file is missing).
-func parseCodexStream(r io.Reader, emit StreamHandler) string {
+func parseCodexStream(r io.Reader, emit StreamHandler) codexStreamResult {
 	if emit == nil {
 		emit = func(StreamEvent) {}
 	}
 	br := bufio.NewReaderSize(r, 256*1024)
 	var acc strings.Builder
+	var sessionID string
 	var sawDelta bool
 	for {
 		raw, err := br.ReadBytes('\n')
@@ -141,7 +227,16 @@ func parseCodexStream(r io.Reader, emit StreamHandler) string {
 			var line codexStreamLine
 			if jerr := json.Unmarshal(bytes.TrimSpace(raw), &line); jerr == nil {
 				switch {
+				case line.Type == "thread.started":
+					sessionID = line.ThreadID
+				case line.Type == "turn.started":
+					emit(StreamEvent{Type: "step_start", Detail: "turn"})
+				case line.Type == "turn.completed":
+					emit(StreamEvent{Type: "step_finish", Detail: "turn"})
 				case line.Msg != nil:
+					if line.Msg.SessionID != "" {
+						sessionID = line.Msg.SessionID
+					}
 					handleCodexProtoMsg(&line, &acc, &sawDelta, emit)
 				case strings.HasPrefix(line.Type, "item."):
 					handleCodexItem(line.Type, line.Item, &acc, sawDelta, emit)
@@ -149,7 +244,7 @@ func parseCodexStream(r io.Reader, emit StreamHandler) string {
 			}
 		}
 		if err != nil {
-			return acc.String()
+			return codexStreamResult{Text: acc.String(), SessionID: sessionID}
 		}
 	}
 }

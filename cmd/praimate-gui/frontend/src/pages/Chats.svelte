@@ -28,12 +28,29 @@
     { id: 'edits', label: 'Edits', hint: 'auto-approve file edits in the chat folder' },
     { id: 'full', label: 'Full', hint: 'skip all approvals — edits AND commands' },
   ]
+  const OPENCODE_TOOL_LEVELS = [
+    { id: 'plan', label: 'Plan', hint: 'OpenCode plan agent — disallows edit tools' },
+    { id: '', label: 'Build', hint: 'OpenCode default build agent' },
+    { id: 'full', label: 'Full', hint: 'OpenCode auto-approves permission requests for this chat' },
+  ]
+
+  function isOpenCodeLikeCli(cli) {
+    return cli === 'opencode' || cli === 'praimate-code'
+  }
+
+  function toolLevelsForCli(cli) {
+    return isOpenCodeLikeCli(cli) ? OPENCODE_TOOL_LEVELS : TOOL_LEVELS
+  }
+
+  function normalizeToolsForCli(cli, tools) {
+    return isOpenCodeLikeCli(cli) && tools !== 'plan' && tools !== 'full' ? '' : (tools || '')
+  }
 
   // Escalation hint: when the last reply shows denied/failed tool calls
   // and the chat isn't already at Full, offer a one-click level bump —
   // the "approve and retry" affordance for CLIs without mid-turn asks.
   $: lastAssistant = [...messages].reverse().find((m) => m.Role === 'assistant')
-  $: deniedTools = (lastAssistant?.Meta?.activity || []).some((t) => !t.ok)
+  $: deniedTools = (lastAssistant?.Meta?.activity || []).some((t) => (t.type === 'tool' || t.tool) && t.ok === false)
 
   // New clean chat (CLI + model + tools, no agent)
   let creating = false
@@ -42,6 +59,7 @@
   let newModel = ''
   let newTools = ''
   let modelSuggestions = []
+  let modelLoading = false
   let starting = false
   // Local LLM (Settings → Local LLM) injected into a new chat. Chats
   // route local through the full launcher machinery, so every CLI works.
@@ -73,7 +91,7 @@
   $: shownChats = searchResults ?? chats
   // Studio + Code sessions live in their own sections — they're
   // folder-scoped, not regular conversations.
-  $: regularChats = shownChats.filter((c) => c.Settings?.surface !== 'studio' && c.Settings?.surface !== 'code' && c.Settings?.surface !== 'agent-helper')
+  $: regularChats = shownChats.filter((c) => c.Settings?.surface !== 'studio' && c.Settings?.surface !== 'code' && c.Settings?.surface !== 'agent-helper' && c.Settings?.surface !== 'workflow')
   $: studioChats = shownChats.filter((c) => c.Settings?.surface === 'studio')
   $: codeChats = shownChats.filter((c) => c.Settings?.surface === 'code')
 
@@ -129,11 +147,12 @@
       chat,
       cli: chat.CLIAgent,
       model: chat.Settings?.model || '',
-      tools: chat.Settings?.tools || '',
+      tools: normalizeToolsForCli(chat.CLIAgent, chat.Settings?.tools),
       localEndpoint: chat.Settings?.local?.endpoint || '',
       localApiKey: chat.Settings?.local?.api_key || '',
       localModel: chat.Settings?.local?.model || '',
       suggestions: [],
+      modelLoading: true,
       skills: (chat.Settings?.skills || []).slice(),
       skillsCatalogue: [],
     }
@@ -141,8 +160,8 @@
       api.listCLIs().then((r) => { clis = r || [] }).catch(() => {})
     }
     api.listCLIModels(chat.CLIAgent)
-      .then((r) => { if (cfg && cfg.chat.ID === chat.ID) { cfg.suggestions = r || []; cfg = cfg } })
-      .catch(() => {})
+      .then((r) => { if (cfg && cfg.chat.ID === chat.ID) { cfg.suggestions = r || []; cfg.modelLoading = false; cfg = cfg } })
+      .catch(() => { if (cfg && cfg.chat.ID === chat.ID) { cfg.modelLoading = false; cfg = cfg } })
     api.skillsList()
       .then((r) => { if (cfg && cfg.chat.ID === chat.ID) { cfg.skillsCatalogue = r || []; cfg = cfg } })
       .catch(() => {})
@@ -150,7 +169,11 @@
 
   async function cfgCliChanged() {
     if (!cfg) return
+    cfg.tools = normalizeToolsForCli(cfg.cli, cfg.tools)
+    cfg.modelLoading = true
+    cfg = cfg
     cfg.suggestions = (await api.listCLIModels(cfg.cli).catch(() => [])) || []
+    cfg.modelLoading = false
     cfg = cfg
   }
 
@@ -160,7 +183,7 @@
     error = ''
     try {
       await api.updateChatConfig(
-        cfg.chat.ID, cfg.cli, cfg.model.trim(), cfg.tools,
+        cfg.chat.ID, cfg.cli, cfg.model.trim(), normalizeToolsForCli(cfg.cli, cfg.tools),
         cfg.localEndpoint.trim(), cfg.localApiKey, cfg.localModel.trim())
       try { await api.setChatSkills(cfg.chat.ID, cfg.skills || []) } catch (e) { /* non-fatal */ }
       const id = cfg.chat.ID
@@ -169,7 +192,7 @@
       const fresh = chats.find((x) => x.ID === id)
       if (selected?.ID === id && fresh) {
         selected = fresh
-        toolsLevel = fresh.Settings?.tools || ''
+        toolsLevel = normalizeToolsForCli(fresh.CLIAgent, fresh.Settings?.tools)
       }
     } catch (e) {
       error = String(e)
@@ -198,15 +221,20 @@
   async function refreshModels() {
     modelSuggestions = []
     if (!newCli) return
+    modelLoading = true
     try {
       modelSuggestions = (await api.listCLIModels(newCli)) || []
     } catch {
       modelSuggestions = []
+    } finally {
+      modelLoading = false
     }
   }
 
   $: selectedCliInfo = clis.find((c) => c.id === newCli)
   $: modelSupported = !!selectedCliInfo?.modelHint
+  $: newToolLevels = toolLevelsForCli(newCli)
+  $: if (newTools !== normalizeToolsForCli(newCli, newTools)) newTools = normalizeToolsForCli(newCli, newTools)
   // Per-chat local routing is honoured for claude/openclaude only (other
   // CLIs read the global Local LLM config). Hide the toggle otherwise so
   // it never silently no-ops.
@@ -220,12 +248,13 @@
     try {
       const useLocalNow = newUseLocal && localOpt?.configured
       const chat = await api.startCleanChat(newCli, useLocalNow ? '' : (modelSupported ? newModel.trim() : ''), '')
+      const tools = normalizeToolsForCli(newCli, newTools)
       if (useLocalNow) {
         // Route the chat at the configured local endpoint — the launcher
         // applies the per-CLI env/config when the chat runs.
-        await api.updateChatConfig(chat.ID, newCli, '', newTools || '', localOpt.endpoint, localOpt.apiKey, newLocalModel.trim())
-      } else if (newTools) {
-        await api.setChatTools(chat.ID, newTools)
+        await api.updateChatConfig(chat.ID, newCli, '', tools, localOpt.endpoint, localOpt.apiKey, newLocalModel.trim())
+      } else if (tools) {
+        await api.setChatTools(chat.ID, tools)
       }
       creating = false
       await load()
@@ -257,7 +286,7 @@
 
   async function open(chat) {
     selected = chat
-    toolsLevel = chat.Settings?.tools || ''
+    toolsLevel = normalizeToolsForCli(chat.CLIAgent, chat.Settings?.tools)
     attachments = []
     approvals = []
     try {
@@ -283,9 +312,10 @@
   async function setTools(level) {
     if (!selected) return
     try {
-      await api.setChatTools(selected.ID, level)
-      toolsLevel = level
-      if (selected.Settings) selected.Settings.tools = level
+      const next = normalizeToolsForCli(selected.CLIAgent, level)
+      await api.setChatTools(selected.ID, next)
+      toolsLevel = next
+      if (selected.Settings) selected.Settings.tools = next
     } catch (e) {
       error = String(e)
     }
@@ -307,9 +337,13 @@
 
   function handleStreamEvent(ev) {
     if (!sending || !selected || ev.chatId !== selected.ID) return
-    if (!stream) stream = { text: '', tools: [] }
+    if (!stream) stream = { text: '', tools: [], reasoning: [], steps: [] }
     if (ev.type === 'text') {
       stream.text += ev.text
+    } else if (ev.type === 'reasoning') {
+      stream.reasoning = [...(stream.reasoning || []), ev.text]
+    } else if (ev.type === 'step_start' || ev.type === 'step_finish' || ev.type === 'error') {
+      stream.steps = [...(stream.steps || []), { type: ev.type, detail: ev.detail, ok: ev.type !== 'error' && ev.ok !== false }]
     } else if (ev.type === 'tool_start') {
       stream.tools = [...stream.tools, { id: ev.id || '', tool: ev.tool, detail: ev.detail, done: false, ok: true }]
     } else if (ev.type === 'tool_end') {
@@ -423,6 +457,31 @@
     return String(s).replace(/\n*\[The user is looking at:[^\]]*\]\s*$/, '')
   }
 
+  function activityTitle(activity) {
+    const n = activity?.length || 0
+    return `Activity · ${n} event${n === 1 ? '' : 's'}`
+  }
+
+  function activityStatus(t) {
+    if (t.type === 'reasoning') return '?'
+    if (t.type === 'step_start') return '◌'
+    if (t.type === 'step_finish') return '✓'
+    if (t.type === 'error' || t.ok === false) return '✗'
+    return '✓'
+  }
+
+  function activityName(t) {
+    if (t.type === 'reasoning') return 'reasoning'
+    if (t.type === 'step_start') return 'step'
+    if (t.type === 'step_finish') return 'step done'
+    if (t.type === 'error') return 'error'
+    return t.tool || t.type || 'tool'
+  }
+
+  function activityDetail(t) {
+    return t.type === 'reasoning' ? t.text : t.detail
+  }
+
   function isImg(p) {
     return /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(String(p))
   }
@@ -472,11 +531,12 @@
     <datalist id="cfg-model-suggestions">
       {#each cfg.suggestions as m}<option value={m}></option>{/each}
     </datalist>
+    {#if cfg.modelLoading}<div class="card-sub">Loading models...</div>{/if}
     <label class="lbl">Tools</label>
     <div class="row">
-      {#each TOOL_LEVELS as lvl}
-        <button class="btn sm" class:primary={cfg.tools === lvl.id} title={lvl.hint} on:click={() => (cfg.tools = lvl.id)}>{lvl.label}</button>
-      {/each}
+        {#each toolLevelsForCli(cfg.cli) as lvl}
+          <button class="btn sm" class:primary={cfg.tools === lvl.id} title={lvl.hint} on:click={() => (cfg.tools = lvl.id)}>{lvl.label}</button>
+        {/each}
     </div>
     {#if cfg.cli === 'claude' || cfg.cli === 'openclaude'}
       <label class="lbl" style="margin-top:10px">Local endpoint (optional — routes THIS chat through a self-hosted backend)</label>
@@ -517,7 +577,7 @@
     </div>
     <div class="toolpick" title="How much the CLI agent may do: edit files, run commands">
       <span class="lbl-inline">Tools</span>
-      {#each TOOL_LEVELS as lvl}
+      {#each toolLevelsForCli(selected.CLIAgent) as lvl}
         <button
           class="btn sm"
           class:primary={toolsLevel === lvl.id}
@@ -546,15 +606,18 @@
           <div class="who">{m.Role}{m.TS ? ' · ' + fmtDate(m.TS) : ''}{m.Meta?.interrupted ? ' · interrupted' : ''}</div>
           <!-- content rendered below; studio context block stripped -->
           {#if m.Meta?.activity?.length}
-            <div class="tool-feed">
-              {#each m.Meta.activity as t}
-                <div class="tool-row" class:err={!t.ok}>
-                  <span class="tool-status">{t.ok ? '✓' : '✗'}</span>
-                  <span class="tool-name">{t.tool}</span>
-                  {#if t.detail}<span class="tool-detail mono">{t.detail}</span>{/if}
-                </div>
-              {/each}
-            </div>
+            <details class="activity-block">
+              <summary>{activityTitle(m.Meta.activity)}</summary>
+              <div class="tool-feed">
+                {#each m.Meta.activity as t}
+                  <div class="tool-row" class:err={t.ok === false || t.type === 'error'} class:reasoning-row={t.type === 'reasoning'}>
+                    <span class="tool-status">{activityStatus(t)}</span>
+                    <span class="tool-name">{activityName(t)}</span>
+                    {#if activityDetail(t)}<span class="tool-detail mono" class:reasoning-detail={t.type === 'reasoning'}>{activityDetail(t)}</span>{/if}
+                  </div>
+                {/each}
+              </div>
+            </details>
           {/if}
           {cleanMsg(m.Content)}
           {#if m.Meta?.attachments}
@@ -578,6 +641,20 @@
     {#if sending}
       <div class="msg assistant">
         <div class="who">assistant</div>
+        {#if stream?.reasoning?.length}
+          <div class="tool-feed reasoning-live">
+            {#each stream.reasoning as r}
+              <div class="tool-row reasoning-row"><span class="tool-status">?</span><span class="tool-name">reasoning</span><span class="tool-detail reasoning-detail">{r}</span></div>
+            {/each}
+          </div>
+        {/if}
+        {#if stream?.steps?.length}
+          <div class="tool-feed">
+            {#each stream.steps as s}
+              <div class="tool-row" class:err={!s.ok}><span class="tool-status">{s.ok ? '◌' : '✗'}</span><span class="tool-name">{s.type === 'error' ? 'error' : s.type === 'step_finish' ? 'step done' : 'step'}</span>{#if s.detail}<span class="tool-detail mono">{s.detail}</span>{/if}</div>
+            {/each}
+          </div>
+        {/if}
         {#if stream?.tools?.length}
           <div class="tool-feed">
             {#each stream.tools as t}
@@ -615,8 +692,8 @@
       {#if selected.CLIAgent === 'claude' || selected.CLIAgent === 'openclaude'}
         Switch to <button class="btn sm" on:click={() => setTools('ask')}>Ask</button> to approve them live, or
       {/if}
-      raise the level and ask again:
-      <button class="btn sm" on:click={() => setTools('edits')}>Allow edits</button>
+      {isOpenCodeLikeCli(selected.CLIAgent) ? 'switch to Full access and ask again:' : 'raise the level and ask again:'}
+      {#if !isOpenCodeLikeCli(selected.CLIAgent)}<button class="btn sm" on:click={() => setTools('edits')}>Allow edits</button>{/if}
       <button class="btn sm" on:click={() => setTools('full')}>Full access</button>
     </div>
   {/if}
@@ -713,10 +790,11 @@
         <datalist id="model-suggestions">
           {#each modelSuggestions as m}<option value={m}></option>{/each}
         </datalist>
+        {#if modelLoading}<div class="card-sub">Loading models...</div>{/if}
       {/if}
       <label class="lbl">Tools</label>
       <div class="row">
-        {#each TOOL_LEVELS as lvl}
+        {#each newToolLevels as lvl}
           <button class="btn sm" class:primary={newTools === lvl.id} title={lvl.hint} on:click={() => (newTools = lvl.id)}>{lvl.label}</button>
         {/each}
       </div>
@@ -866,8 +944,12 @@
     font-size: 12px;
     color: var(--text-dim);
   }
+  .activity-block { margin: 4px 0 8px; }
+  .activity-block summary { cursor: pointer; color: var(--text-dim); font-size: 12px; user-select: none; }
+  .activity-block .tool-feed { margin-bottom: 0; }
   .tool-row { display: flex; gap: 6px; align-items: baseline; min-width: 0; }
   .tool-row.err .tool-status { color: var(--danger, #e5484d); }
+  .reasoning-row .tool-status { color: var(--accent, #7c6cf2); }
   .tool-status { width: 1em; flex: none; }
   .tool-name { font-weight: 600; flex: none; }
   .tool-detail {
@@ -876,6 +958,7 @@
     white-space: nowrap;
     font-size: 11px;
   }
+  .reasoning-detail { white-space: pre-wrap; text-overflow: clip; }
   .cursor { animation: blink 1s steps(1) infinite; }
   @keyframes blink { 50% { opacity: 0; } }
   .approval-card {

@@ -70,6 +70,7 @@ refreshed too when you have them installed. On Windows the previous
 binary is preserved as `praimate.exe.old` (a running `.exe` can be
 renamed but not deleted); the next update cleans it up.
 
+
 ## First run
 
 First run asks where your data lives and what to seed:
@@ -800,7 +801,7 @@ returns:
 
 Optional, off by default. When enabled, the workspaces root becomes a
 git repository whose history mirrors your chats and templates across
-machines. No GitHub / Gitea REST API calls — pure git protocol over
+machines. No GitHub REST API calls — pure git protocol over
 HTTPS or SSH, using the credentials your `git` client already has.
 
 ### Three ways to start

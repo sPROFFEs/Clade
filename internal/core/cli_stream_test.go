@@ -108,9 +108,9 @@ func TestParseCodexStream_ProtoSchema(t *testing.T) {
 	}, "\n") + "\n"
 
 	emit, events := collectEvents()
-	text := parseCodexStream(strings.NewReader(stream), emit)
-	if text != "All green." {
-		t.Fatalf("accumulated text = %q", text)
+	result := parseCodexStream(strings.NewReader(stream), emit)
+	if result.Text != "All green." {
+		t.Fatalf("accumulated text = %q", result.Text)
 	}
 	var sawStart, sawEnd bool
 	var streamed string
@@ -150,9 +150,9 @@ func TestParseCodexStream_ItemSchema(t *testing.T) {
 	}, "\n") + "\n"
 
 	emit, events := collectEvents()
-	text := parseCodexStream(strings.NewReader(stream), emit)
-	if text != "There are 3 files." {
-		t.Fatalf("accumulated text = %q", text)
+	result := parseCodexStream(strings.NewReader(stream), emit)
+	if result.Text != "There are 3 files." {
+		t.Fatalf("accumulated text = %q", result.Text)
 	}
 	var sawStart, sawEnd bool
 	for _, ev := range *events {
@@ -182,8 +182,8 @@ func TestParseStreams_TolerateUnknownLines(t *testing.T) {
 	codex := "WARN some log line\n" +
 		`{"type":"future.event","item":{"item_type":"hologram"}}` + "\n" +
 		`{"id":"1","msg":{"type":"agent_message","message":"fine"}}` + "\n"
-	if text := parseCodexStream(strings.NewReader(codex), nil); text != "fine" {
-		t.Fatalf("codex: text=%q", text)
+	if result := parseCodexStream(strings.NewReader(codex), nil); result.Text != "fine" {
+		t.Fatalf("codex: text=%q", result.Text)
 	}
 }
 

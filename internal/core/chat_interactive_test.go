@@ -92,6 +92,48 @@ func TestContinueChat_RedactsOutboundRevealsReply(t *testing.T) {
 	}
 }
 
+func TestContinueChatStream_PersistsCompactOpenCodeActivity(t *testing.T) {
+	mock := &mockAdapter{
+		name:      "opencode",
+		resumable: true,
+		replies:   []string{"final"},
+		streamEvents: []StreamEvent{
+			{Type: "reasoning", Text: "checking\ncontext"},
+			{Type: "step_start", Detail: "inspect workspace"},
+			{Type: "tool_start", Tool: "read", Detail: "main.go", ID: "t1"},
+			{Type: "tool_end", Tool: "read", Detail: "main.go", ID: "t1", OK: true},
+			{Type: "error", Detail: "permission rejected"},
+		},
+	}
+	withMockAdapter(t, mock)
+
+	c, _ := New(Options{Store: openTempStore(t)})
+	ctx := context.Background()
+	chat, err := c.CreateChat(ctx, CreateChatRequest{Title: "oc", CLIAgent: "opencode", WorkspacePath: "/tmp"})
+	if err != nil {
+		t.Fatalf("CreateChat: %v", err)
+	}
+	if _, err := c.ContinueChatStream(ctx, chat.ID, "hello", "/tmp", "", nil, nil); err != nil {
+		t.Fatalf("ContinueChatStream: %v", err)
+	}
+	msgs, err := c.ListMessages(ctx, chat.ID, 0)
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+	assistant := msgs[len(msgs)-1]
+	activity, ok := assistant.Meta["activity"].([]any)
+	if !ok || len(activity) < 4 {
+		t.Fatalf("activity not persisted: %#v", assistant.Meta)
+	}
+	first, _ := activity[0].(map[string]any)
+	if first["type"] != "reasoning" || first["text"] != "checking ⏎ context" {
+		t.Fatalf("reasoning activity = %#v", first)
+	}
+	if _, ok := assistant.Meta["opencode"]; ok {
+		t.Fatalf("raw opencode events should not be persisted: %#v", assistant.Meta)
+	}
+}
+
 // UpdateChatConfig is the GUI's per-chat settings sheet: switching the
 // CLI clears the session id (sessions belong to their CLI), and model +
 // tools persist into the settings JSON.

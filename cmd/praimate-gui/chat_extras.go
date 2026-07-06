@@ -2,7 +2,7 @@ package main
 
 // Chat extras — the bindings behind the composer's power features:
 //
-//   - per-chat Tools level (safe / edits / full) and model re-pinning
+//   - per-chat Tools level (safe / ask / edits / plan / full) and model re-pinning
 //   - "!" shell commands run in the chat's working directory
 //   - file ingestion: attach images / PDFs / docs to a turn; the files
 //     are copied into a per-chat attachments dir and their paths handed
@@ -28,13 +28,13 @@ import (
 )
 
 // SetChatTools persists the chat's Tools permission level ("", "ask",
-// "edits", "full"). The next turn picks it up — resumed sessions re-pin
+// "edits", "plan", "full"). The next turn picks it up — resumed sessions re-pin
 // the level on every invocation.
 func (a *App) SetChatTools(chatID, tools string) error {
 	switch tools {
-	case "", "ask", "edits", "full":
+	case "", "ask", "edits", "plan", "full":
 	default:
-		return fmt.Errorf("unknown tools level %q (want \"\", \"ask\", \"edits\" or \"full\")", tools)
+		return fmt.Errorf("unknown tools level %q (want \"\", \"ask\", \"edits\", \"plan\" or \"full\")", tools)
 	}
 	c, err := a.requireCore()
 	if err != nil {
@@ -49,7 +49,7 @@ func (a *App) SetChatTools(chatID, tools string) error {
 // (history stays). Empty localEndpoint clears the local route.
 func (a *App) UpdateChatConfig(chatID, cli, model, tools, localEndpoint, localAPIKey, localModel string) error {
 	switch tools {
-	case "", "ask", "edits", "full":
+	case "", "ask", "edits", "plan", "full":
 	default:
 		return fmt.Errorf("unknown tools level %q", tools)
 	}
@@ -186,6 +186,9 @@ func (a *App) SendChatWithAttachments(chatID, message string, attachments []stri
 		} else {
 			systemPrompt = prefix
 		}
+	}
+	if chat.Settings.Surface == "workflow" {
+		systemPrompt = appendPromptContext(systemPrompt, core.WorkflowSystemContext(chat.WorkspacePath))
 	}
 	return c.ContinueChatWithAttachments(a.ctx, chatID, message, chat.WorkspacePath, systemPrompt, attachments)
 }

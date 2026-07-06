@@ -39,7 +39,7 @@ import (
 type buildIn struct {
 	Message string
 	Model   string
-	Tools   string // "", "edits", "full" — see SingleShotOpts.Tools
+	Tools   string // "", "ask", "edits", "full" — see SingleShotOpts.Tools
 	TmpDir  string
 }
 
@@ -94,9 +94,17 @@ func praimateManagedBinDir() string {
 
 func (a *execAdapter) Name() string { return a.name }
 
-func (a *execAdapter) SupportsResume() bool { return false }
+func (a *execAdapter) SupportsResume() bool {
+	return isOpenCodeLikeAdapter(a.name) || a.name == "codex"
+}
 
 func (a *execAdapter) Resume(ctx context.Context, sessionID string, opts ResumeOpts) (*Reply, error) {
+	if isOpenCodeLikeAdapter(a.name) {
+		return a.openCodeResumeStream(ctx, sessionID, opts, nil)
+	}
+	if a.name == "codex" {
+		return a.codexResumeStream(ctx, sessionID, opts, nil)
+	}
 	return nil, fmt.Errorf("%s adapter does not support resume", a.name)
 }
 
@@ -118,6 +126,10 @@ func (a *execAdapter) Available(ctx context.Context) error {
 }
 
 func (a *execAdapter) SingleShot(ctx context.Context, opts SingleShotOpts) (*Reply, error) {
+	if isOpenCodeLikeAdapter(a.name) {
+		return a.openCodeSingleShotStream(ctx, opts, nil)
+	}
+
 	path, err := a.resolveBin()
 	if err != nil {
 		return nil, fmt.Errorf("%s CLI not on PATH", a.bin)
@@ -194,14 +206,28 @@ func NewCodexAdapter() *execAdapter {
 			if in.Model != "" {
 				args = append(args, "-m", in.Model)
 			}
-			switch in.Tools {
-			case "edits":
-				args = append(args, "--sandbox", "workspace-write")
-			case "full":
-				args = append(args, "--dangerously-bypass-approvals-and-sandbox")
-			}
+			args = append(args, codexPermissionArgs(in.Tools, false)...)
 			return append(args, "-"), out
 		},
+	}
+}
+
+func codexPermissionArgs(tools string, resume bool) []string {
+	switch tools {
+	case "edits":
+		if resume {
+			return []string{"-c", `sandbox_mode="workspace-write"`}
+		}
+		return []string{"--sandbox", "workspace-write"}
+	case "full":
+		return []string{"--dangerously-bypass-approvals-and-sandbox"}
+	default:
+		// Codex's own default can be workspace-write depending on config/version.
+		// PrAImate Safe/Ask must stay read-only unless the user selects Edits/Full.
+		if resume {
+			return []string{"-c", `sandbox_mode="read-only"`}
+		}
+		return []string{"--sandbox", "read-only"}
 	}
 }
 

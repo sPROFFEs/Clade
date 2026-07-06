@@ -4,10 +4,11 @@
   // Editor (document studio). Editing happens on the YAML wire format
   // in the embedded CodeMirror editor; saving re-validates through the
   // same parser `praimate agent import` uses.
-  import { onMount, onDestroy } from 'svelte'
-  import { api, onTurn } from '../lib/api.js'
+  import { onMount } from 'svelte'
+  import { api } from '../lib/api.js'
   import { activePage, openChatId, pendingTerm, agentStudio } from '../lib/stores.js'
   import CodeEditor from '../lib/CodeEditor.svelte'
+  import WorkflowRunner from '../lib/WorkflowRunner.svelte'
 
   let agents = []
   let error = ''
@@ -71,6 +72,7 @@
       model: '',
       cliOptions,
       suggestions: [],
+      modelLoading: false,
       folder: '',
       busy: false,
       useLocal: false,
@@ -101,7 +103,10 @@
     if (!dlg) return
     // Drop the local toggle if the new CLI can't route on this surface.
     if (dlg.useLocal && !isLocalRoutable(dlg.surface, dlg.cli)) { dlg.useLocal = false; dlg = dlg }
+    dlg.modelLoading = true
+    dlg = dlg
     dlg.suggestions = (await api.listCLIModels(dlg.cli).catch(() => [])) || []
+    dlg.modelLoading = false
     dlg = dlg
   }
 
@@ -333,74 +338,20 @@
   // --- workflow run (ported from the old Run page) ---------------------------
 
   let runAgent = null
-  let workflow = null
-  let cli = ''
-  let cwd = ''
-  let inputs = {}
-  let privacyCounts = null
-  let running = false
-  let turns = []
-  let result = null
-  let unsubscribe = () => {}
 
   function openRun(a) {
     runAgent = a
-    cli = a.supports?.[0] || 'claude'
-    const def = a.workflows?.find((w) => w.name === a.default_workflow)
-    workflow = def || a.workflows?.[0] || null
-    inputs = {}
-    privacyCounts = null
-    result = null
-    turns = []
-    if (workflow) for (const inp of workflow.inputs || []) inputs[inp.name] = inp.default || ''
     view = 'run'
-  }
-
-  function pickWorkflow(w) {
-    workflow = w
-    inputs = {}
-    privacyCounts = null
-    for (const inp of w.inputs || []) inputs[inp.name] = inp.default || ''
-  }
-
-  async function chooseFolder() {
-    try { const p = await api.pickFolder(); if (p) cwd = p } catch (e) { error = String(e) }
-  }
-
-  async function review() {
-    try {
-      privacyCounts = (await api.privacyPreview(Object.values(inputs).join(' '))) || {}
-    } catch (e) { error = String(e) }
-  }
-
-  async function startRun() {
-    running = true
-    turns = []
-    result = null
-    error = ''
-    unsubscribe = onTurn((t) => { turns = [...turns, t] })
-    try {
-      result = await api.runWorkflow(runAgent.id, workflow.name, cli, cwd, inputs)
-    } catch (e) {
-      error = String(e)
-    } finally {
-      unsubscribe()
-      running = false
-      privacyCounts = null
-    }
   }
 
   function backToList() {
     view = 'list'
-    runAgent = null; workflow = null; inputs = {}; turns = []; result = null; privacyCounts = null
+    runAgent = null
     editing = null
     know = null
   }
 
   onMount(load)
-  onDestroy(() => unsubscribe())
-
-  $: matchTotal = privacyCounts ? Object.values(privacyCounts).reduce((a, b) => a + b, 0) : 0
 </script>
 
 {#if view === 'edit'}
@@ -507,75 +458,7 @@
   </div>
   </div>
 {:else if view === 'run' && runAgent}
-  {#if running}
-    <div class="card">
-      <div class="card-title">Running {runAgent.name} · {workflow.name} on {cli}…</div>
-      <div class="card-sub">Streaming turns as they complete.</div>
-    </div>
-    {#each turns as t}
-      <div class="msg user"><div class="who">you (turn {t.index + 1})</div>{t.user_msg}</div>
-      <div class="msg assistant"><div class="who">assistant · {t.duration_ms}ms</div>{t.reply}</div>
-    {/each}
-  {:else if result}
-    <div class="row" style="margin-bottom:14px">
-      <button class="btn" on:click={backToList}>← Agents</button>
-      <span class="pill" class:ok={result.outcome === 'completed'} class:err={result.outcome !== 'completed'}>{result.outcome}</span>
-      {#if result.chat_id}<span class="pill">saved: {result.chat_id}</span>{/if}
-    </div>
-    {#if result.error}<div class="banner">{result.error}</div>{/if}
-    {#each result.turns || [] as t}
-      <div class="msg user"><div class="who">you (turn {t.index + 1})</div>{t.user_msg}</div>
-      <div class="msg assistant"><div class="who">assistant · {t.duration_ms}ms</div>{t.reply}</div>
-    {/each}
-  {:else}
-    <div class="row" style="margin-bottom:14px">
-      <button class="btn" on:click={backToList}>← Agents</button>
-      <strong>{runAgent.name} — run workflow</strong>
-    </div>
-    {#if error}<div class="banner">{error}</div>{/if}
-    {#if (runAgent.workflows || []).length > 1}
-      <label class="lbl">Workflow</label>
-      <div class="row" style="flex-wrap:wrap">
-        {#each runAgent.workflows as w}
-          <button class="btn" class:primary={workflow?.name === w.name} on:click={() => pickWorkflow(w)}>{w.name}</button>
-        {/each}
-      </div>
-    {/if}
-    {#if workflow}
-      <label class="lbl">CLI</label>
-      <select class="field" bind:value={cli} style="max-width:240px">
-        {#each runAgent.supports || [] as s}<option value={s}>{s}</option>{/each}
-      </select>
-      <label class="lbl">Working folder</label>
-      <div class="row">
-        <input class="field grow" bind:value={cwd} placeholder="(defaults to app cwd)" />
-        <button class="btn" on:click={chooseFolder}>Browse…</button>
-      </div>
-      {#each workflow.inputs || [] as inp}
-        <label class="lbl">{inp.prompt || inp.name}{inp.required ? ' *' : ''}</label>
-        <input class="field" bind:value={inputs[inp.name]} placeholder={inp.placeholder || ''} />
-      {/each}
-      {#if privacyCounts === null}
-        <div style="margin-top:18px"><button class="btn primary" on:click={review}>Continue</button></div>
-      {:else}
-        <div class="card" style="margin-top:18px">
-          {#if matchTotal === 0}
-            <div class="card-title">Privacy scan: clean</div>
-          {:else}
-            <div class="card-title" style="color:var(--warn)">Privacy scan: {matchTotal} match(es)</div>
-            <div class="card-sub">
-              Sent REDACTED to the CLI:
-              {#each Object.entries(privacyCounts) as [cat, n]}<span class="pill warn">{cat} ×{n}</span>{/each}
-            </div>
-          {/if}
-          <div class="row" style="margin-top:10px">
-            <button class="btn primary" on:click={startRun}>Run workflow</button>
-            <button class="btn" on:click={() => (privacyCounts = null)}>Back</button>
-          </div>
-        </div>
-      {/if}
-    {/if}
-  {/if}
+  <WorkflowRunner agent={runAgent} localOpt={localOpt} on:close={backToList} />
 {:else}
   <div class="row" style="margin-bottom: 4px">
     <h1 class="grow" style="margin:0">Agents</h1>
@@ -621,6 +504,7 @@
         <datalist id="launch-model-suggestions">
           {#each dlg.suggestions as m}<option value={m}></option>{/each}
         </datalist>
+        {#if dlg.modelLoading}<div class="card-sub">Loading models...</div>{/if}
       {/if}
       {#if true}
         <label class="lbl">Project folder *</label>

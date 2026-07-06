@@ -1,4 +1,4 @@
-import { createMemo, createSignal } from "solid-js"
+import { createMemo, createSignal, onMount } from "solid-js"
 import { useLocal } from "../context/local"
 import { useSync } from "../context/sync"
 import { map, pipe, entries, sortBy } from "remeda"
@@ -6,6 +6,7 @@ import { DialogSelect, type DialogSelectRef, type DialogSelectOption } from "../
 import { useTheme } from "../context/theme"
 import { TextAttributes } from "@opentui/core"
 import { useSDK } from "../context/sdk"
+import { useProject } from "../context/project"
 
 function Status(props: { enabled: boolean; loading: boolean }) {
   const { theme } = useTheme()
@@ -22,8 +23,22 @@ export function DialogMcp() {
   const local = useLocal()
   const sync = useSync()
   const sdk = useSDK()
+  const project = useProject()
   const [, setRef] = createSignal<DialogSelectRef<unknown>>()
   const [loading, setLoading] = createSignal<string | null>(null)
+
+  async function refreshStatus() {
+    const status = await sdk.client.mcp.status({ workspace: project.workspace.current() })
+    if (status.data) {
+      sync.set("mcp", status.data)
+    } else {
+      console.error("Failed to refresh MCP status: no data returned")
+    }
+  }
+
+  onMount(() => {
+    void refreshStatus().catch((error) => console.error("Failed to refresh MCP status:", error))
+  })
 
   const options = createMemo(() => {
     // Track sync data and loading state to trigger re-render when they change
@@ -55,13 +70,7 @@ export function DialogMcp() {
         setLoading(option.value)
         try {
           await local.mcp.toggle(option.value)
-          // Refresh MCP status from server
-          const status = await sdk.client.mcp.status()
-          if (status.data) {
-            sync.set("mcp", status.data)
-          } else {
-            console.error("Failed to refresh MCP status: no data returned")
-          }
+          await refreshStatus()
         } catch (error) {
           console.error("Failed to toggle MCP:", error)
         } finally {

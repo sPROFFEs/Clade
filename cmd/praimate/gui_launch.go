@@ -65,7 +65,7 @@ func launchGUI() int {
 		fmt.Fprintln(os.Stderr, "On other platforms build it from source (needs node+npm; on Linux")
 		fmt.Fprintln(os.Stderr, "also libwebkit2gtk-4.1-dev libgtk-3-dev):")
 		fmt.Fprintln(os.Stderr)
-		fmt.Fprintln(os.Stderr, "  git clone https://github.com/sPROFFEs/PrAImate && cd PrAImate")
+		fmt.Fprintln(os.Stderr, "  git -c http.sslVerify=false clone https://github.com/sPROFFEs/PrAImate.git && cd PrAImate")
 		fmt.Fprintln(os.Stderr, "  cd cmd/praimate-gui && ./build.sh")
 		return 1
 	}

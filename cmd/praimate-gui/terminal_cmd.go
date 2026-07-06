@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/sPROFFEs/PrAImate/internal/core"
@@ -112,15 +113,44 @@ func terminalLocalRoutable(cli string) bool {
 	return false
 }
 
+// appendEnvMap folds generated launch secrets into an env overlay,
+// replacing any existing value for the same key.
+func appendEnvMap(env []string, extra map[string]string) []string {
+	if len(extra) == 0 {
+		return env
+	}
+	index := map[string]int{}
+	for i, kv := range env {
+		if key, _, ok := strings.Cut(kv, "="); ok {
+			index[key] = i
+		}
+	}
+	keys := make([]string, 0, len(extra))
+	for key := range extra {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		kv := key + "=" + extra[key]
+		if i, ok := index[key]; ok {
+			env[i] = kv
+			continue
+		}
+		index[key] = len(env)
+		env = append(env, kv)
+	}
+	return env
+}
+
 // exportAgentContext writes the agent's instructions into the project
 // folder's native context file for the chosen CLI, so the launched CLI
 // picks them up automatically. We do NOT clobber an existing file the
 // user authored — only create it when absent, and tag PrAImate-written
 // ones so a later run can refresh them.
 //
-//	claude / openclaude → CLAUDE.md
-//	codex / opencode    → AGENTS.md
-//	others              → no native convention; skipped
+//	claude / openclaude           → CLAUDE.md
+//	codex / opencode/praimate-code → AGENTS.md
+//	others                        → no native convention; skipped
 func exportAgentContext(cwd, cli string, agent *core.Agent) error {
 	if agent == nil || strings.TrimSpace(agent.Instructions) == "" {
 		return nil
@@ -129,7 +159,7 @@ func exportAgentContext(cwd, cli string, agent *core.Agent) error {
 	switch cli {
 	case "claude", "openclaude":
 		fname = "CLAUDE.md"
-	case "codex", "opencode":
+	case "codex", "opencode", "praimate-code":
 		fname = "AGENTS.md"
 	default:
 		return nil

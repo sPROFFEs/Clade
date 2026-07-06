@@ -9,7 +9,10 @@ package core
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
+	"unicode"
 )
 
 // AddCustomMCPRequest is the form-friendly shape for a user-defined MCP.
@@ -45,14 +48,23 @@ func (c *Core) AddCustomMCP(ctx context.Context, req AddCustomMCPRequest) (*MCPS
 
 	// Allow the command field to carry inline args ("python server.py
 	// --port 9000"); split them out when explicit Args weren't given.
+	// Keep this shell-like enough for quoted paths, but still persist a
+	// direct argv vector so the MCP client does not need a shell.
 	command := strings.TrimSpace(req.Command)
 	args := req.Args
 	if transport == string(MCPTransportStdio) && len(args) == 0 && command != "" {
-		fields := strings.Fields(command)
+		fields, err := splitCommandLine(command)
+		if err != nil {
+			return nil, fmt.Errorf("AddCustomMCP: %w", err)
+		}
 		if len(fields) > 1 {
 			command = fields[0]
 			args = fields[1:]
 		}
+	}
+	if transport == string(MCPTransportStdio) {
+		command = expandMCPProcessArg(command)
+		args = expandMCPProcessArgs(args)
 	}
 
 	return c.ConnectMCP(ctx, ConnectMCPRequest{
@@ -118,4 +130,156 @@ func mcpSlug(s string) string {
 		b = b[:len(b)-1]
 	}
 	return string(b)
+}
+
+func splitCommandLine(s string) ([]string, error) {
+	var fields []string
+	var b strings.Builder
+	inSingle := false
+	inDouble := false
+	escaped := false
+	haveToken := false
+
+	flush := func() {
+		fields = append(fields, b.String())
+		b.Reset()
+		haveToken = false
+	}
+
+	for _, r := range s {
+		if escaped {
+			b.WriteRune(r)
+			escaped = false
+			haveToken = true
+			continue
+		}
+		switch {
+		case inSingle:
+			if r == '\'' {
+				inSingle = false
+				haveToken = true
+			} else {
+				b.WriteRune(r)
+				haveToken = true
+			}
+		case inDouble:
+			switch r {
+			case '\\':
+				escaped = true
+			case '"':
+				inDouble = false
+				haveToken = true
+			default:
+				b.WriteRune(r)
+				haveToken = true
+			}
+		default:
+			switch {
+			case unicode.IsSpace(r):
+				if haveToken {
+					flush()
+				}
+			case r == '\\':
+				escaped = true
+				haveToken = true
+			case r == '\'':
+				inSingle = true
+				haveToken = true
+			case r == '"':
+				inDouble = true
+				haveToken = true
+			default:
+				b.WriteRune(r)
+				haveToken = true
+			}
+		}
+	}
+	if escaped {
+		b.WriteRune('\\')
+	}
+	if inSingle || inDouble {
+		return nil, fmt.Errorf("unterminated quote in command")
+	}
+	if haveToken {
+		flush()
+	}
+	return fields, nil
+}
+
+func expandMCPProcessArgs(args []string) []string {
+	if len(args) == 0 {
+		return nil
+	}
+	out := make([]string, len(args))
+	for i, arg := range args {
+		out[i] = expandMCPProcessArg(arg)
+	}
+	return out
+}
+
+func expandMCPProcessArg(s string) string {
+	if s == "" {
+		return s
+	}
+	s = expandEnvPreserveUnset(s)
+	if s == "~" {
+		if home, err := os.UserHomeDir(); err == nil && home != "" {
+			return home
+		}
+	}
+	if strings.HasPrefix(s, "~/") {
+		if home, err := os.UserHomeDir(); err == nil && home != "" {
+			return filepath.Join(home, s[2:])
+		}
+	}
+	return s
+}
+
+func expandEnvPreserveUnset(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		if s[i] != '$' || i+1 >= len(s) {
+			b.WriteByte(s[i])
+			i++
+			continue
+		}
+		if s[i+1] == '{' {
+			end := strings.IndexByte(s[i+2:], '}')
+			if end < 0 {
+				b.WriteByte(s[i])
+				i++
+				continue
+			}
+			end += i + 2
+			name := s[i+2 : end]
+			if value, ok := os.LookupEnv(name); ok {
+				b.WriteString(value)
+			} else {
+				b.WriteString(s[i : end+1])
+			}
+			i = end + 1
+			continue
+		}
+		j := i + 1
+		for j < len(s) && isEnvNameByte(s[j]) {
+			j++
+		}
+		if j == i+1 {
+			b.WriteByte(s[i])
+			i++
+			continue
+		}
+		name := s[i+1 : j]
+		if value, ok := os.LookupEnv(name); ok {
+			b.WriteString(value)
+		} else {
+			b.WriteString(s[i:j])
+		}
+		i = j
+	}
+	return b.String()
+}
+
+func isEnvNameByte(c byte) bool {
+	return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_'
 }

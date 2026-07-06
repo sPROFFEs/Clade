@@ -44,9 +44,9 @@ type BackupState struct {
 // commit lists are populated so the frontend can render the
 // resolution panel.
 type BackupSyncResult struct {
-	Action        string   `json:"action"` // in_sync | pushed | pulled | diverged | no_remote
-	LocalCommits  []string `json:"localCommits"`
-	RemoteCommits []string `json:"remoteCommits"`
+	Action        string       `json:"action"` // in_sync | pushed | pulled | diverged | no_remote
+	LocalCommits  []string     `json:"localCommits"`
+	RemoteCommits []string     `json:"remoteCommits"`
 	State         *BackupState `json:"state"`
 }
 

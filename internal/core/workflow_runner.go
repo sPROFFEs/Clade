@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -28,10 +29,21 @@ type RunOptions struct {
 	// Env is per-launch environment overrides (e.g. local-LLM routing).
 	Env map[string]string
 
+	// Model, if non-empty, selects the model for every workflow turn.
+	Model string
+
+	// Tools is retained for compatibility; workflow runs always execute
+	// with full tool privileges.
+	Tools string
+
 	// OnTurn, if non-nil, is invoked with each completed turn as it
 	// arrives. Lets a TUI/GUI stream the conversation without waiting
 	// for the whole workflow to finish.
 	OnTurn func(turn TurnResult)
+
+	// OnEvent, if non-nil, is invoked with live turn events and workflow
+	// state transitions. CLIs without streaming still emit state events.
+	OnEvent func(event WorkflowRunEvent)
 
 	// Persist toggles DB-backed chat persistence. When true the runner
 	// creates a chats row at start, writes one messages row per turn
@@ -51,14 +63,55 @@ type RunOptions struct {
 	// via Core.BuildMemoryInjection before calling RunWorkflow.
 	// Empty = no injection.
 	MemoryInjection string
+
+	// SystemContext, if non-empty, is appended to the workflow's system
+	// prompt. GUI callers use this to make per-run context explicit
+	// without changing agent YAML.
+	SystemContext string
+
+	// ChatSettings, if Persist is true, seeds the temporary/persisted chat
+	// row created for the workflow transcript.
+	ChatSettings ChatSettings
 }
 
 // TurnResult records one round of (user message, assistant reply).
 type TurnResult struct {
-	Index      int
-	UserMsg    string
-	Reply      *Reply
-	DurationMs int64
+	Index        int
+	WorkflowName string
+	UserMsg      string
+	Reply        *Reply
+	DurationMs   int64
+}
+
+// WorkflowRunEvent is one live update from a workflow run.
+type WorkflowRunEvent struct {
+	WorkflowName string
+	TurnIndex    int
+	Type         string
+	Text         string
+	Tool         string
+	Detail       string
+	ID           string
+	OK           bool
+}
+
+// RunAllOptions parameterise a sequential, shared-session execution of
+// every workflow declared on an agent.
+type RunAllOptions struct {
+	Agent            *Agent
+	InputsByWorkflow map[string]map[string]string
+	CLI              string
+	Cwd              string
+	Env              map[string]string
+	Model            string
+	Tools            string
+	OnTurn           func(turn TurnResult)
+	OnEvent          func(event WorkflowRunEvent)
+	Persist          bool
+	ChatTitle        string
+	MemoryInjection  string
+	SystemContext    string
+	ChatSettings     ChatSettings
 }
 
 // RunResult is the terminal outcome of a workflow execution.
@@ -71,8 +124,8 @@ type RunResult struct {
 	Err          error
 
 	// ChatID is non-empty when Persist was set and a chat row was
-	// successfully created. Callers can pass it to DistillChat() to
-	// trigger memory distillation against the stored turns.
+	// successfully created. GUI workflow chats are temporary and deleted
+	// when the run view is closed.
 	ChatID string
 }
 
@@ -95,134 +148,243 @@ const (
 //     supports it (cheaper: keeps state inside the CLI), or fall back
 //     to SingleShot per turn.
 //
-// wait_for_assistant steps are no-ops in this implementation — the
-// reply is already consumed by the matching user_message. They exist
-// in the YAML so future executors can pause on specific tool calls
-// (UntilTool) without changing the format.
+// wait_for_assistant steps are explicit barriers: by the time the
+// runner observes one, the preceding user_message has already received
+// and persisted its final reply. until_tool is retained for YAML
+// compatibility; specific tool-gated waits can be layered on later.
 func (c *Core) RunWorkflow(ctx context.Context, opts RunOptions) *RunResult {
-	res := &RunResult{Outcome: OutcomeAdapterErr}
-
 	if err := validateRunOptions(opts); err != nil {
-		res.Err = err
-		return res
+		return &RunResult{Outcome: OutcomeAdapterErr, Err: err}
 	}
-
 	workflow := opts.Agent.FindWorkflow(opts.WorkflowName)
 	if workflow == nil {
 		workflow = opts.Agent.ResolveDefaultWorkflow()
 		if workflow == nil {
-			res.Err = fmt.Errorf("agent %q: no workflow named %q and no default", opts.Agent.ID, opts.WorkflowName)
+			return &RunResult{
+				AgentID: opts.Agent.ID, WorkflowName: opts.WorkflowName,
+				Outcome: OutcomeAdapterErr,
+				Err:     fmt.Errorf("agent %q: no workflow named %q and no default", opts.Agent.ID, opts.WorkflowName),
+			}
+		}
+	}
+	return c.runWorkflowSequence(ctx, workflowRunConfig{
+		Agent: opts.Agent, CLI: opts.CLI, Cwd: opts.Cwd, Env: opts.Env,
+		Model: opts.Model, Tools: opts.Tools, OnTurn: opts.OnTurn, OnEvent: opts.OnEvent,
+		Persist: opts.Persist, ChatTitle: opts.ChatTitle, MemoryInjection: opts.MemoryInjection, SystemContext: opts.SystemContext,
+		ChatSettings: opts.ChatSettings,
+	}, []workflowRunPlan{{Workflow: workflow, Inputs: opts.Inputs}})
+}
+
+// RunAllWorkflows executes every workflow on opts.Agent in YAML order,
+// sharing the adapter session between workflows. Because shared context is
+// the point of this path, it requires a resumable CLI when there is more
+// than one workflow.
+func (c *Core) RunAllWorkflows(ctx context.Context, opts RunAllOptions) *RunResult {
+	if err := validateRunAllOptions(opts); err != nil {
+		return &RunResult{Outcome: OutcomeAdapterErr, Err: err}
+	}
+	plans := make([]workflowRunPlan, 0, len(opts.Agent.Workflows))
+	for i := range opts.Agent.Workflows {
+		w := &opts.Agent.Workflows[i]
+		plans = append(plans, workflowRunPlan{
+			Workflow: w,
+			Inputs:   opts.InputsByWorkflow[w.Name],
+		})
+	}
+	return c.runWorkflowSequence(ctx, workflowRunConfig{
+		Agent: opts.Agent, CLI: opts.CLI, Cwd: opts.Cwd, Env: opts.Env,
+		Model: opts.Model, Tools: opts.Tools, OnTurn: opts.OnTurn, OnEvent: opts.OnEvent,
+		Persist: opts.Persist, ChatTitle: opts.ChatTitle, MemoryInjection: opts.MemoryInjection, SystemContext: opts.SystemContext,
+		ChatSettings: opts.ChatSettings, RequireResume: true,
+	}, plans)
+}
+
+type workflowRunPlan struct {
+	Workflow *Workflow
+	Inputs   map[string]string
+}
+
+type workflowRunConfig struct {
+	Agent           *Agent
+	CLI             string
+	Cwd             string
+	Env             map[string]string
+	Model           string
+	Tools           string
+	OnTurn          func(turn TurnResult)
+	OnEvent         func(event WorkflowRunEvent)
+	Persist         bool
+	ChatTitle       string
+	MemoryInjection string
+	SystemContext   string
+	ChatSettings    ChatSettings
+	RequireResume   bool
+}
+
+func (c *Core) runWorkflowSequence(ctx context.Context, cfg workflowRunConfig, plans []workflowRunPlan) *RunResult {
+	res := &RunResult{Outcome: OutcomeAdapterErr}
+	if err := validateWorkflowRunConfig(cfg); err != nil {
+		res.Err = err
+		return res
+	}
+	if len(plans) == 0 {
+		res.AgentID = cfg.Agent.ID
+		res.Err = fmt.Errorf("agent %q: no workflows to run", cfg.Agent.ID)
+		return res
+	}
+	if plans[0].Workflow != nil {
+		res.WorkflowName = plans[0].Workflow.Name
+	}
+	res.AgentID = cfg.Agent.ID
+
+	for _, p := range plans {
+		if p.Workflow == nil {
+			res.Err = fmt.Errorf("agent %q: nil workflow in run plan", cfg.Agent.ID)
 			return res
 		}
 	}
-	res.AgentID = opts.Agent.ID
-	res.WorkflowName = workflow.Name
 
-	if !contains(opts.Agent.Supports, opts.CLI) {
+	if !contains(cfg.Agent.Supports, cfg.CLI) {
 		res.Err = fmt.Errorf("agent %q does not support CLI %q (supports: %v)",
-			opts.Agent.ID, opts.CLI, opts.Agent.Supports)
+			cfg.Agent.ID, cfg.CLI, cfg.Agent.Supports)
 		return res
 	}
 
-	adapter, err := GetCLIAdapter(opts.CLI)
+	adapter, err := GetCLIAdapter(cfg.CLI)
 	if err != nil {
 		res.Err = err
 		return res
 	}
-	if mcpEnv, err := c.prepareMCPForRun(ctx, opts.Agent, opts.CLI, opts.Cwd); err != nil {
+	if cfg.RequireResume && !adapter.SupportsResume() {
+		res.Err = fmt.Errorf("agent %q: run all workflows requires resumable CLI %q", cfg.Agent.ID, cfg.CLI)
+		return res
+	}
+	if mcpEnv, err := c.prepareMCPForRun(ctx, cfg.Agent, cfg.CLI, cfg.Cwd); err != nil {
 		res.Err = err
 		return res
 	} else if len(mcpEnv) > 0 {
-		opts.Env = mergeStringMaps(opts.Env, mcpEnv)
+		cfg.Env = mergeStringMaps(cfg.Env, mcpEnv)
 	}
 
-	rendered, err := RenderWorkflow(opts.Agent, workflow, opts.Inputs)
-	if err != nil {
-		res.Err = err
-		return res
+	rendered := make([]*RenderedWorkflow, 0, len(plans))
+	for _, p := range plans {
+		rw, err := RenderWorkflow(cfg.Agent, p.Workflow, p.Inputs)
+		if err != nil {
+			res.Err = err
+			return res
+		}
+		rendered = append(rendered, rw)
 	}
 	privacy := c.PrivacyScanner().NewRedactionSession()
-	systemPrompt, _ := privacy.Redact(AgentSystemPrompt(opts.Agent))
+	systemPrompt := withSystemContext(AgentSystemPrompt(cfg.Agent), WorkflowSystemContext(cfg.Cwd))
+	systemPrompt = withSystemContext(systemPrompt, cfg.SystemContext)
+	systemPrompt, _ = privacy.Redact(systemPrompt)
 
 	// Optional DB-backed chat persistence. Failures here are logged
 	// via res.Err only if no other path sets it later; they do NOT
 	// abort the run — a user shouldn't lose a workflow because the
 	// DB hiccupped.
-	chatID := c.maybeCreateChat(ctx, opts)
+	chatID := c.maybeCreateChat(ctx, RunOptions{
+		Agent: cfg.Agent, WorkflowName: res.WorkflowName, CLI: cfg.CLI,
+		Cwd: cfg.Cwd, Model: cfg.Model, Persist: cfg.Persist, ChatTitle: cfg.ChatTitle,
+		ChatSettings: cfg.ChatSettings,
+	})
 	res.ChatID = chatID
 
 	turnIdx := 0
 	var lastReply *Reply
-	for _, step := range rendered.Steps {
-		if step.Kind != StepUserMessage {
-			continue
-		}
-		if err := ctx.Err(); err != nil {
-			res.Outcome = OutcomeCancelled
-			res.Err = err
-			c.maybeEndChat(ctx, chatID, res.Outcome)
-			return res
-		}
+	tools := "full"
+	for _, workflow := range rendered {
+		emitWorkflowEvent(cfg.OnEvent, WorkflowRunEvent{
+			WorkflowName: workflow.Name, Type: "workflow_start", OK: true,
+		})
+		for _, step := range workflow.Steps {
+			if step.Kind == StepWaitForAssistant {
+				barrierTurnIdx := turnIdx
+				if barrierTurnIdx > 0 {
+					barrierTurnIdx--
+				}
+				emitWaitBarrier(cfg.OnEvent, workflow.Name, barrierTurnIdx, step.UntilTool)
+				continue
+			}
+			if step.Kind != StepUserMessage {
+				continue
+			}
+			if err := ctx.Err(); err != nil {
+				res.Outcome = OutcomeCancelled
+				res.Err = err
+				c.maybeEndChat(ctx, chatID, res.Outcome)
+				return res
+			}
 
-		body := step.Body
-		// Memory injection rides on the FIRST rendered user_message.
-		// Subsequent turns already have model context, and prepending
-		// the same injection block per turn would burn tokens.
-		if turnIdx == 0 && opts.MemoryInjection != "" {
-			body = opts.MemoryInjection + "\n\n" + body
-		}
+			body := step.Body
+			// Memory injection rides on the FIRST rendered user_message.
+			// Subsequent turns already have model context, and prepending
+			// the same injection block per turn would burn tokens.
+			if turnIdx == 0 && cfg.MemoryInjection != "" {
+				body = cfg.MemoryInjection + "\n\n" + body
+			}
 
-		adapterBody, _ := privacy.Redact(body)
-		c.maybeAddMessage(ctx, chatID, "user", body)
+			adapterBody, _ := privacy.Redact(body)
+			c.maybeAddMessage(ctx, chatID, "user", body)
 
-		start := time.Now()
-		var reply *Reply
-		var runErr error
-		if turnIdx == 0 || !adapter.SupportsResume() || lastReply == nil || lastReply.SessionID == "" {
-			reply, runErr = adapter.SingleShot(ctx, SingleShotOpts{
-				Cwd:          opts.Cwd,
-				Message:      adapterBody,
-				SystemPrompt: systemPrompt,
-				Env:          opts.Env,
+			emitWorkflowEvent(cfg.OnEvent, WorkflowRunEvent{
+				WorkflowName: workflow.Name, TurnIndex: turnIdx, Type: "turn_start", OK: true,
 			})
-		} else {
-			reply, runErr = adapter.Resume(ctx, lastReply.SessionID, ResumeOpts{Message: adapterBody})
-		}
-		if runErr != nil {
-			res.Outcome = OutcomeAdapterErr
-			res.Err = runErr
-			c.maybeEndChat(ctx, chatID, res.Outcome)
-			return res
-		}
-		reply = revealReply(privacy, reply)
-		if reply.ExitCode != 0 {
-			res.Outcome = OutcomeAgentFailed
-			res.Err = fmt.Errorf("%s exited with code %d", adapter.Name(), reply.ExitCode)
-			res.Turns = append(res.Turns, TurnResult{
-				Index:      turnIdx,
-				UserMsg:    body,
-				Reply:      reply,
-				DurationMs: time.Since(start).Milliseconds(),
-			})
+
+			start := time.Now()
+			reply, runErr := runWorkflowTurn(ctx, adapter, workflow.Name, turnIdx, cfg, tools,
+				systemPrompt, adapterBody, lastReply, cfg.OnEvent)
+			if runErr != nil {
+				res.Outcome = OutcomeAdapterErr
+				res.Err = runErr
+				emitWorkflowEvent(cfg.OnEvent, WorkflowRunEvent{
+					WorkflowName: workflow.Name, TurnIndex: turnIdx, Type: "error", Detail: runErr.Error(), OK: false,
+				})
+				c.maybeEndChat(ctx, chatID, res.Outcome)
+				return res
+			}
+			reply = revealReply(privacy, reply)
+			if reply.ExitCode != 0 {
+				res.Outcome = OutcomeAgentFailed
+				res.Err = fmt.Errorf("%s exited with code %d", adapter.Name(), reply.ExitCode)
+				emitWorkflowEvent(cfg.OnEvent, WorkflowRunEvent{
+					WorkflowName: workflow.Name, TurnIndex: turnIdx, Type: "error", Detail: res.Err.Error(), OK: false,
+				})
+				res.Turns = append(res.Turns, TurnResult{
+					Index:        turnIdx,
+					WorkflowName: workflow.Name,
+					UserMsg:      body,
+					Reply:        reply,
+					DurationMs:   time.Since(start).Milliseconds(),
+				})
+				c.maybeAddMessage(ctx, chatID, "assistant", reply.Text)
+				c.maybeEndChat(ctx, chatID, res.Outcome)
+				return res
+			}
+
 			c.maybeAddMessage(ctx, chatID, "assistant", reply.Text)
-			c.maybeEndChat(ctx, chatID, res.Outcome)
-			return res
-		}
 
-		c.maybeAddMessage(ctx, chatID, "assistant", reply.Text)
-
-		turn := TurnResult{
-			Index:      turnIdx,
-			UserMsg:    body,
-			Reply:      reply,
-			DurationMs: time.Since(start).Milliseconds(),
+			turn := TurnResult{
+				Index:        turnIdx,
+				WorkflowName: workflow.Name,
+				UserMsg:      body,
+				Reply:        reply,
+				DurationMs:   time.Since(start).Milliseconds(),
+			}
+			res.Turns = append(res.Turns, turn)
+			if cfg.OnTurn != nil {
+				cfg.OnTurn(turn)
+			}
+			emitWorkflowEvent(cfg.OnEvent, WorkflowRunEvent{
+				WorkflowName: workflow.Name, TurnIndex: turnIdx, Type: "turn_finish", OK: true,
+			})
+			lastReply = reply
+			turnIdx++
 		}
-		res.Turns = append(res.Turns, turn)
-		if opts.OnTurn != nil {
-			opts.OnTurn(turn)
-		}
-		lastReply = reply
-		turnIdx++
+		emitWorkflowEvent(cfg.OnEvent, WorkflowRunEvent{
+			WorkflowName: workflow.Name, TurnIndex: turnIdx, Type: "workflow_finish", OK: true,
+		})
 	}
 	if lastReply != nil {
 		res.SessionID = lastReply.SessionID
@@ -235,6 +397,77 @@ func (c *Core) RunWorkflow(ctx context.Context, opts RunOptions) *RunResult {
 	res.Outcome = OutcomeCompleted
 	c.maybeEndChat(ctx, chatID, res.Outcome)
 	return res
+}
+
+func runWorkflowTurn(ctx context.Context, adapter CLIAdapter, workflowName string, turnIdx int,
+	cfg workflowRunConfig, tools, systemPrompt, adapterBody string, lastReply *Reply,
+	onEvent func(WorkflowRunEvent)) (*Reply, error) {
+	emit := func(ev StreamEvent) {
+		emitWorkflowEvent(onEvent, WorkflowRunEvent{
+			WorkflowName: workflowName,
+			TurnIndex:    turnIdx,
+			Type:         ev.Type,
+			Text:         ev.Text,
+			Tool:         ev.Tool,
+			Detail:       ev.Detail,
+			ID:           ev.ID,
+			OK:           ev.OK,
+		})
+	}
+	firstTurn := turnIdx == 0 || !adapter.SupportsResume() || lastReply == nil || lastReply.SessionID == ""
+	if sc, ok := adapter.(streamingAdapter); ok && onEvent != nil {
+		var reply *Reply
+		var err error
+		if firstTurn {
+			reply, err = sc.SingleShotStream(ctx, SingleShotOpts{
+				Cwd: cfg.Cwd, Message: adapterBody, SystemPrompt: systemPrompt,
+				Model: cfg.Model, Tools: tools, Env: cfg.Env,
+			}, emit)
+		} else {
+			reply, err = sc.ResumeStream(ctx, lastReply.SessionID, ResumeOpts{
+				Message: adapterBody, Cwd: cfg.Cwd, Model: cfg.Model, Tools: tools, Env: cfg.Env,
+			}, emit)
+		}
+		if !errors.Is(err, ErrStreamUnsupported) {
+			return reply, err
+		}
+	}
+	if firstTurn {
+		return adapter.SingleShot(ctx, SingleShotOpts{
+			Cwd: cfg.Cwd, Message: adapterBody, SystemPrompt: systemPrompt,
+			Model: cfg.Model, Tools: tools, Env: cfg.Env,
+		})
+	}
+	return adapter.Resume(ctx, lastReply.SessionID, ResumeOpts{
+		Message: adapterBody, Cwd: cfg.Cwd, Model: cfg.Model, Tools: tools, Env: cfg.Env,
+	})
+}
+
+func emitWorkflowEvent(onEvent func(WorkflowRunEvent), ev WorkflowRunEvent) {
+	if onEvent != nil {
+		onEvent(ev)
+	}
+}
+
+func emitWaitBarrier(onEvent func(WorkflowRunEvent), workflowName string, turnIdx int, untilTool string) {
+	detail := "wait_for_assistant"
+	if strings.TrimSpace(untilTool) != "" {
+		detail += ":" + strings.TrimSpace(untilTool)
+	}
+	emitWorkflowEvent(onEvent, WorkflowRunEvent{
+		WorkflowName: workflowName,
+		TurnIndex:    turnIdx,
+		Type:         "step_start",
+		Detail:       detail,
+		OK:           true,
+	})
+	emitWorkflowEvent(onEvent, WorkflowRunEvent{
+		WorkflowName: workflowName,
+		TurnIndex:    turnIdx,
+		Type:         "step_finish",
+		Detail:       detail,
+		OK:           true,
+	})
 }
 
 func revealReply(redaction *PrivacyRedaction, reply *Reply) *Reply {
@@ -257,10 +490,17 @@ func (c *Core) maybeCreateChat(ctx context.Context, opts RunOptions) string {
 	if title == "" {
 		title = opts.Agent.Name + " · " + opts.WorkflowName
 	}
+	settings := opts.ChatSettings
+	settings.Tools = "full"
+	if settings.Model == "" {
+		settings.Model = opts.Model
+	}
 	ch, err := c.CreateChat(ctx, CreateChatRequest{
-		Title:    title,
-		AgentID:  opts.Agent.ID,
-		CLIAgent: opts.CLI,
+		Title:         title,
+		AgentID:       opts.Agent.ID,
+		CLIAgent:      opts.CLI,
+		WorkspacePath: opts.Cwd,
+		Settings:      settings,
 	})
 	if err != nil {
 		return ""
@@ -290,6 +530,32 @@ func validateRunOptions(opts RunOptions) error {
 		return errors.New("RunWorkflow: empty CLI")
 	}
 	if opts.Cwd == "" {
+		return errors.New("RunWorkflow: empty Cwd")
+	}
+	return nil
+}
+
+func validateRunAllOptions(opts RunAllOptions) error {
+	if opts.Agent == nil {
+		return errors.New("RunAllWorkflows: nil agent")
+	}
+	if opts.CLI == "" {
+		return errors.New("RunAllWorkflows: empty CLI")
+	}
+	if opts.Cwd == "" {
+		return errors.New("RunAllWorkflows: empty Cwd")
+	}
+	return nil
+}
+
+func validateWorkflowRunConfig(cfg workflowRunConfig) error {
+	if cfg.Agent == nil {
+		return errors.New("RunWorkflow: nil agent")
+	}
+	if cfg.CLI == "" {
+		return errors.New("RunWorkflow: empty CLI")
+	}
+	if cfg.Cwd == "" {
 		return errors.New("RunWorkflow: empty Cwd")
 	}
 	return nil

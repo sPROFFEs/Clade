@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+
+	"github.com/sPROFFEs/PrAImate/internal/gitutil"
 )
 
 // Result captures a single git invocation's outcome. ExitCode is the
@@ -69,6 +71,7 @@ func Run(ctx context.Context, dir string, args ...string) Result {
 	if _, err := exec.LookPath("git"); err != nil {
 		return Result{Err: ErrGitNotInstalled}
 	}
+	args = gitutil.DisableSSLVerifyForInternalHostOrOrigin(ctx, dir, args...)
 	cmd := exec.CommandContext(ctx, "git", args...)
 	hideConsole(cmd)
 	if dir != "" {

@@ -205,24 +205,32 @@ func (c *Core) ContinueChatStream(ctx context.Context, chatID, userMessage, cwd,
 	// that persists on the assistant message, so reopened chats still
 	// show what the agent did.
 	var activity []map[string]any
-	collect := onEvent
-	if onEvent != nil {
-		collect = func(ev StreamEvent) {
+	collect := func(ev StreamEvent) {
+		if len(activity) < 100 {
 			switch ev.Type {
-			case "tool_start":
-				if len(activity) < 100 {
-					activity = append(activity, map[string]any{"tool": ev.Tool, "detail": ev.Detail, "ok": true})
+			case "reasoning":
+				if text := compactActivityText(ev.Text, 1200); text != "" {
+					activity = append(activity, map[string]any{"type": "reasoning", "text": text})
 				}
-			case "tool_end":
-				if !ev.OK {
-					for i := len(activity) - 1; i >= 0; i-- {
-						if activity[i]["ok"] == true {
-							activity[i]["ok"] = false
-							break
-						}
-					}
+			case "step_start":
+				activity = append(activity, map[string]any{"type": "step_start", "detail": compactActivityText(ev.Detail, 300), "ok": true})
+			case "step_finish":
+				activity = append(activity, map[string]any{"type": "step_finish", "detail": compactActivityText(ev.Detail, 300), "ok": ev.OK})
+			case "error":
+				activity = append(activity, map[string]any{"type": "error", "detail": compactActivityText(ev.Detail, 500), "ok": false})
+			case "tool_start":
+				activity = append(activity, map[string]any{"type": "tool", "tool": ev.Tool, "detail": compactActivityText(ev.Detail, 300), "ok": true})
+			}
+		}
+		if ev.Type == "tool_end" && !ev.OK {
+			for i := len(activity) - 1; i >= 0; i-- {
+				if activity[i]["ok"] == true && (activity[i]["type"] == "tool" || activity[i]["tool"] != nil) {
+					activity[i]["ok"] = false
+					break
 				}
 			}
+		}
+		if onEvent != nil {
 			onEvent(ev)
 		}
 	}
@@ -248,7 +256,7 @@ func (c *Core) ContinueChatStream(ctx context.Context, chatID, userMessage, cwd,
 			Endpoint: l.Endpoint, APIKey: l.APIKey, Model: l.Model,
 		})
 	}
-	resumeOpts := ResumeOpts{Message: outbound, Model: model, Tools: chat.Settings.Tools, Approval: approval, Env: env}
+	resumeOpts := ResumeOpts{Message: outbound, Cwd: cwd, Model: model, Tools: chat.Settings.Tools, Approval: approval, Env: env}
 	shotOpts := SingleShotOpts{
 		Cwd:          cwd,
 		Message:      outbound,
@@ -263,7 +271,8 @@ func (c *Core) ContinueChatStream(ctx context.Context, chatID, userMessage, cwd,
 	start := time.Now()
 	var reply *Reply
 	streamed := false
-	if sc, ok := adapter.(streamingAdapter); ok && collect != nil {
+	shouldStream := onEvent != nil || isOpenCodeLikeAdapter(adapter.Name())
+	if sc, ok := adapter.(streamingAdapter); ok && shouldStream {
 		if resuming {
 			reply, err = sc.ResumeStream(ctx, chat.SessionID, resumeOpts, collect)
 		} else {
@@ -340,6 +349,14 @@ func privacyRedactPlain(p *PrivacyScanner, text string) string {
 	}
 	out, _ := p.Redact(text)
 	return out
+}
+
+func compactActivityText(text string, limit int) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	return truncate(strings.ReplaceAll(text, "\n", " ⏎ "), limit)
 }
 
 // StartCleanChat creates a DB-backed chat bound to a CLI only — no

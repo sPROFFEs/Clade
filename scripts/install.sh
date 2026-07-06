@@ -28,11 +28,14 @@
 set -euo pipefail
 
 REPO="sPROFFEs/PrAImate"
-RAW_REPO_URL="https://github.com/sPROFFEs/PrAImate"
+FORGE_URL="https://github.com"
+RAW_REPO_URL="$FORGE_URL/$REPO"
+# GitHub's API lives on api.github.com under /repos/<owner>/<repo>/…
+RELEASE_API_URL="https://api.github.com/repos/$REPO/releases/latest"
 SOURCE_BRANCH="main"
 # Release tag to pull assets from. When unset we resolve "latest" via
 # the GitHub API at download time so the installer keeps working as
-# the operator publishes new versioned tags (0.1.7, 0.1.8, ...).
+# the operator publishes new versioned tags (1.0.8, 1.0.9, ...).
 # Override with RELEASE_TAG=<tag> in the environment to pin a release.
 RELEASE_TAG="${RELEASE_TAG:-}"
 
@@ -138,12 +141,29 @@ find_local_bins() {
 
 LOCAL_BINS="$(find_local_bins || true)"
 
+find_source_dir() {
+  local cand
+  for cand in "$PWD" "$HERE/.."; do
+    [[ -n "$cand" ]] || continue
+    if [[ -f "$cand/go.mod" && -d "$cand/cmd/praimate" && -d "$cand/cmd/wpc" ]]; then
+      (cd "$cand" && pwd)
+      return 0
+    fi
+  done
+  return 1
+}
+
+SOURCE_DIR=""
+
 # ---------- mode prompt ----------
 if [[ -z "$MODE" ]]; then
   if [[ -n "$LOCAL_BINS" ]]; then
     # Inside an archive / repo — just install what's here.
     MODE="local"
     c_dim "(found local binaries in $LOCAL_BINS — skipping download/build prompt)"
+  elif SOURCE_DIR="$(find_source_dir)"; then
+    MODE="source"
+    c_dim "(found source checkout in $SOURCE_DIR — building local source)"
   else
     cat <<EOF
 How do you want to install PrAImate?
@@ -223,19 +243,18 @@ fetch() {
 }
 
 resolve_latest_tag() {
-  local api="https://api.github.com/repos/$REPO/releases/latest"
   local dl tag
   dl="$(detect_downloader)"
-  # The pattern is intentionally NOT anchored to line-start: GitHub
-  # returns the JSON minified (everything on one line), so an `^…` anchor
+  # The pattern is intentionally NOT anchored to line-start: GitHub can
+  # return the JSON minified (everything on one line), so an `^…` anchor
   # would only match a pretty-printed response and silently fail in
   # production. `.*` on both sides lets sed find "tag_name" anywhere on
   # the line; the non-greedy [^"]* keeps the capture tight.
   if [[ "$dl" == "curl" ]]; then
-    tag="$(curl -fsSL -H 'User-Agent: praimate-installer' "$api" 2>/dev/null \
+    tag="$(curl -fsSL -H 'User-Agent: praimate-installer' "$RELEASE_API_URL" 2>/dev/null \
       | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
   else
-    tag="$(wget -q -O - --header='User-Agent: praimate-installer' "$api" 2>/dev/null \
+    tag="$(wget -q -O - --header='User-Agent: praimate-installer' "$RELEASE_API_URL" 2>/dev/null \
       | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
   fi
   if [[ -z "$tag" ]]; then
@@ -252,7 +271,7 @@ install_from_release() {
     RELEASE_TAG="$(resolve_latest_tag)"
   fi
   local fname="praimate-${TRIPLET}.tar.gz"
-  local url="https://github.com/$REPO/releases/download/${RELEASE_TAG}/${fname}"
+  local url="$FORGE_URL/$REPO/releases/download/${RELEASE_TAG}/${fname}"
   c_dim "  tag:     $RELEASE_TAG"
   c_dim "  asset:   $fname"
   c_dim "  url:     $url"
@@ -325,6 +344,43 @@ install_from_release() {
 # ---------- source path: clone + go build ----------
 have_go() { command -v go >/dev/null 2>&1; }
 
+gui_ext() {
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) printf '.exe' ;;
+    *) printf '' ;;
+  esac
+}
+
+build_gui_from_source() {
+  local src="$1"
+  local missing=()
+  if ! command -v npm >/dev/null 2>&1; then
+    missing+=("npm")
+  fi
+  if ! command -v pkg-config >/dev/null 2>&1; then
+    missing+=("pkg-config")
+  fi
+  if [[ "$(uname -s)" == "Linux" ]]; then
+    if command -v pkg-config >/dev/null 2>&1; then
+      pkg-config --exists webkit2gtk-4.1 || missing+=("libwebkit2gtk-4.1-dev")
+      pkg-config --exists gtk+-3.0 || missing+=("libgtk-3-dev")
+    else
+      missing+=("libwebkit2gtk-4.1-dev" "libgtk-3-dev")
+    fi
+  fi
+
+  if ((${#missing[@]})); then
+    c_yel "Skipping praimate-gui build; missing: ${missing[*]}"
+    if [[ "$(uname -s)" == "Linux" ]]; then
+      c_dim "  On Debian/Kali install them with:"
+      c_dim "    sudo apt-get install -y npm pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev"
+    fi
+    return 1
+  fi
+
+  (cd "$src/cmd/praimate-gui" && ./build.sh)
+}
+
 detect_pkg_manager() {
   # Print the apt/dnf/pacman/zypper/apk/brew install command for Go,
   # or empty if we don't know the system.
@@ -370,32 +426,56 @@ install_from_source() {
     step "Go not found"
     install_go || exit 1
   fi
-  step "Cloning repo"
-  local tmp
-  tmp="$(mktemp -d)"
+  local src tmp builddir gui_bin ext installed
+  tmp=""
+  builddir="$(mktemp -d)"
   # See install_from_release for why this uses double quotes.
-  trap "rm -rf '$tmp'" EXIT
-  git clone --depth 1 --branch "$SOURCE_BRANCH" \
-    "${RAW_REPO_URL}.git" "$tmp/PrAImate" \
-    || { c_red "git clone failed"; exit 1; }
+  trap "rm -rf '$tmp' '$builddir'" EXIT
+
+  if src="$(find_source_dir)"; then
+    step "Using local source"
+    c_dim "  source: $src"
+  else
+    step "Cloning repo"
+    tmp="$(mktemp -d)"
+    git clone --depth 1 --branch "$SOURCE_BRANCH" \
+      "${RAW_REPO_URL}.git" "$tmp/PrAImate" \
+      || { c_red "git clone failed"; exit 1; }
+    src="$tmp/PrAImate"
+  fi
+  SOURCE_DIR="$src"
 
   step "Building (this can take ~30s on first run while Go fetches deps)"
   (
-    cd "$tmp/PrAImate"
+    cd "$src"
     GOOS="$(uname -s | tr '[:upper:]' '[:lower:]')" \
     GOARCH="$(case $(uname -m) in x86_64|amd64) printf amd64;; aarch64|arm64) printf arm64;; esac)" \
     CGO_ENABLED=0 \
-    go build -trimpath -ldflags '-s -w' -o ./praimate ./cmd/praimate
+    go build -trimpath -ldflags '-s -w' -o "$builddir/praimate" ./cmd/praimate
     GOOS="$(uname -s | tr '[:upper:]' '[:lower:]')" \
     GOARCH="$(case $(uname -m) in x86_64|amd64) printf amd64;; aarch64|arm64) printf arm64;; esac)" \
     CGO_ENABLED=0 \
-    go build -trimpath -ldflags '-s -w' -o ./wpc   ./cmd/wpc
+    go build -trimpath -ldflags '-s -w' -o "$builddir/wpc" ./cmd/wpc
   )
 
+  step "Building GUI"
+  ext="$(gui_ext)"
+  gui_bin="$src/cmd/praimate-gui/praimate-gui$ext"
+  if ! build_gui_from_source "$src"; then
+    c_red "praimate-gui was not built, so 'praimate --gui' will not work."
+    c_red "Install the missing GUI dependencies above and re-run this installer."
+    exit 1
+  fi
+
   step "Installing to $DEST"
-  $SUDO install -m 0755 "$tmp/PrAImate/praimate" "$DEST/praimate"
-  $SUDO install -m 0755 "$tmp/PrAImate/wpc"   "$DEST/wpc"
-  c_grn "  ✓ praimate + wpc installed"
+  $SUDO install -m 0755 "$builddir/praimate" "$DEST/praimate"
+  $SUDO install -m 0755 "$builddir/wpc"   "$DEST/wpc"
+  installed="praimate + wpc"
+  if [[ -f "$gui_bin" ]]; then
+    $SUDO install -m 0755 "$gui_bin" "$DEST/praimate-gui$ext"
+    installed="$installed + praimate-gui"
+  fi
+  c_grn "  ✓ $installed installed"
 }
 
 # ---------- local path: bins already next to us ----------
@@ -403,12 +483,18 @@ install_local() {
   step "Installing to $DEST"
   $SUDO install -m 0755 "$LOCAL_BINS/praimate" "$DEST/praimate"
   $SUDO install -m 0755 "$LOCAL_BINS/wpc"   "$DEST/wpc"
+  installed="praimate + wpc"
   if [[ -f "$LOCAL_BINS/praimate-gui" ]]; then
     $SUDO install -m 0755 "$LOCAL_BINS/praimate-gui" "$DEST/praimate-gui"
-    c_grn "  ✓ praimate + wpc + praimate-gui installed"
-  else
-    c_grn "  ✓ praimate + wpc installed"
+    installed="$installed + praimate-gui"
   fi
+  if [[ -f "$LOCAL_BINS/praimate-code" ]]; then
+    $SUDO install -m 0755 "$LOCAL_BINS/praimate-code" "$DEST/praimate-code"
+    [[ -f "$LOCAL_BINS/PRAIMATE-CODE-LICENSE" ]] && $SUDO cp "$LOCAL_BINS/PRAIMATE-CODE-LICENSE" "$DEST/" 2>/dev/null || true
+    [[ -f "$LOCAL_BINS/PRAIMATE-CODE-NOTICE" ]] && $SUDO cp "$LOCAL_BINS/PRAIMATE-CODE-NOTICE" "$DEST/" 2>/dev/null || true
+    installed="$installed + praimate-code"
+  fi
+  c_grn "  ✓ $installed installed"
 }
 
 # ---------- dispatch ----------
@@ -634,6 +720,7 @@ PLIST
 ICON_SRC=""
 [[ -n "${extracted:-}" && -f "${extracted:-}/praimate.png" ]] && ICON_SRC="$extracted/praimate.png"
 [[ -z "$ICON_SRC" && -n "${LOCAL_BINS:-}" && -f "${LOCAL_BINS:-}/praimate.png" ]] && ICON_SRC="$LOCAL_BINS/praimate.png"
+[[ -z "$ICON_SRC" && -n "${SOURCE_DIR:-}" && -f "${SOURCE_DIR:-}/cmd/praimate-gui/frontend/src/assets/monke-icon.png" ]] && ICON_SRC="$SOURCE_DIR/cmd/praimate-gui/frontend/src/assets/monke-icon.png"
 create_shortcuts "$ICON_SRC" || true
 
 step "Done"

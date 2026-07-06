@@ -144,7 +144,7 @@ func (a *ClaudeAdapter) Resume(ctx context.Context, sessionID string, opts Resum
 		return nil, err
 	}
 	defer cleanup()
-	return a.run(ctx, "", opts.Env, append(args, extra...), opts.Message)
+	return a.run(ctx, opts.Cwd, opts.Env, append(args, extra...), opts.Message)
 }
 
 // resumeArgs builds the argv for a resumed turn. format as in

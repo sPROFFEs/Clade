@@ -11,6 +11,7 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -28,6 +29,7 @@ import (
 	"github.com/sPROFFEs/PrAImate/internal/core"
 	"github.com/sPROFFEs/PrAImate/internal/installer"
 	"github.com/sPROFFEs/PrAImate/internal/launcher"
+	"github.com/sPROFFEs/PrAImate/internal/ollama"
 	"github.com/sPROFFEs/PrAImate/internal/store"
 	"github.com/sPROFFEs/PrAImate/internal/version"
 )
@@ -240,8 +242,22 @@ func (a *App) StartTerminal(agentID, cli, model, cwd, localEndpoint, localAPIKey
 	}
 	if agentID != "" {
 		if agent, gerr := c.GetAgent(a.ctx, agentID); gerr == nil {
+			if !agent.AllowsSurface("terminal") {
+				return "", fmt.Errorf("agent %q is not allowed on the terminal surface", agent.Name)
+			}
+			mcpEnv, merr := c.PrepareMCPForRun(a.ctx, agent, cli, cwd)
+			if merr != nil {
+				return "", merr
+			}
+			env = appendEnvMap(env, mcpEnv)
 			_ = exportAgentContext(cwd, cli, agent)
 		}
+	} else {
+		mcpEnv, merr := c.PrepareEnabledMCPForRun(a.ctx, cli, cwd)
+		if merr != nil {
+			return "", merr
+		}
+		env = appendEnvMap(env, mcpEnv)
 	}
 	return a.terms.start(a.ctx, name, args, cwd, env)
 }
@@ -482,10 +498,16 @@ func (a *App) ListCLIs() []CLIInfo {
 	return out
 }
 
-// ListCLIModels returns live model suggestions for a CLI. For
-// opencode/praimate-code it runs `<bin> models` (one provider/model per
-// line); other CLIs fall back to the static suggestions.
+// ListCLIModels returns live model suggestions when the CLI exposes a
+// catalogue; otherwise it falls back to the static suggestions.
 func (a *App) ListCLIModels(cli string) []string {
+	if cli == "codex" {
+		models := a.listCodexModels()
+		if len(models) > 0 {
+			return models
+		}
+		return staticModelSuggestions[cli]
+	}
 	if cli != "opencode" && cli != "praimate-code" {
 		return staticModelSuggestions[cli]
 	}
@@ -508,6 +530,45 @@ func (a *App) ListCLIModels(cli string) []string {
 		if line != "" && strings.Contains(line, "/") && !strings.Contains(line, " ") {
 			models = append(models, line)
 		}
+	}
+	return models
+}
+
+func (a *App) listCodexModels() []string {
+	bin, err := exec.LookPath("codex")
+	if err != nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(a.ctx, 15*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, "debug", "models")
+	hideConsole(cmd)
+	outBytes, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	return parseCodexDebugModels(outBytes)
+}
+
+func parseCodexDebugModels(raw []byte) []string {
+	var payload struct {
+		Models []struct {
+			Slug       string `json:"slug"`
+			Visibility string `json:"visibility"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var models []string
+	for _, item := range payload.Models {
+		slug := strings.TrimSpace(item.Slug)
+		if slug == "" || seen[slug] || item.Visibility != "list" {
+			continue
+		}
+		seen[slug] = true
+		models = append(models, slug)
 	}
 	return models
 }
@@ -730,10 +791,24 @@ func (a *App) PickFolder() (string, error) {
 // TurnEvent is the payload emitted on the "praimate:turn" event while
 // a workflow run is in flight.
 type TurnEvent struct {
-	Index      int    `json:"index"`
-	UserMsg    string `json:"user_msg"`
-	Reply      string `json:"reply"`
-	DurationMs int64  `json:"duration_ms"`
+	Index        int    `json:"index"`
+	WorkflowName string `json:"workflow_name,omitempty"`
+	UserMsg      string `json:"user_msg"`
+	Reply        string `json:"reply"`
+	DurationMs   int64  `json:"duration_ms"`
+}
+
+// WorkflowStreamEvent is emitted on "praimate:workflow-stream" while a
+// workflow run is active.
+type WorkflowStreamEvent struct {
+	WorkflowName string `json:"workflow_name"`
+	TurnIndex    int    `json:"turn_index"`
+	Type         string `json:"type"`
+	Text         string `json:"text,omitempty"`
+	Tool         string `json:"tool,omitempty"`
+	Detail       string `json:"detail,omitempty"`
+	ID           string `json:"id,omitempty"`
+	OK           bool   `json:"ok,omitempty"`
 }
 
 // RunResult mirrors core.RunResult in a JSON-friendly shape.
@@ -749,7 +824,7 @@ type RunResult struct {
 // promise resolves when the run completes); per-turn progress streams
 // via the "praimate:turn" event. Memory injection and persistence
 // mirror the TUI Recipes flow.
-func (a *App) RunWorkflow(agentID, workflowName, cli, cwd string, inputs map[string]string) (*RunResult, error) {
+func (a *App) RunWorkflow(agentID, workflowName, cli, model, cwd string, inputs map[string]string, localEndpoint, localAPIKey, localModel string) (*RunResult, error) {
 	c, err := a.requireCore()
 	if err != nil {
 		return nil, err
@@ -758,9 +833,12 @@ func (a *App) RunWorkflow(agentID, workflowName, cli, cwd string, inputs map[str
 	if err != nil {
 		return nil, err
 	}
+	cwd = strings.TrimSpace(cwd)
 	if cwd == "" {
-		cwd = "."
+		return nil, fmt.Errorf("a working folder is required")
 	}
+	model, env := workflowModelAndEnv(cli, model, localEndpoint, localAPIKey, localModel)
+	settings := workflowChatSettings(model, localEndpoint, localAPIKey, localModel)
 
 	query := ""
 	for _, v := range inputs {
@@ -774,19 +852,127 @@ func (a *App) RunWorkflow(agentID, workflowName, cli, cwd string, inputs map[str
 		Inputs:          inputs,
 		CLI:             cli,
 		Cwd:             cwd,
+		Model:           model,
+		Env:             env,
 		Persist:         true,
 		ChatTitle:       agent.Name + " · " + workflowName,
 		MemoryInjection: injection,
+		ChatSettings:    settings,
 		OnTurn: func(t core.TurnResult) {
 			wruntime.EventsEmit(a.ctx, "praimate:turn", TurnEvent{
-				Index:      t.Index,
-				UserMsg:    t.UserMsg,
-				Reply:      t.Reply.Text,
-				DurationMs: t.DurationMs,
+				Index:        t.Index,
+				WorkflowName: t.WorkflowName,
+				UserMsg:      t.UserMsg,
+				Reply:        replyText(t.Reply),
+				DurationMs:   t.DurationMs,
+			})
+		},
+		OnEvent: func(ev core.WorkflowRunEvent) {
+			wruntime.EventsEmit(a.ctx, "praimate:workflow-stream", WorkflowStreamEvent{
+				WorkflowName: ev.WorkflowName,
+				TurnIndex:    ev.TurnIndex,
+				Type:         ev.Type,
+				Text:         ev.Text,
+				Tool:         ev.Tool,
+				Detail:       ev.Detail,
+				ID:           ev.ID,
+				OK:           ev.OK,
 			})
 		},
 	})
 
+	out := guiRunResult(res)
+	return out, nil
+}
+
+// RunAllWorkflows executes every workflow on the agent in declaration
+// order, sharing one resumable CLI session across the sequence.
+func (a *App) RunAllWorkflows(agentID, cli, model, cwd string, inputsByWorkflow map[string]map[string]string, localEndpoint, localAPIKey, localModel string) (*RunResult, error) {
+	c, err := a.requireCore()
+	if err != nil {
+		return nil, err
+	}
+	agent, err := c.GetAgent(a.ctx, agentID)
+	if err != nil {
+		return nil, err
+	}
+	cwd = strings.TrimSpace(cwd)
+	if cwd == "" {
+		return nil, fmt.Errorf("a working folder is required")
+	}
+	model, env := workflowModelAndEnv(cli, model, localEndpoint, localAPIKey, localModel)
+	settings := workflowChatSettings(model, localEndpoint, localAPIKey, localModel)
+
+	var query string
+	for _, inputs := range inputsByWorkflow {
+		for _, v := range inputs {
+			query += v + " "
+		}
+	}
+	injection, _ := c.BuildMemoryInjection(a.ctx, core.InjectionOptions{Query: query})
+
+	res := c.RunAllWorkflows(a.ctx, core.RunAllOptions{
+		Agent:            agent,
+		InputsByWorkflow: inputsByWorkflow,
+		CLI:              cli,
+		Cwd:              cwd,
+		Model:            model,
+		Env:              env,
+		Persist:          true,
+		ChatTitle:        agent.Name + " · all workflows",
+		MemoryInjection:  injection,
+		ChatSettings:     settings,
+		OnTurn: func(t core.TurnResult) {
+			wruntime.EventsEmit(a.ctx, "praimate:turn", TurnEvent{
+				Index:        t.Index,
+				WorkflowName: t.WorkflowName,
+				UserMsg:      t.UserMsg,
+				Reply:        replyText(t.Reply),
+				DurationMs:   t.DurationMs,
+			})
+		},
+		OnEvent: func(ev core.WorkflowRunEvent) {
+			wruntime.EventsEmit(a.ctx, "praimate:workflow-stream", WorkflowStreamEvent{
+				WorkflowName: ev.WorkflowName,
+				TurnIndex:    ev.TurnIndex,
+				Type:         ev.Type,
+				Text:         ev.Text,
+				Tool:         ev.Tool,
+				Detail:       ev.Detail,
+				ID:           ev.ID,
+				OK:           ev.OK,
+			})
+		},
+	})
+	out := guiRunResult(res)
+	return out, nil
+}
+
+func workflowChatSettings(model, localEndpoint, localAPIKey, localModel string) core.ChatSettings {
+	settings := core.ChatSettings{Surface: "workflow", Tools: "full", Model: model}
+	if strings.TrimSpace(localEndpoint) != "" {
+		settings.Local = &core.ChatLocalEndpoint{Endpoint: localEndpoint, APIKey: localAPIKey, Model: localModel}
+	}
+	return settings
+}
+
+func workflowModelAndEnv(cli, model, localEndpoint, localAPIKey, localModel string) (string, map[string]string) {
+	model = strings.TrimSpace(model)
+	if strings.TrimSpace(localEndpoint) == "" || (cli != "claude" && cli != "openclaude") {
+		return model, nil
+	}
+	localModel = strings.TrimSpace(localModel)
+	if model == "" {
+		model = localModel
+	}
+	return model, ollama.ClaudeEnv(ollama.Settings{
+		Endpoint: localEndpoint,
+		APIKey:   localAPIKey,
+		Model:    localModel,
+	})
+}
+
+func guiRunResult(res *core.RunResult) *RunResult {
 	out := &RunResult{
 		Outcome:   string(res.Outcome),
 		ChatID:    res.ChatID,
@@ -797,18 +983,21 @@ func (a *App) RunWorkflow(agentID, workflowName, cli, cwd string, inputs map[str
 	}
 	for _, t := range res.Turns {
 		out.Turns = append(out.Turns, TurnEvent{
-			Index: t.Index, UserMsg: t.UserMsg,
-			Reply: t.Reply.Text, DurationMs: t.DurationMs,
+			Index:        t.Index,
+			WorkflowName: t.WorkflowName,
+			UserMsg:      t.UserMsg,
+			Reply:        replyText(t.Reply),
+			DurationMs:   t.DurationMs,
 		})
 	}
+	return out
+}
 
-	// Fire-and-forget distillation, same as the TUI Recipes flow.
-	if res.ChatID != "" && res.Outcome == core.OutcomeCompleted {
-		go func(chatID string) {
-			_, _ = c.DistillChat(context.Background(), chatID, nil)
-		}(res.ChatID)
+func replyText(reply *core.Reply) string {
+	if reply == nil {
+		return ""
 	}
-	return out, nil
+	return reply.Text
 }
 
 // PrivacyPreview scans the would-be outbound text and returns category

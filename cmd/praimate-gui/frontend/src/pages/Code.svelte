@@ -28,8 +28,11 @@
   // agent-config view). clis: [{id, available, modelHint}].
   let clis = []
   let modelSuggestions = []
+  let modelLoading = false
+  let modelLoadSeq = 0
   $: selectedCliInfo = clis.find((c) => c.id === cli)
   $: modelSupported = !!selectedCliInfo?.modelHint
+  $: terminalAgents = agents.filter((a) => !a.surfaces?.length || a.surfaces.includes('terminal'))
 
   // Local LLM (Settings → Local LLM). useLocal routes the session at the
   // configured endpoint; localModel picks from its live model list.
@@ -42,7 +45,11 @@
   $: localRoutable = LOCAL_ROUTABLE.includes(cli)
 
   async function loadModels() {
+    const seq = ++modelLoadSeq
+    if (!cli) { modelSuggestions = []; return }
+    modelLoading = true
     try { modelSuggestions = (await api.listCLIModels(cli)) || [] } catch { modelSuggestions = [] }
+    finally { if (seq === modelLoadSeq) modelLoading = false }
   }
   // Refresh model suggestions whenever the chosen CLI changes.
   $: if (cli) { loadModels() }
@@ -340,6 +347,7 @@
           bind:value={model}
           disabled={!modelSupported} />
         <datalist id="code-models">{#each modelSuggestions as m}<option value={m}></option>{/each}</datalist>
+        {#if modelLoading}<div class="card-sub">Loading models...</div>{/if}
       {/if}
       <label class="lbl">Project folder</label>
       <div class="row">
@@ -352,12 +360,12 @@
       </div>
     </div>
   {:else if !agent}
-    {#if agents.length === 0}
-      <div class="empty">No agents yet — press “New session” above, or create one on the Agents page.</div>
+    {#if terminalAgents.length === 0}
+      <div class="empty">No terminal-capable agents yet — press “New session” above, or create one on the Agents page.</div>
     {:else}
       <div class="section-label">Or launch from an agent</div>
     {/if}
-    {#each agents as a}
+    {#each terminalAgents as a}
       <div class="card row">
         <div class="grow">
           <div class="card-title">{a.name}</div>
@@ -380,6 +388,7 @@
       <label class="lbl">Model <span class="card-sub">(optional — blank uses the CLI default)</span></label>
       <input class="field" list="code-models" bind:value={model} placeholder="provider/model or model name" style="max-width:420px" />
       <datalist id="code-models">{#each modelSuggestions as m}<option value={m}></option>{/each}</datalist>
+      {#if modelLoading}<div class="card-sub">Loading models...</div>{/if}
     {/if}
     <label class="lbl">Project folder</label>
     <div class="row">

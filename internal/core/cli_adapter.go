@@ -36,21 +36,24 @@ type SingleShotOpts struct {
 	Env map[string]string
 
 	// Tools selects how much the CLI's agent may DO during the turn:
-	//   ""      — the CLI's default (headless modes typically deny
-	//             file edits and shell commands without approval).
+	//   ""      — PrAImate safe mode. CLIs with sandbox flags are forced
+	//             read-only; others use their safest available default.
 	//   "ask"   — route each permission request to the user mid-turn.
 	//             Only claude/openclaude support this headlessly (via
 	//             --permission-prompt-tool + the approval shim in
-	//             Approval); other CLIs treat it as "".
+	//             Approval); other CLIs treat it as safe/read-only.
 	//   "edits" — auto-approve file edits in the working directory
 	//             (claude --permission-mode acceptEdits,
 	//             codex --sandbox workspace-write).
+	//   "plan"  — opencode native plan agent (--agent plan). Other CLIs
+	//             treat it as "".
 	//   "full"  — skip approvals entirely (claude --permission-mode
 	//             bypassPermissions, codex
-	//             --dangerously-bypass-approvals-and-sandbox). The user
-	//             opts in per chat; never default to this.
-	// Adapters whose CLI has no such flags (opencode, deepseek) ignore
-	// it; gemini already runs --approval-mode yolo in headless mode.
+	//             --dangerously-bypass-approvals-and-sandbox, opencode
+	//             --dangerously-skip-permissions). The user opts in per
+	//             chat; never default to this.
+	// Adapters whose CLI has no such flags (deepseek) ignore it; gemini
+	// already runs --approval-mode yolo in headless mode.
 	Tools string
 
 	// Approval wires the "ask" level: how to spawn the MCP approval
@@ -65,6 +68,10 @@ type SingleShotOpts struct {
 type ResumeOpts struct {
 	// Message is the new user turn.
 	Message string
+	// Cwd is the working directory the resumed CLI invocation should
+	// treat as the project root. Resumed sessions do not reliably
+	// restore process cwd across CLIs, so callers must re-pin it.
+	Cwd string
 	// Model re-pins the model ("" = CLI default). Same semantics as
 	// SingleShotOpts.Model.
 	Model string

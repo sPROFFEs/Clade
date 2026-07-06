@@ -51,10 +51,10 @@ func (a *App) ListCLIBackends() ([]CLIBackend, error) {
 
 // InstallMethod is one way to install/update a CLI on this OS.
 type InstallMethod struct {
-	ID          string `json:"id"`
-	Label       string `json:"label"`
-	Command     string `json:"command"`
-	Recommended bool   `json:"recommended"`
+	ID             string   `json:"id"`
+	Label          string   `json:"label"`
+	Command        string   `json:"command"`
+	Recommended    bool     `json:"recommended"`
 	MissingPrereqs []string `json:"missingPrereqs,omitempty"`
 }
 

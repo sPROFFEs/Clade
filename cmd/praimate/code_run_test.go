@@ -55,3 +55,16 @@ func TestCodeBinaryName_OSSuffix(t *testing.T) {
 		t.Fatalf("unix name = %q", name)
 	}
 }
+
+func TestEnvMapList_Sorted(t *testing.T) {
+	got := envMapList(map[string]string{"B": "2", "A": "1"})
+	want := []string{"A=1", "B=2"}
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d (%v)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("env[%d] = %q, want %q (all: %v)", i, got[i], want[i], got)
+		}
+	}
+}

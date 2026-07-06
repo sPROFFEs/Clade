@@ -29,13 +29,44 @@ func (c *Core) prepareMCPForRun(ctx context.Context, agent *Agent, cli, cwd stri
 	if len(servers) == 0 {
 		return nil, nil
 	}
+	return writeMCPConfigForRun(cli, cwd, servers)
+}
+
+// PrepareMCPForRun is the GUI/terminal-facing wrapper around the
+// launch-time MCP config emission used by workflow runs.
+func (c *Core) PrepareMCPForRun(ctx context.Context, agent *Agent, cli, cwd string) (map[string]string, error) {
+	return c.prepareMCPForRun(ctx, agent, cli, cwd)
+}
+
+// PrepareEnabledMCPForRun writes config for all globally enabled MCP
+// servers. This is used for clean live-terminal sessions, where there
+// is no PrAImate agent YAML to declare a narrower mcp_servers list.
+func (c *Core) PrepareEnabledMCPForRun(ctx context.Context, cli, cwd string) (map[string]string, error) {
+	if c.store == nil {
+		return nil, nil
+	}
+	servers, err := c.ListMCPServers(ctx, true)
+	if err != nil {
+		return nil, err
+	}
+	return writeMCPConfigForRun(cli, cwd, servers)
+}
+
+func writeMCPConfigForRun(cli, cwd string, servers []MCPServer) (map[string]string, error) {
+	if len(servers) == 0 {
+		return nil, nil
+	}
+	if cwd == "" {
+		return nil, fmt.Errorf("MCP config: empty cwd")
+	}
 	env := map[string]string{}
+	var err error
 	switch cli {
 	case "claude", "openclaude":
 		err = writeClaudeMCPConfig(cwd, servers, env)
 	case "codex":
 		err = writeCodexMCPConfig(cwd, servers, env)
-	case "opencode":
+	case "opencode", "praimate-code":
 		err = writeOpenCodeMCPConfig(cwd, servers, env)
 	default:
 		// Gemini/DeepSeek MCP wiring is intentionally absent in 1.0a;
@@ -71,8 +102,9 @@ func writeClaudeMCPConfig(cwd string, servers []MCPServer, env map[string]string
 		entry := claudeServer{"type": claudeType(s.Transport)}
 		switch s.Transport {
 		case MCPTransportStdio:
-			entry["command"] = s.Command
-			entry["args"] = orEmpty(s.Args)
+			command, args := resolvedStdioMCPCommand(s)
+			entry["command"] = command
+			entry["args"] = orEmpty(args)
 			if len(s.Env) > 0 {
 				entry["env"] = envRefs(s, env, "${%s}")
 			}
@@ -101,12 +133,13 @@ func writeCodexMCPConfig(cwd string, servers []MCPServer, env map[string]string)
 		b.WriteString("enabled = true\n")
 		switch s.Transport {
 		case MCPTransportStdio:
+			command, args := resolvedStdioMCPCommand(s)
 			b.WriteString("command = ")
-			b.WriteString(tomlString(s.Command))
+			b.WriteString(tomlString(command))
 			b.WriteByte('\n')
-			if len(s.Args) > 0 {
+			if len(args) > 0 {
 				b.WriteString("args = ")
-				b.WriteString(tomlArray(s.Args))
+				b.WriteString(tomlArray(args))
 				b.WriteByte('\n')
 			}
 			if len(s.Env) > 0 {
@@ -168,8 +201,9 @@ func writeOpenCodeMCPConfig(cwd string, servers []MCPServer, env map[string]stri
 		entry := map[string]any{"enabled": true}
 		switch s.Transport {
 		case MCPTransportStdio:
+			command, args := resolvedStdioMCPCommand(s)
 			entry["type"] = "local"
-			entry["command"] = append([]string{s.Command}, s.Args...)
+			entry["command"] = append([]string{command}, args...)
 			if len(s.Env) > 0 {
 				entry["environment"] = envRefs(s, env, "{env:%s}")
 			}
@@ -189,6 +223,10 @@ func writeOpenCodeMCPConfig(cwd string, servers []MCPServer, env map[string]stri
 		mcp[s.ID] = entry
 	}
 	return writeJSONFile(path, cfg)
+}
+
+func resolvedStdioMCPCommand(s MCPServer) (string, []string) {
+	return expandMCPProcessArg(s.Command), expandMCPProcessArgs(s.Args)
 }
 
 func writeJSONFile(path string, body any) error {

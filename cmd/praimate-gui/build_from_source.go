@@ -27,10 +27,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sPROFFEs/PrAImate/internal/gitutil"
 	"github.com/sPROFFEs/PrAImate/internal/installer"
 )
 
-const praimateRepoURL = "https://github.com/sPROFFEs/PrAImate"
+const praimateRepoURL = "https://github.com/sPROFFEs/PrAImate.git"
 
 // BuildRequirement is one external tool a from-source build needs.
 type BuildRequirement struct {
@@ -149,7 +150,8 @@ func (a *App) BuildToolFromSource(tool string) error {
 
 	repo := filepath.Join(work, "PrAImate")
 	emit("→ cloning %s (shallow)…", praimateRepoURL)
-	if err := runStreamed(ctx, w, work, nil, "git", "clone", "--depth", "1", praimateRepoURL, repo); err != nil {
+	gitArgs := gitutil.DisableSSLVerifyForInternalHost("clone", "--depth", "1", praimateRepoURL, repo)
+	if err := runStreamed(ctx, w, work, nil, "git", gitArgs...); err != nil {
 		return fmt.Errorf("clone failed: %w", err)
 	}
 
@@ -158,7 +160,11 @@ func (a *App) BuildToolFromSource(tool string) error {
 		return err
 	}
 	emit("→ building %s from source (this can take several minutes)…", label)
-	env := append(os.Environ(), "OUT="+out)
+	env := append(os.Environ(),
+		"OUT="+out,
+		"PRAIMATE_BUILD_DIR="+parent,
+		"TMPDIR="+parent,
+	)
 	if err := runStreamed(ctx, w, repo, env, "bash", script); err != nil {
 		return fmt.Errorf("build failed: %w", err)
 	}

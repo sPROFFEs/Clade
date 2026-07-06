@@ -30,6 +30,7 @@
 
   let files = []
   let error = ''
+  let treeLoading = false
   let tabs = [] // [{path, content, dirty, ref, flushTimer, externalPending}]
   let active = '' // active tab path
   let cursorInfo = { line: 1, col: 1, selLen: 0 }
@@ -79,10 +80,13 @@
   }
 
   async function loadTree() {
+    treeLoading = true
     try {
       files = (await api.editorListFiles()) || []
     } catch (e) {
       error = String(e)
+    } finally {
+      treeLoading = false
     }
   }
 
@@ -358,8 +362,10 @@
 
   function handleStreamEvent(ev) {
     if (!sending || ev.chatId !== chatId) return
-    if (!stream) stream = { text: '', tools: [] }
+    if (!stream) stream = { text: '', tools: [], reasoning: [], steps: [] }
     if (ev.type === 'text') stream.text += ev.text
+    else if (ev.type === 'reasoning') stream.reasoning = [...(stream.reasoning || []), ev.text]
+    else if (ev.type === 'step_start' || ev.type === 'step_finish' || ev.type === 'error') stream.steps = [...(stream.steps || []), { type: ev.type, detail: ev.detail, ok: ev.type !== 'error' && ev.ok !== false }]
     else if (ev.type === 'tool_start') stream.tools = [...stream.tools, { id: ev.id || '', tool: ev.tool, detail: ev.detail, done: false, ok: true }]
     else if (ev.type === 'tool_end') {
       const t = [...stream.tools]
@@ -441,6 +447,31 @@
   // hide it in the transcript.
   function cleanMsg(s) {
     return String(s).replace(/\n*\[The user is looking at:[^\]]*\]\s*$/, '')
+  }
+
+  function activityTitle(activity) {
+    const n = activity?.length || 0
+    return `Activity · ${n} event${n === 1 ? '' : 's'}`
+  }
+
+  function activityStatus(t) {
+    if (t.type === 'reasoning') return '?'
+    if (t.type === 'step_start') return '◌'
+    if (t.type === 'step_finish') return '✓'
+    if (t.type === 'error' || t.ok === false) return '✗'
+    return '✓'
+  }
+
+  function activityName(t) {
+    if (t.type === 'reasoning') return 'reasoning'
+    if (t.type === 'step_start') return 'step'
+    if (t.type === 'step_finish') return 'step done'
+    if (t.type === 'error') return 'error'
+    return t.tool || t.type || 'tool'
+  }
+
+  function activityDetail(t) {
+    return t.type === 'reasoning' ? t.text : t.detail
   }
 
   function onWindowKey(e) {
@@ -547,6 +578,7 @@
     <div class="tree-head">
       <button class="btn sm" title="Hide files" on:click={() => (treeOpen = false)}>◂</button>
       <span class="grow mono" title={folder}>{folder.split(/[\\/]/).pop()}</span>
+      <button class="btn sm" on:click={loadTree} disabled={treeLoading} title="Refresh file tree">{treeLoading ? '…' : '↻'}</button>
       <button class="btn sm" on:click={revealFolder} title="Open folder in file manager">🗂</button>
       <button class="btn sm" on:click={() => (showNewFile = !showNewFile)} title="New file">＋</button>
     </div>
@@ -665,12 +697,38 @@
       {#each messages as m}
         <div class="msg {m.Role === 'user' ? 'user' : 'assistant'}" class:pending={m._pending}>
           <div class="who">{m.Role}{m.TS ? ' · ' + fmtDate(m.TS) : ''}</div>
+          {#if m.Meta?.activity?.length}
+            <details class="activity-block">
+              <summary>{activityTitle(m.Meta.activity)}</summary>
+              <div class="tool-feed">
+                {#each m.Meta.activity as t}
+                  <div class="tool-row" class:err={t.ok === false || t.type === 'error'} class:reasoning-row={t.type === 'reasoning'}>
+                    {activityStatus(t)} {activityName(t)} <span class="mono" class:reasoning-detail={t.type === 'reasoning'}>{activityDetail(t) || ''}</span>
+                  </div>
+                {/each}
+              </div>
+            </details>
+          {/if}
           {cleanMsg(m.Content)}
         </div>
       {/each}
       {#if sending}
         <div class="msg assistant">
           <div class="who">assistant</div>
+          {#if stream?.reasoning?.length}
+            <div class="tool-feed">
+              {#each stream.reasoning as r}
+                <div class="tool-row reasoning-row">? reasoning <span class="reasoning-detail">{r}</span></div>
+              {/each}
+            </div>
+          {/if}
+          {#if stream?.steps?.length}
+            <div class="tool-feed">
+              {#each stream.steps as s}
+                <div class="tool-row" class:err={!s.ok}>{s.ok ? (s.type === 'step_finish' ? '✓' : '◌') : '✗'} {s.type === 'error' ? 'error' : s.type === 'step_finish' ? 'step done' : 'step'} <span class="mono">{s.detail || ''}</span></div>
+              {/each}
+            </div>
+          {/if}
           {#if stream?.tools?.length}
             <div class="tool-feed">
               {#each stream.tools as t}
@@ -870,6 +928,12 @@
   .composer { display: flex; gap: 6px; align-items: flex-end; padding-top: 8px; }
   .composer textarea { resize: none; }
   .tool-feed { font-size: 11px; color: var(--text-dim); border-left: 2px solid var(--border); padding: 4px 8px; margin-bottom: 6px; }
+  .activity-block { margin: 3px 0 6px; }
+  .activity-block summary { cursor: pointer; color: var(--text-dim); font-size: 11px; user-select: none; }
+  .activity-block .tool-feed { margin-bottom: 0; }
+  .tool-row.err { color: var(--danger, #e5484d); }
+  .reasoning-row { color: var(--accent, #7c6cf2); white-space: pre-wrap; }
+  .reasoning-detail { white-space: pre-wrap; }
   .typing { color: var(--text-dim); font-style: italic; }
   .cursor { animation: blink 1s steps(1) infinite; }
   @keyframes blink { 50% { opacity: 0; } }
