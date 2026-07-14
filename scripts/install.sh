@@ -9,6 +9,8 @@
 #   curl -fsSL https://… | bash -s -- --user        # ~/.local/bin
 #   curl -fsSL https://… | bash -s -- --system      # /usr/local/bin
 #   curl -fsSL https://… | bash -s -- --yes         # auto-yes all prompts
+#   curl -fsSL https://… | bash -s -- --uninstall   # remove binaries + shortcuts
+#   curl -fsSL https://… | bash -s -- --uninstall --purge   # + config/DB
 #
 # Or run locally (from inside an extracted release archive or a repo checkout):
 #   ./scripts/install.sh
@@ -43,6 +45,8 @@ MODE=""          # binary | source (empty = ask, default binary in non-tty)
 PREFIX_MODE=""   # user | system (empty = auto)
 PREFIX=""        # explicit
 YES=0
+UNINSTALL=0
+PURGE=0
 
 # ---------- arg parsing ----------
 while [[ $# -gt 0 ]]; do
@@ -54,12 +58,76 @@ while [[ $# -gt 0 ]]; do
     --prefix)    PREFIX="$2"   ; shift 2 ;;
     --prefix=*)  PREFIX="${1#--prefix=}" ; shift ;;
     --yes|-y)    YES=1 ; shift ;;
+    --uninstall) UNINSTALL=1 ; shift ;;
+    --purge)     PURGE=1 ; shift ;;
     -h|--help)
       sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'
+      cat <<'EOF'
+  --uninstall        remove the installed binaries, launch wrappers and
+                     desktop entries (keeps your config, chats and DB)
+  --purge            with --uninstall: ALSO delete config, managed tools,
+                     the chat database and the build cache
+EOF
       exit 0 ;;
     *) printf 'unknown arg: %s (try --help)\n' "$1" >&2; exit 2 ;;
   esac
 done
+
+# ---------- uninstall ----------
+# Removes what install.sh created. Without --purge the user's data
+# (config, managed tools, chat DB) stays so a reinstall picks up where
+# they left off.
+do_uninstall() {
+  local dests=() d removed=0
+  if [[ -n "$PREFIX" ]]; then
+    dests=("$PREFIX")
+  else
+    dests=("$HOME/.local/bin" "/usr/local/bin")
+  fi
+  local files=(praimate wpc praimate-gui praimate-code praimate-launch
+               praimate-gui-launch PRAIMATE-CODE-LICENSE PRAIMATE-CODE-NOTICE)
+  for d in "${dests[@]}"; do
+    [[ -d "$d" ]] || continue
+    local sudo_cmd=""
+    [[ -w "$d" ]] || { command -v sudo >/dev/null 2>&1 && sudo_cmd="sudo"; }
+    local f
+    for f in "${files[@]}"; do
+      if [[ -e "$d/$f" || -L "$d/$f" ]]; then
+        $sudo_cmd rm -f "$d/$f" && { printf '  removed %s\n' "$d/$f"; removed=1; }
+      fi
+    done
+    if [[ -d "$(dirname "$d")/share/praimate" ]]; then
+      $sudo_cmd rm -rf "$(dirname "$d")/share/praimate" \
+        && { printf '  removed %s\n' "$(dirname "$d")/share/praimate"; removed=1; }
+    fi
+  done
+  # Desktop integration (Linux; macOS installs create none of these).
+  local apps="$HOME/.local/share/applications" desk_dir
+  desk_dir="$(command -v xdg-user-dir >/dev/null 2>&1 && xdg-user-dir DESKTOP || echo "$HOME/Desktop")"
+  local e
+  for e in praimate.desktop praimate-gui.desktop; do
+    for d in "$apps" "$desk_dir"; do
+      [[ -f "$d/$e" ]] && rm -f "$d/$e" && printf '  removed %s\n' "$d/$e"
+    done
+  done
+  rm -f "$HOME/.local/share/icons/praimate.png" 2>/dev/null || true
+  command -v update-desktop-database >/dev/null 2>&1 \
+    && update-desktop-database "$apps" 2>/dev/null || true
+
+  if [[ "$PURGE" == 1 ]]; then
+    local cfg="${XDG_CONFIG_HOME:-$HOME/.config}"
+    local cache="${XDG_CACHE_HOME:-$HOME/.cache}"
+    local p
+    for p in "$cfg/praimate" "$cfg/clade" "$HOME/.praimate" "$cache/praimate"; do
+      [[ -d "$p" ]] && rm -rf "$p" && printf '  purged  %s\n' "$p"
+    done
+  else
+    printf '  (config, managed tools and the chat DB were kept — add --purge to remove them)\n'
+  fi
+  [[ "$removed" == 1 ]] && printf 'PrAImate uninstalled.\n' || printf 'nothing to remove (already uninstalled?)\n'
+  exit 0
+}
+[[ "$UNINSTALL" == 1 ]] && do_uninstall
 
 # ---------- tty helpers ----------
 # When piped via `curl | bash`, stdin is the pipe. To prompt the user

@@ -15,6 +15,9 @@
 #   -Prefix <dir>               install dir (default: %LOCALAPPDATA%\Programs\PrAImate)
 #   -AllUsers                   install to %ProgramFiles%\PrAImate (needs admin)
 #   -Yes                        auto-confirm prompts
+#   -Uninstall                  remove binaries, shortcuts and the PATH entry
+#                               (config, chats and the DB are kept)
+#   -Uninstall -Purge           ALSO delete config, managed tools and the DB
 #
 # The binary path resolves the latest GitHub release via the API.
 # Set $env:RELEASE_TAG=<tag> to pin a specific release instead.
@@ -25,7 +28,12 @@ param(
     [string]$Mode = "",
     [string]$Prefix = "",
     [switch]$AllUsers,
-    [switch]$Yes
+    [switch]$Yes,
+    # -Uninstall removes the installed binaries, shortcuts and the PATH
+    # entry (config, chats and the DB are kept). Add -Purge to also
+    # delete config, managed tools and the chat database.
+    [switch]$Uninstall,
+    [switch]$Purge
 )
 
 $ErrorActionPreference = "Stop"
@@ -93,6 +101,91 @@ function Get-ArchTriplet {
     }
 }
 $Triplet = Get-ArchTriplet
+
+# ---------- uninstall ----------
+# Removes what this installer created. Without -Purge the user's data
+# (config, managed tools, chat DB under %APPDATA%) stays so a reinstall
+# picks up where they left off.
+if ($Uninstall) {
+    $dests = @()
+    if ($Prefix) { $dests += $Prefix }
+    else {
+        $dests += (Join-Path $env:LOCALAPPDATA "Programs\PrAImate")
+        $dests += (Join-Path $env:ProgramFiles "PrAImate")
+    }
+    $removed = $false
+    foreach ($d in $dests) {
+        if (-not (Test-Path $d)) { continue }
+        Step "Removing binaries from $d"
+        foreach ($f in @("praimate.exe","wpc.exe","praimate-gui.exe","praimate-code.exe",
+                         "praimate.exe.old","praimate-gui.exe.old","praimate-code.exe.old",
+                         "PRAIMATE-CODE-LICENSE","PRAIMATE-CODE-NOTICE")) {
+            $p = Join-Path $d $f
+            if (Test-Path $p) { Remove-Item -Force $p; Info "removed $f"; $removed = $true }
+        }
+        # Bundled samples live next to the install dir.
+        $share = Join-Path (Split-Path $d -Parent) "share\praimate"
+        if (Test-Path $share) { Remove-Item -Recurse -Force $share; Info "removed $share" }
+        # Drop the dir itself when it's now empty.
+        if ((Get-ChildItem $d -Force -ErrorAction SilentlyContinue | Measure-Object).Count -eq 0) {
+            Remove-Item -Force $d
+        }
+        # PATH entry (User scope for the default dir, Machine for ProgramFiles).
+        # Only rewrite when the dir is genuinely on the list — a blind
+        # split/rejoin would rewrite the value (dropping empty segments)
+        # even when there's nothing to remove.
+        foreach ($scope in @("User","Machine")) {
+            try {
+                $cur = [Environment]::GetEnvironmentVariable("PATH", $scope)
+                if ($cur) {
+                    $had = $false
+                    $parts = @()
+                    foreach ($p in ($cur -split ";")) {
+                        if ($p -and ($p.TrimEnd('\') -ieq $d.TrimEnd('\'))) { $had = $true }
+                        else { $parts += $p }
+                    }
+                    if ($had) {
+                        [Environment]::SetEnvironmentVariable("PATH", ($parts -join ";"), $scope)
+                        Info "removed $d from $scope PATH"
+                    }
+                }
+            } catch { }
+        }
+    }
+    # Shortcuts: only delete ones whose target lives inside a dir we're
+    # uninstalling — a custom -Prefix uninstall must not take out the
+    # shortcuts of a separate default-location install.
+    Step "Removing shortcuts"
+    $desk = [Environment]::GetFolderPath("Desktop")
+    $startMenu = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
+    $ws = New-Object -ComObject WScript.Shell
+    foreach ($n in @("PrAImate.lnk","PrAImate GUI.lnk")) {
+        foreach ($dir in @($desk, $startMenu)) {
+            $lnk = Join-Path $dir $n
+            if (-not (Test-Path $lnk)) { continue }
+            $target = ""
+            try { $target = $ws.CreateShortcut($lnk).TargetPath } catch { }
+            $mine = $false
+            foreach ($d in $dests) {
+                if ($target -and $target.StartsWith($d.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) { $mine = $true }
+            }
+            if ($mine) { Remove-Item -Force $lnk; Info "removed $lnk" }
+        }
+    }
+    if ($Purge) {
+        Step "Purging config + data"
+        foreach ($p in @((Join-Path $env:APPDATA "praimate"),
+                         (Join-Path $env:APPDATA "PrAImate"),
+                         (Join-Path $env:APPDATA "clade"),
+                         (Join-Path $env:LOCALAPPDATA "praimate"))) {
+            if (Test-Path $p) { Remove-Item -Recurse -Force $p; Info "purged $p" }
+        }
+    } else {
+        Info "(config, managed tools and the chat DB were kept - add -Purge to remove them)"
+    }
+    if ($removed) { Step "PrAImate uninstalled" } else { Warn "nothing to remove (already uninstalled?)" }
+    exit 0
+}
 
 # ---------- locate local binaries (release-archive / repo case) ----------
 $here = if ($MyInvocation.MyCommand.Path) {

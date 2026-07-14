@@ -17,6 +17,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -598,6 +599,20 @@ func runUpdate(autoYes bool) int {
 // Anything else returns a helpful "available tools: ..." error so the
 // user can pick.
 func runInstallTool(name string) int {
+	// praimate-code lives outside KnownTools (it's a coding CLI, not a
+	// companion tool) but is the thing users most want to install from
+	// the command line — `praimate code` points here when it's missing.
+	if name == "praimate-code" {
+		if err := installer.InstallPraimateCode(context.Background(), os.Stdout); err != nil {
+			fmt.Fprintf(os.Stderr, "\npraimate: install praimate-code failed: %v\n", err)
+			if errors.Is(err, installer.ErrNoPrebuiltAsset) {
+				fmt.Fprintln(os.Stderr, "       build it from source instead: scripts/build-praimate-code.sh (needs git + bun)")
+			}
+			return 1
+		}
+		fmt.Println("\n✓ praimate-code installed. Launch it with: praimate code")
+		return 0
+	}
 	id := installer.ToolID(name)
 	known := false
 	var hint string
@@ -608,7 +623,7 @@ func runInstallTool(name string) int {
 		}
 	}
 	if !known {
-		fmt.Fprintf(os.Stderr, "praimate: unknown tool %q. Available:%s\n", name, hint)
+		fmt.Fprintf(os.Stderr, "praimate: unknown tool %q. Available:%s praimate-code\n", name, hint)
 		return 2
 	}
 	methods := installer.ToolMethods(id, installer.ActionInstall, installer.DetectOS())

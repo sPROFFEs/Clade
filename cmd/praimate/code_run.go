@@ -14,6 +14,7 @@ package main
 //  3. <config>/praimate/bin/praimate-code (managed-install location)
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -22,8 +23,10 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strings"
 
 	"github.com/sPROFFEs/PrAImate/internal/core"
+	"github.com/sPROFFEs/PrAImate/internal/installer"
 	"github.com/sPROFFEs/PrAImate/internal/store"
 )
 
@@ -66,13 +69,14 @@ func runCode(args []string) int {
 	bin := resolveCodeBinary(exePath, configDir)
 	if bin == "" {
 		fmt.Fprintln(os.Stderr, "praimate: praimate-code not found next to this binary or on PATH.")
-		fmt.Fprintln(os.Stderr)
-		fmt.Fprintln(os.Stderr, "PrAImate Code is our version-pinned build of OpenCode. It ships")
-		fmt.Fprintln(os.Stderr, "prebuilt in the linux-amd64 and windows-amd64 release archives.")
-		fmt.Fprintln(os.Stderr, "Build it from source with:")
-		fmt.Fprintln(os.Stderr)
-		fmt.Fprintln(os.Stderr, "  scripts/build-praimate-code.sh")
-		return 127
+		if !offerCodeInstall() {
+			return 127
+		}
+		bin = resolveCodeBinary(exePath, configDir)
+		if bin == "" {
+			fmt.Fprintln(os.Stderr, "praimate: install finished but praimate-code still can't be resolved.")
+			return 127
+		}
 	}
 
 	cmd := exec.Command(bin, args...)
@@ -89,6 +93,45 @@ func runCode(args []string) int {
 		return 1
 	}
 	return 0
+}
+
+// offerCodeInstall gives the user a one-command way out of the
+// "praimate-code not installed" dead end: on an interactive terminal it
+// asks and runs the same install the GUI uses (bundled sidecar copy →
+// native release download); non-interactively it prints how to get it.
+// Returns true when an install ran and succeeded.
+func offerCodeInstall() bool {
+	interactive := false
+	if fi, err := os.Stdin.Stat(); err == nil && fi.Mode()&os.ModeCharDevice != 0 {
+		interactive = true
+	}
+	if !interactive {
+		fmt.Fprintln(os.Stderr)
+		fmt.Fprintln(os.Stderr, "PrAImate Code is our version-pinned build of OpenCode. Get it with:")
+		fmt.Fprintln(os.Stderr)
+		fmt.Fprintln(os.Stderr, "  praimate install-tool praimate-code    # downloads the prebuilt (~150 MB)")
+		fmt.Fprintln(os.Stderr)
+		fmt.Fprintln(os.Stderr, "or install it from the GUI's CLIs tab, or build from source:")
+		fmt.Fprintln(os.Stderr, "  scripts/build-praimate-code.sh   (needs bun)")
+		return false
+	}
+	fmt.Fprint(os.Stderr, "\nPrAImate Code is our version-pinned build of OpenCode.\nDownload the prebuilt now (~150 MB, one time)? [Y/n] ")
+	reply, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+	reply = strings.ToLower(strings.TrimSpace(reply))
+	if reply != "" && reply != "y" && reply != "yes" {
+		fmt.Fprintln(os.Stderr, "skipped — run `praimate install-tool praimate-code` when ready.")
+		return false
+	}
+	if err := installer.InstallPraimateCode(context.Background(), os.Stderr); err != nil {
+		if errors.Is(err, installer.ErrNoPrebuiltAsset) {
+			fmt.Fprintf(os.Stderr, "\nNo prebuilt exists for %s/%s. Build it from source instead:\n", runtime.GOOS, runtime.GOARCH)
+			fmt.Fprintln(os.Stderr, "  scripts/build-praimate-code.sh   (needs git + bun)")
+		} else {
+			fmt.Fprintf(os.Stderr, "\npraimate: install failed: %v\n", err)
+		}
+		return false
+	}
+	return true
 }
 
 func prepareCodeMCPEnv() []string {
