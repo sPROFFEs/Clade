@@ -116,6 +116,9 @@ func refreshManagedPaths() {
 	installer.ImportManagedToolsToPath()
 	installer.ImportPraimateBinToPath()
 	installer.ImportUserBinDirs()
+	// Windows: pick up PATH dirs the just-finished installer wrote to
+	// the registry (scoop shims, npm prefix, bun, …). No-op elsewhere.
+	installer.ImportWindowsRegistryPath()
 }
 
 // RefreshPATH is the user-triggered version of refreshManagedPaths,

@@ -45,9 +45,17 @@ func candidateUserBinDirs(home string) []string {
 		local := os.Getenv("LOCALAPPDATA")
 		appd := os.Getenv("APPDATA")
 		dirs := []string{
+			// Claude Code's native installer targets ~/.local/bin on
+			// Windows too, and bun's PowerShell installer uses ~/.bun/bin
+			// (NOT %LOCALAPPDATA%\Programs\bun).
+			filepath.Join(home, ".local", "bin"),
+			filepath.Join(home, ".bun", "bin"),
+			filepath.Join(home, ".opencode", "bin"),
 			filepath.Join(home, ".cargo", "bin"),
 			filepath.Join(home, ".deno", "bin"),
 			filepath.Join(home, "go", "bin"),
+			// scoop's default per-user shim dir (deepseek-tui et al).
+			filepath.Join(home, "scoop", "shims"),
 		}
 		if local != "" {
 			dirs = append(dirs,
@@ -65,6 +73,8 @@ func candidateUserBinDirs(home string) []string {
 			filepath.Join(home, ".bun", "bin"),
 			filepath.Join(home, ".deno", "bin"),
 			filepath.Join(home, ".cargo", "bin"),
+			filepath.Join(home, ".opencode", "bin"),
+			filepath.Join(home, ".claude", "local"),
 			filepath.Join(home, ".rye", "shims"),
 			filepath.Join(home, ".volta", "bin"),
 			filepath.Join(home, ".foundry", "bin"),
@@ -79,11 +89,15 @@ func candidateUserBinDirs(home string) []string {
 			filepath.Join(home, ".bun", "bin"),
 			filepath.Join(home, ".deno", "bin"),
 			filepath.Join(home, ".cargo", "bin"),
+			filepath.Join(home, ".opencode", "bin"),
+			filepath.Join(home, ".claude", "local"),
 			filepath.Join(home, ".rye", "shims"),
 			filepath.Join(home, ".volta", "bin"),
 			filepath.Join(home, ".foundry", "bin"),
 			filepath.Join(home, "go", "bin"),
 			filepath.Join(home, ".npm-global", "bin"),
+			// Homebrew on Linux.
+			"/home/linuxbrew/.linuxbrew/bin",
 		}
 	}
 }

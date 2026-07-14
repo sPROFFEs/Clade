@@ -127,6 +127,12 @@ func main() {
 	// shortcut or any non-shell context that hasn't sourced the user's
 	// rc files.
 	installer.ImportUserBinDirs()
+	// Windows: merge the User + Machine PATH from the registry. A
+	// terminal session opened BEFORE a tool was installed still has the
+	// old PATH — the registry has the fresh one, so tools like opencode
+	// installed minutes ago resolve without reopening the terminal.
+	// No-op on non-Windows.
+	installer.ImportWindowsRegistryPath()
 
 	// One-shot config migrations. Codex 0.40+ hard-errors on
 	// wire_api="chat" — rewrite our managed block to "responses" so

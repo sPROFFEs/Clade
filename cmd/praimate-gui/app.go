@@ -89,7 +89,7 @@ func (a *App) startup(ctx context.Context) {
 	// into our PATH so user-installer registry edits made after the
 	// GUI launched (npm prefix, pnpm setup, bun installer, …) reach
 	// exec.LookPath. No-op on non-Windows.
-	importWindowsRegistryPath()
+	installer.ImportWindowsRegistryPath()
 
 	// Live PATH rescan — periodically check the well-known per-user CLI
 	// dirs in case the user installed bun/pnpm/cargo/uv in another
@@ -109,7 +109,7 @@ func (a *App) startup(ctx context.Context) {
 				installer.ImportManagedToolsToPath()
 				installer.ImportPraimateBinToPath()
 				installer.ImportUserBinDirs()
-				importWindowsRegistryPath()
+				installer.ImportWindowsRegistryPath()
 			}
 		}
 	}()

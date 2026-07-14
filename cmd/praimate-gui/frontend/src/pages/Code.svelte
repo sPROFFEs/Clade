@@ -16,6 +16,10 @@
   let codeInstalled = true
   let installing = false
   let installLog = ''
+  // Set when no prebuilt exists for this OS/arch — offer the local
+  // compile (BuildToolFromSource) instead of a retry that can't work.
+  let compileOffer = false
+  let unsubInstall = () => {}
 
   // setup state
   let agent = null
@@ -62,11 +66,38 @@
     installing = true
     installLog = ''
     error = ''
+    compileOffer = false
     try {
-      installLog = await api.installPraimateCode()
+      // Returns { ok, log, error, noPrebuiltAsset } — never a string.
+      const res = await api.installPraimateCode()
+      installLog = res?.log || ''
+      if (res && res.ok === false) {
+        if (res.noPrebuiltAsset) {
+          compileOffer = true
+        } else {
+          error = 'Install failed: ' + (res.error || 'unknown error')
+        }
+      }
       await checkCode()
     } catch (e) {
       error = 'Install failed: ' + String(e)
+    } finally {
+      installing = false
+    }
+  }
+
+  // Compile PrAImate Code locally (clones the repo, builds with bun).
+  // Output streams over "praimate:install" into installLog.
+  async function compileCode() {
+    installing = true
+    installLog = ''
+    error = ''
+    compileOffer = false
+    try {
+      await api.buildToolFromSource('praimate-code')
+      await checkCode()
+    } catch (e) {
+      error = 'Compile failed: ' + String(e)
     } finally {
       installing = false
     }
@@ -274,13 +305,24 @@
   onMount(() => {
     load()
     checkCode()
+    // Live install/compile output for the PrAImate Code card.
+    if (typeof window !== 'undefined' && window.runtime?.EventsOn) {
+      window.runtime.EventsOn('praimate:install', (ev) => {
+        if (ev?.cli === 'praimate-code' || ev?.cli === 'build:praimate-code') {
+          installLog = (installLog ? installLog + '\n' : '') + ev.line
+          const lines = installLog.split('\n')
+          if (lines.length > 200) installLog = lines.slice(-200).join('\n')
+        }
+      })
+      unsubInstall = () => window.runtime.EventsOff('praimate:install')
+    }
     const p = get(pendingTerm)
     if (p) {
       pendingTerm.set(null)
       attachPending(p)
     }
   })
-  onDestroy(teardown)
+  onDestroy(() => { unsubInstall(); teardown() })
 </script>
 
 <div class="row" style="margin-bottom:4px">
@@ -304,7 +346,18 @@
       <button class="btn primary" on:click={installCode} disabled={installing}>
         {installing ? 'Installing…' : 'Install PrAImate Code'}
       </button>
+      {#if compileOffer}
+        <button class="btn" on:click={compileCode} disabled={installing}>Compile from source</button>
+      {/if}
     </div>
+    {#if compileOffer}
+      <div class="card-sub" style="margin-top:8px; color: var(--warn)">
+        No prebuilt PrAImate Code is published for this OS/arch. You can compile
+        it locally instead — needs <span class="mono">git</span> and
+        <span class="mono">bun</span>{navigator.platform?.startsWith('Win') ? ' plus Git Bash' : ''}
+        on PATH (several minutes, large download).
+      </div>
+    {/if}
     {#if installLog}<pre class="mono" style="margin-top:10px; max-height:140px; overflow:auto">{installLog}</pre>{/if}
   </div>
 {/if}
