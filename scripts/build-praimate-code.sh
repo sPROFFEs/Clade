@@ -132,7 +132,7 @@ cat > "$OUT/PRAIMATE-CODE-NOTICE" <<EOF
 PrAImate Code is a rebranded build of OpenCode.
 
 Upstream:  $OPENCODE_URL
-Pinned ref: ${OPENCODE_REF:-v1.17.3 (vendored in third_party/opencode)}
+Pinned ref: ${OPENCODE_REF:-v1.17.20 (vendored in third_party/opencode)}
 License:   MIT (see PRAIMATE-CODE-LICENSE)
 
 OpenCode is the work of its authors; PrAImate ships a version-pinned

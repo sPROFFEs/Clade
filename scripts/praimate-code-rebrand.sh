@@ -27,8 +27,12 @@ HOME_TSX="packages/tui/src/routes/home.tsx"
 
 # 1. Short-circuit the update-available handler. `if (true) return`
 #    avoids unreachable-code type errors while disabling the dialog.
+#    The returned string literal is deliberate: comments are stripped by
+#    bun's bundler, but live code survives — so the built binary carries
+#    a greppable "praimate:managed-build" marker that
+#    update-praimate-code.sh uses to verify the patch really applied.
 if [ -f "$APP_TSX" ] && grep -q 'installation.update-available", async (evt) => {' "$APP_TSX"; then
-  perl -0pi -e 's/(event\.on\("installation\.update-available", async \(evt\) => \{)/$1\n    if (true) return; \/\/ praimate: managed build, upstream update advisory disabled/' "$APP_TSX"
+  perl -0pi -e 's/(event\.on\("installation\.update-available", async \(evt\) => \{)/$1\n    if (true) return "praimate:managed-build"; \/\/ upstream update advisory disabled/' "$APP_TSX"
   echo "    · disabled update advisory"
 else
   echo "    · WARN: update-advisory anchor not found (upstream moved?); skipped" >&2

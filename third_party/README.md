@@ -9,7 +9,7 @@ recording provenance).
 
 | Dir | Upstream | Pinned | License | Built into |
 |---|---|---|---|---|
-| `opencode/` | https://github.com/sst/opencode | `v1.17.3` | MIT (© opencode) | **PrAImate Code** (`scripts/build-praimate-code.sh`) |
+| `opencode/` | https://github.com/sst/opencode | `v1.17.20` | MIT (© opencode) | **PrAImate Code** (`scripts/build-praimate-code.sh`) |
 | `graphify/` | https://github.com/safishamsi/graphify (`graphifyy` on PyPI) | `0.8.36` | MIT (© Safi Shamsi) | **praimate-graphify** (`scripts/build-graphify.sh`) |
 
 ## opencode/
@@ -22,14 +22,27 @@ over it, `bun install`s, and compiles. Keeping the mirror pristine means
 the rebrand diff stays reviewable in one small script and bumping
 upstream is a clean re-vendor.
 
-**Re-vendor / bump upstream:**
+**Re-vendor / bump upstream** — use the updater script; it re-vendors,
+bumps the pin notes, verifies the rebrand anchors still apply, builds,
+checks the personalized banner made it into the binary, and can commit,
+push and upload the release asset for you:
+
+```sh
+scripts/update-praimate-code.sh                    # bump to latest upstream
+scripts/update-praimate-code.sh v1.17.20           # bump to a specific tag
+scripts/update-praimate-code.sh --push --release   # + commit/push + upload asset
+```
+
+Manual equivalent (what the script automates):
 
 ```sh
 ref=v1.17.4   # new tag
 git clone --depth 1 --branch "$ref" https://github.com/sst/opencode /tmp/oc
 rm -rf /tmp/oc/.git
 rm -rf third_party/opencode && mv /tmp/oc third_party/opencode
-# then bump OPENCODE_REF's default note in build-praimate-code.sh
+# then bump the pin here and OPENCODE_REF's default note in
+# build-praimate-code.sh, and confirm praimate-code-rebrand.sh's anchors
+# (<Logo /> and the update-advisory hook) still exist in the new source
 ```
 
 `bun install` still pulls the JS dependency tree from npm at build time
