@@ -98,6 +98,8 @@ Useful installer modes:
 ./scripts/install.sh --user        # install into ~/.local/bin
 ./scripts/install.sh --system      # install into /usr/local/bin
 ./scripts/install.sh --yes         # non-interactive defaults
+./scripts/install.sh --uninstall   # remove binaries, wrappers, desktop entries
+./scripts/install.sh --uninstall --purge   # also remove config, tools, chat DB
 ```
 
 ```powershell
@@ -105,7 +107,13 @@ Useful installer modes:
 .\scripts\install.ps1 -Mode Source
 .\scripts\install.ps1 -AllUsers
 .\scripts\install.ps1 -Yes
+.\scripts\install.ps1 -Uninstall          # remove binaries, shortcuts, PATH entry
+.\scripts\install.ps1 -Uninstall -Purge   # also remove config, tools, chat DB
 ```
+
+Uninstalling without `--purge` / `-Purge` keeps your config, managed
+tools and chat database, so a later reinstall picks up where you left
+off.
 
 Source installs now detect an existing checkout, build `praimate` and
 `wpc`, build the GUI when dependencies are available, and install the
@@ -125,7 +133,15 @@ praimate code           # bundled PrAImate Code CLI
 praimate -check-update  # check GitHub for a newer release
 praimate -update        # self-update installed binaries
 praimate -version       # banner + version
+
+praimate install-tool praimate-code   # download the prebuilt PrAImate Code
+praimate install-tool graphify        # install a managed helper tool
 ```
+
+If `praimate code` can't find PrAImate Code it offers to download the
+prebuilt binary on the spot (about 150 MB, one time). Installs use a
+native downloader — no curl or PowerShell involved — and fall back to a
+guided compile-from-source when no prebuilt exists for your platform.
 
 First run asks for a workspaces root and can seed sample workpaths and
 starter agents. From there:
@@ -170,6 +186,18 @@ OUT=dist/$(go env GOOS)-$(go env GOARCH) scripts/build-praimate-code.sh
 
 It requires `bun` and around 8 GB of free scratch space. Set
 `PRAIMATE_BUILD_DIR=/path/on/a/larger/disk` when `/tmp` is too small.
+
+To bump the vendored OpenCode to a newer upstream release while keeping
+the PrAImate rebrand (banner + disabled update advisory), use the
+updater — it re-vendors, verifies the rebrand anchors before building,
+compiles, checks the banner made it into the binary, and can commit,
+push, and upload the release asset:
+
+```sh
+scripts/update-praimate-code.sh                    # bump to latest upstream
+scripts/update-praimate-code.sh v1.17.20           # bump to a specific tag
+scripts/update-praimate-code.sh --push --release   # + commit/push + upload asset
+```
 
 The GUI can also be built directly:
 
