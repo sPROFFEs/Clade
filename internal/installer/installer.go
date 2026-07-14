@@ -79,6 +79,15 @@ type Method struct {
 	// the agent's binary name); ManagedPrefixPkg is the npm spec.
 	ManagedPrefix    string
 	ManagedPrefixPkg string
+
+	// DownloadAsset, when non-empty, switches Run to the NATIVE release-
+	// asset downloader (DownloadReleaseAsset): fetch this asset from the
+	// latest GitHub release into DownloadDest. No shell, no curl, no
+	// PowerShell — Go's net/http handles TLS and retries, and a missing
+	// asset returns ErrNoPrebuiltAsset instead of an opaque 404. Command
+	// is still set for display but isn't executed.
+	DownloadAsset string
+	DownloadDest  string
 }
 
 // Shell tells Run how to execute Command. Direct means no shell wrapping
@@ -148,6 +157,9 @@ func Methods(agent AgentID, action Action, current OS) []Method {
 // every Node-based agent (codex, opencode, gemini, deepseek), even
 // though the launcher is capable of installing pnpm itself.
 func methodAvailable(m Method) bool {
+	if m.DownloadAsset != "" {
+		return true // native Go downloader — no external runner needed
+	}
 	bin := m.ID
 	switch bin {
 	case "powershell":
@@ -606,10 +618,25 @@ func Run(ctx context.Context, m Method, stdout, stderr io.Writer) error {
 // RunWithOptions is Run + caller-supplied opt-ins. Streams stdout/stderr
 // to the writers so the TUI can render output live.
 func RunWithOptions(ctx context.Context, m Method, opts RunOptions, stdout, stderr io.Writer) error {
+	// Native release-asset install — handled fully in-process, before
+	// any prereq/env work (it needs no node, pnpm, curl or PowerShell).
+	// A binary bundled next to the running praimate executable (release
+	// archives ship praimate-code / praimate-graphify there) wins over
+	// the network.
+	if m.DownloadAsset != "" {
+		if handled, err := installFromBundledSidecar(m, stdout); handled {
+			return err
+		}
+		return DownloadReleaseAsset(ctx, m.DownloadAsset, m.DownloadDest, stdout)
+	}
 	var extraEnv []string
 	// Honor the Node opt-in first — if pnpm setup follows, it needs
-	// node on PATH or it can't run corepack at all.
-	if opts.InstallNode && runtime.GOOS == "windows" {
+	// node on PATH or it can't run corepack at all. Gated on the method
+	// actually declaring node as a prereq: without this, a caller that
+	// always passes InstallNode (the GUI does) triggered a multi-minute
+	// winget Node install before methods that never touch Node, like the
+	// prebuilt-binary downloads.
+	if opts.InstallNode && runtime.GOOS == "windows" && methodNeedsNode(m) {
 		if _, err := exec.LookPath("node"); err != nil {
 			env, err := AutoInstallNodeWindows(ctx, stdout)
 			if err != nil {
@@ -675,6 +702,18 @@ func RunWithOptions(ctx context.Context, m Method, opts RunOptions, stdout, stde
 	return cmd.Run()
 }
 
+// methodNeedsNode reports whether running m depends on a Node runtime —
+// either it declares node as a prereq or it's a pnpm command (pnpm's
+// corepack bootstrap needs node too).
+func methodNeedsNode(m Method) bool {
+	for _, p := range m.Prereqs {
+		if p == "node" {
+			return true
+		}
+	}
+	return strings.HasPrefix(m.Command, "pnpm ")
+}
+
 func buildCmd(ctx context.Context, m Method) *exec.Cmd {
 	switch m.Shell {
 	case ShellBash:
@@ -686,7 +725,13 @@ func buildCmd(ctx context.Context, m Method) *exec.Cmd {
 		if _, err := exec.LookPath("powershell.exe"); err == nil {
 			bin = "powershell.exe"
 		}
-		cmd := exec.CommandContext(ctx, bin, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", m.Command)
+		// Windows PowerShell 5.1's .NET web stack can default to TLS 1.0,
+		// which GitHub / claude.ai reject mid-handshake ("The connection
+		// was closed unexpectedly"). Opt the spawned session into TLS 1.2+
+		// before the actual command runs.
+		const tlsBootstrap = "try { [Net.ServicePointManager]::SecurityProtocol = " +
+			"[Net.ServicePointManager]::SecurityProtocol -bor 3072 -bor 12288 } catch {}; "
+		cmd := exec.CommandContext(ctx, bin, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", tlsBootstrap+m.Command)
 		hideConsole(cmd)
 		return cmd
 	default:
@@ -1104,8 +1149,10 @@ func tapCmd(a Action, name string) string {
 }
 
 func wingetCmd(a Action, id string) string {
+	// Both verbs carry the agreement flags: winget prompts interactively
+	// without them, which hangs when we spawn it with no console input.
 	if a == ActionUpdate {
-		return "winget upgrade --id " + id + " -e"
+		return "winget upgrade --id " + id + " -e --accept-package-agreements --accept-source-agreements"
 	}
 	return "winget install --id " + id + " -e --accept-package-agreements --accept-source-agreements"
 }

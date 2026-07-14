@@ -21,7 +21,7 @@ the bundled **PrAImate Code** build. It provides the layer around those
 tools: agents, workflows, memory, MCP configuration, automation, local
 tool management, and optional git-backed backup.
 
-The current project version is **1.0.7**.
+The current project version is **1.0.8**.
 
 ## Binaries
 
@@ -155,7 +155,7 @@ scripts/build.sh
 scripts/build.sh --with-gui
 scripts/build.sh --with-code
 scripts/build.sh --with-graphify
-scripts/build.sh --version=1.0.7
+scripts/build.sh --version=1.0.8
 ```
 
 `scripts/build.sh` stamps the version into `praimate`, builds supported

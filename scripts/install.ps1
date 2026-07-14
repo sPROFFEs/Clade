@@ -30,6 +30,20 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Windows PowerShell 5.1's .NET web stack can default to TLS 1.0, which
+# GitHub's servers reject mid-handshake ("The connection was closed
+# unexpectedly"). Opt into TLS 1.2 (and 1.3 where the OS supports it)
+# without clobbering whatever else is already enabled.
+try {
+    [Net.ServicePointManager]::SecurityProtocol = `
+        [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    [Net.ServicePointManager]::SecurityProtocol = `
+        [Net.ServicePointManager]::SecurityProtocol -bor 12288  # Tls13; enum member missing on older .NET
+} catch {}
+# Invoke-WebRequest's live progress bar slows large downloads ~10x on
+# PowerShell 5.1; silence it for this script only.
+$ProgressPreference = "SilentlyContinue"
+
 $Repo = "sPROFFEs/PrAImate"
 $ForgeURL = "https://github.com"
 $RepoURL = "$ForgeURL/$Repo"
@@ -176,7 +190,27 @@ function Install-Binary {
     $tmp = New-Item -ItemType Directory -Force -Path (Join-Path $env:TEMP ("praimate-install-" + [Guid]::NewGuid().ToString("N")))
     try {
         $zip = Join-Path $tmp.FullName $fname
-        Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing -ErrorAction Stop
+        # Retry transient network drops; a 404 (asset really missing)
+        # fails immediately with a pointer at the releases page.
+        $maxTries = 3
+        for ($try = 1; $try -le $maxTries; $try++) {
+            try {
+                Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing `
+                    -Headers @{ "User-Agent" = "praimate-installer" } -ErrorAction Stop
+                break
+            } catch {
+                $status = $null
+                if ($_.Exception.Response) { $status = [int]$_.Exception.Response.StatusCode }
+                if ($status -eq 404) {
+                    Fail "release $ReleaseTag has no asset $fname - see $RepoURL/releases"
+                }
+                if ($try -eq $maxTries) {
+                    Fail "download failed after $maxTries attempts: $($_.Exception.Message)"
+                }
+                Warn "    download attempt $try failed ($($_.Exception.Message)); retrying..."
+                Start-Sleep -Seconds ($try * 2)
+            }
+        }
         Info ("downloaded " + ((Get-Item $zip).Length / 1MB).ToString("0.0") + " MB")
 
         Step "Extracting"

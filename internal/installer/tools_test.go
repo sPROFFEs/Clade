@@ -168,17 +168,24 @@ func containsString(xs []string, want string) bool {
 }
 
 func TestPraimateCodeMethods_PresentPerOS(t *testing.T) {
-	// Linux/macOS → a curl download method; Windows → powershell.
+	// Every OS gets the native download method (bundled copy + release
+	// asset fetch, handled in-process — no curl/PowerShell shell-out).
 	unix := allToolMethods(ToolPraimateCode, ActionInstall, OSLinux)
-	if len(unix) != 1 || unix[0].ID != "curl" {
+	if len(unix) != 1 || unix[0].ID != "download" {
 		t.Fatalf("linux praimate-code methods = %+v", unix)
 	}
+	if !strings.Contains(unix[0].DownloadAsset, "praimate-code-") {
+		t.Fatalf("method missing download asset: %+v", unix[0])
+	}
 	if !strings.Contains(unix[0].Command, "praimate-code-") {
-		t.Fatalf("download command missing asset url: %q", unix[0].Command)
+		t.Fatalf("display command missing asset name: %q", unix[0].Command)
 	}
 	win := allToolMethods(ToolPraimateCode, ActionInstall, OSWindows)
-	if len(win) != 1 || win[0].ID != "powershell" {
+	if len(win) != 1 || win[0].ID != "download" {
 		t.Fatalf("windows praimate-code methods = %+v", win)
+	}
+	if !strings.HasSuffix(win[0].DownloadDest, "praimate-code.exe") {
+		t.Fatalf("windows dest should be praimate-code.exe: %+v", win[0])
 	}
 }
 

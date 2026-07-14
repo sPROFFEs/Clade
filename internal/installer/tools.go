@@ -318,79 +318,54 @@ func graphifyBundledMethod(current OS) *Method {
 	if err != nil {
 		return nil
 	}
-	if current == OSWindows {
-		dest := filepath.Join(binDir, "graphify.exe")
-		return &Method{
-			ID:          "powershell",
-			Label:       "Download PrAImate's bundled graphify (no Python needed)",
-			Command:     forgeAssetDownloadPowerShell(graphifyAssetName(), binDir, dest),
-			Shell:       ShellPowerShell,
-			Recommended: true,
-		}
-	}
 	dest := filepath.Join(binDir, "graphify")
+	if current == OSWindows {
+		dest += ".exe"
+	}
+	asset := graphifyAssetName()
 	return &Method{
-		ID:          "curl",
-		Label:       "Download PrAImate's bundled graphify (no Python needed)",
-		Command:     forgeAssetDownloadBash(graphifyAssetName(), binDir, dest),
-		Shell:       ShellBash,
-		Recommended: true,
+		ID:            "download",
+		Label:         "Download PrAImate's bundled graphify (no Python needed)",
+		Command:       assetDownloadDisplayCmd(asset, dest),
+		DownloadAsset: asset,
+		DownloadDest:  dest,
+		Recommended:   true,
 	}
 }
 
+// assetDownloadDisplayCmd is the human-readable line the picker shows
+// for a native download method. Not executed — Run dispatches on
+// DownloadAsset and downloads in-process via net/http.
+func assetDownloadDisplayCmd(asset, dest string) string {
+	return "download " + version.RepoURL + "/releases/download/<latest>/" + asset + " -> " + dest
+}
+
+// InstallBundledGraphify installs the standalone graphify build: a
+// binary bundled next to the running praimate executable wins,
+// otherwise the release asset is downloaded natively. Both paths live
+// in Run's DownloadAsset dispatch. The method is built without the
+// graphifyAssetShipped gate on purpose — the bundled-sidecar copy works
+// on every OS, and a missing release asset surfaces as
+// ErrNoPrebuiltAsset ("compile from source") rather than a flat
+// "unsupported platform".
 func InstallBundledGraphify(ctx context.Context, w io.Writer) error {
 	binDir, err := PraimateBinDir()
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(binDir, 0o755); err != nil {
-		return err
-	}
-
-	name := "graphify"
+	dest := filepath.Join(binDir, "graphify")
 	if runtime.GOOS == "windows" {
-		name += ".exe"
+		dest += ".exe"
 	}
-
-	exe, err := os.Executable()
-	if err == nil {
-		// Look for bundled binary (e.g. from zip release)
-		// Note: bundled name in zip is praimate-graphify, but we install as graphify
-		localName := "praimate-graphify"
-		if runtime.GOOS == "windows" {
-			localName += ".exe"
-		}
-		localCand := filepath.Join(filepath.Dir(exe), localName)
-		if st, err := os.Stat(localCand); err == nil && !st.IsDir() {
-			fmt.Fprintf(w, "→ Found bundled binary at %s\n", localCand)
-			dest := filepath.Join(binDir, name)
-			fmt.Fprintf(w, "→ Copying to %s\n", dest)
-
-			srcFile, err := os.Open(localCand)
-			if err != nil {
-				return fmt.Errorf("open local binary: %w", err)
-			}
-			defer srcFile.Close()
-
-			dstFile, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
-			if err != nil {
-				return fmt.Errorf("create destination: %w", err)
-			}
-			defer dstFile.Close()
-
-			if _, err := io.Copy(dstFile, srcFile); err != nil {
-				return fmt.Errorf("copy binary: %w", err)
-			}
-			fmt.Fprintln(w, "✓ Install finished")
-			return nil
-		}
+	asset := graphifyAssetName()
+	m := Method{
+		ID:            "download",
+		Label:         "Download PrAImate's bundled graphify (no Python needed)",
+		Command:       assetDownloadDisplayCmd(asset, dest),
+		DownloadAsset: asset,
+		DownloadDest:  dest,
 	}
-
-	m := graphifyBundledMethod(DetectOS())
-	if m == nil {
-		return fmt.Errorf("graphify bundling is not supported on this platform")
-	}
-	return Run(ctx, *m, w, w)
+	return Run(ctx, m, w, w)
 }
 
 func fileExists(p string) bool {
@@ -510,68 +485,32 @@ func allToolMethods(tool ToolID, action Action, current OS) []Method {
 	return nil
 }
 
-// praimateCodeMethods builds the download install for PrAImate Code. It
-// resolves the latest GitHub release tag and fetches the prebuilt standalone
-// for the host OS/arch into <config>/praimate/bin. No toolchain
-// needed — it's a single self-contained binary.
+// praimateCodeMethods builds the install method for PrAImate Code: copy
+// the binary bundled next to the running praimate executable (the zip /
+// tar.gz releases ship it there when built with bun), falling back to a
+// native download of the standalone release asset for the host OS/arch
+// into <config>/praimate/bin. Run dispatches this to
+// InstallPraimateCode, which returns ErrNoPrebuiltAsset when neither
+// source exists so callers redirect to "compile from source" instead of
+// retrying a download that can never succeed.
 func praimateCodeMethods(current OS) []Method {
 	binDir, err := PraimateBinDir()
 	if err != nil {
 		return nil
 	}
-	asset := praimateCodeAssetName()
-
-	if current == OSWindows {
-		dest := filepath.Join(binDir, "praimate-code.exe")
-		// Single-quoted PowerShell literals: '\' is NOT an escape char in
-		// PS single-quotes, so Windows paths pass through verbatim (unlike
-		// Go's %q, which would double the backslashes).
-		cmd := forgeAssetDownloadPowerShell(asset, binDir, dest)
-		// ID must name the runner methodAvailable() probes on PATH —
-		// powershell here (the Windows case in methodAvailable).
-		return []Method{{
-			ID:          "powershell",
-			Label:       "Download prebuilt PrAImate Code into <config>\\praimate\\bin",
-			Command:     cmd,
-			Shell:       ShellPowerShell,
-			Recommended: true,
-		}}
-	}
 	dest := filepath.Join(binDir, "praimate-code")
-	cmd := forgeAssetDownloadBash(asset, binDir, dest)
-	// ID "curl" so methodAvailable keeps it visible only when curl is on
-	// PATH; the command itself runs through bash (Shell).
+	if current == OSWindows {
+		dest += ".exe"
+	}
+	asset := praimateCodeAssetName()
 	return []Method{{
-		ID:          "curl",
-		Label:       "Download prebuilt PrAImate Code into <config>/praimate/bin",
-		Command:     cmd,
-		Shell:       ShellBash,
-		Recommended: true,
-		Prereqs:     []string{"curl"},
+		ID:            "download",
+		Label:         "Install prebuilt PrAImate Code (bundled copy or release download)",
+		Command:       assetDownloadDisplayCmd(asset, dest),
+		DownloadAsset: asset,
+		DownloadDest:  dest,
+		Recommended:   true,
 	}}
-}
-
-func forgeAssetDownloadBash(asset, binDir, dest string) string {
-	api := version.ReleaseLatestAPIURL
-	base := version.RepoURL + "/releases/download/"
-	return fmt.Sprintf(
-		"tag=$(curl -fsSL -H 'User-Agent: praimate-installer' %q | sed -n 's/.*\"tag_name\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p' | head -1) && "+
-			"test -n \"$tag\" && "+
-			"url=%q\"$tag\"/%q && "+
-			"mkdir -p %q && curl -fSL \"$url\" -o %q && chmod +x %q",
-		api, base, asset, binDir, dest, dest)
-}
-
-func forgeAssetDownloadPowerShell(asset, binDir, dest string) string {
-	api := version.ReleaseLatestAPIURL
-	base := version.RepoURL + "/releases/download/"
-	return fmt.Sprintf(
-		"$r = Invoke-RestMethod -Uri '%s' -UseBasicParsing -Headers @{ 'User-Agent' = 'praimate-installer' }; "+
-			"$tag = $r.tag_name; if (-not $tag) { throw 'GitHub API response had no tag_name' }; "+
-			"$url = '%s' + $tag + '/%s'; "+
-			"New-Item -ItemType Directory -Force -Path '%s' | Out-Null; "+
-			"Invoke-WebRequest -Uri $url -OutFile '%s'",
-		api, base, asset, binDir, dest)
 }
 
 // ErrNoPrebuiltAsset signals to the caller that the requested binary is
@@ -580,80 +519,19 @@ func forgeAssetDownloadPowerShell(asset, binDir, dest string) string {
 // (BuildToolFromSource) instead of retrying the download.
 var ErrNoPrebuiltAsset = errors.New("no prebuilt asset available for this OS/arch")
 
-// looksLikeMissingAsset checks captured downloader output for the typical
-// "release asset not found" / "HTTP 404" signature so we can convert it
-// into ErrNoPrebuiltAsset.
-func looksLikeMissingAsset(captured string) bool {
-	c := strings.ToLower(captured)
-	switch {
-	case strings.Contains(c, "404") && (strings.Contains(c, "not found") || strings.Contains(c, "the requested url")):
-		return true
-	case strings.Contains(c, "http error 404"):
-		return true
-	case strings.Contains(c, "the remote name could not be resolved"):
-		return false // DNS failure is real network down, not "asset missing"
-	case strings.Contains(c, "curl: (22)"): // -fSL turns >=400 into exit 22
-		return true
-	}
-	return false
-}
-
-// InstallPraimateCode runs the recommended download install for the
-// current OS, streaming output to w. One-call helper for surfaces that
-// don't drive the generic tool-method picker (e.g. the GUI). Returns
-// ErrNoPrebuiltAsset when GitHub doesn't ship a praimate-code asset for
-// the current OS/arch — callers should treat that as "compile from
+// InstallPraimateCode runs the recommended install for the current OS
+// (bundled sidecar copy, else native release download), streaming
+// output to w. One-call helper for surfaces that don't drive the
+// generic tool-method picker (e.g. the GUI). Returns ErrNoPrebuiltAsset
+// when neither a bundled binary nor a published release asset exists
+// for the current OS/arch — callers should treat that as "compile from
 // source" instead of "retry".
 func InstallPraimateCode(ctx context.Context, w io.Writer) error {
-	binDir, err := PraimateBinDir()
-	if err != nil {
-		return err
+	methods := praimateCodeMethods(DetectOS())
+	if len(methods) == 0 {
+		return fmt.Errorf("locate praimate bin dir failed")
 	}
-	if err := os.MkdirAll(binDir, 0o755); err != nil {
-		return err
-	}
-
-	exe, err := os.Executable()
-	if err == nil {
-		name := "praimate-code"
-		if runtime.GOOS == "windows" {
-			name += ".exe"
-		}
-		localCand := filepath.Join(filepath.Dir(exe), name)
-		if st, err := os.Stat(localCand); err == nil && !st.IsDir() {
-			fmt.Fprintf(w, "→ Found bundled binary at %s\n", localCand)
-			dest := filepath.Join(binDir, name)
-			fmt.Fprintf(w, "→ Copying to %s\n", dest)
-
-			srcFile, err := os.Open(localCand)
-			if err != nil {
-				return fmt.Errorf("open local binary: %w", err)
-			}
-			defer srcFile.Close()
-
-			dstFile, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
-			if err != nil {
-				return fmt.Errorf("create destination: %w", err)
-			}
-			defer dstFile.Close()
-
-			if _, err := io.Copy(dstFile, srcFile); err != nil {
-				return fmt.Errorf("copy binary: %w", err)
-			}
-			fmt.Fprintln(w, "✓ Install finished")
-			return nil
-		}
-	}
-
-	// No bundled binary AND no published release asset (the project does
-	// not publish praimate-code prebuilts to GitHub Releases). Skip the
-	// download attempt entirely — surface ErrNoPrebuiltAsset directly so
-	// the GUI redirects the user to "Compile from source" instead of
-	// burning 2-3 seconds on a guaranteed 404.
-	fmt.Fprintf(w, "→ No praimate-code bundle next to the install AND no published prebuilt for %s/%s. Compile from source instead.\n",
-		runtime.GOOS, runtime.GOARCH)
-	return fmt.Errorf("praimate-code prebuilt for %s/%s isn't published: %w",
-		runtime.GOOS, runtime.GOARCH, ErrNoPrebuiltAsset)
+	return Run(ctx, methods[0], w, w)
 }
 
 // praimateCodeAssetName is the release asset filename for the host.
