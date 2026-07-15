@@ -3,8 +3,20 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
+
+// setUserConfigDir points os.UserConfigDir at dir on every OS: Windows
+// reads %AppData% and ignores XDG_CONFIG_HOME, Unix does the reverse.
+func setUserConfigDir(t *testing.T, dir string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Setenv("APPDATA", dir)
+		return
+	}
+	t.Setenv("XDG_CONFIG_HOME", dir)
+}
 
 func TestAgentYAMLDraftUsesHelperWorkspace(t *testing.T) {
 	workspace := t.TempDir()
@@ -27,7 +39,7 @@ func TestAgentYAMLDraftUsesHelperWorkspace(t *testing.T) {
 func TestAgentYAMLDefaultsToAgentDataDirectoryNotProcessCWD(t *testing.T) {
 	configDir := t.TempDir()
 	launchDir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", configDir)
+	setUserConfigDir(t, configDir)
 
 	oldCWD, err := os.Getwd()
 	if err != nil {
@@ -52,7 +64,7 @@ func TestAgentYAMLDefaultsToAgentDataDirectoryNotProcessCWD(t *testing.T) {
 }
 
 func TestAgentYAMLExplicitWorkspaceOverridesAgentDataDirectory(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	setUserConfigDir(t, t.TempDir())
 	workspace := t.TempDir()
 	path, err := agentYAMLWorkspacePath("demo", workspace)
 	if err != nil {
