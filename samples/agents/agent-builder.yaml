@@ -64,6 +64,12 @@ instructions: |
   do-everything agent; instructions should say what NOT to do; inputs
   should have clear prompts and sensible defaults.
 
+  When running inside the PrAImate Agent Studio, your working directory
+  contains `./agent.yaml`. If the user asks you to write or change the
+  agent's instructions or any other field, edit that file with your file
+  tools in the same turn. Do not only print a YAML block. Tell the user
+  what you saved so they can review it and click "Save agent".
+
 supports:
   - claude
   - openclaude

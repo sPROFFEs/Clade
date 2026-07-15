@@ -43,6 +43,37 @@ func (a *App) SetChatTools(chatID, tools string) error {
 	return c.UpdateChatSettings(a.ctx, chatID, func(s *core.ChatSettings) { s.Tools = tools })
 }
 
+// SetChatMCPServers overwrites the per-chat MCP selection. Only connected,
+// enabled servers can be selected; stale/disabled IDs are rejected here so a
+// settings save cannot appear successful while exposing no tools.
+func (a *App) SetChatMCPServers(chatID string, ids []string) error {
+	c, err := a.requireCore()
+	if err != nil {
+		return err
+	}
+	seen := make(map[string]bool, len(ids))
+	clean := make([]string, 0, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" || seen[id] {
+			continue
+		}
+		s, err := c.GetMCPServer(a.ctx, id)
+		if err != nil {
+			return err
+		}
+		if !s.Enabled {
+			return fmt.Errorf("MCP server %q is disabled", s.Name)
+		}
+		seen[id] = true
+		clean = append(clean, id)
+	}
+	return c.UpdateChatSettings(a.ctx, chatID, func(s *core.ChatSettings) {
+		s.MCPServers = append([]string(nil), clean...)
+		s.MCPConfigured = true
+	})
+}
+
 // UpdateChatConfig reconfigures an existing chat (CLI / model / tools /
 // per-chat local endpoint) — the GUI counterpart of the TUI's per-chat
 // settings. Switching CLI starts a fresh session on the next turn

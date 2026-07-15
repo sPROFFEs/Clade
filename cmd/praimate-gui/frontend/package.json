@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build"
+    "build": "vite build",
+    "test:terminal": "node --test src/lib/terminal.test.js"
   },
   "dependencies": {
     "@codemirror/lang-json": "^6.0.2",

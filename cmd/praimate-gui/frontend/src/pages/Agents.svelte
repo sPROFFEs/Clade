@@ -6,7 +6,7 @@
   // same parser `praimate agent import` uses.
   import { onMount } from 'svelte'
   import { api } from '../lib/api.js'
-  import { activePage, openChatId, pendingTerm, agentStudio } from '../lib/stores.js'
+  import { activePage, pageRevision, openChatId, pendingTerm, agentStudio } from '../lib/stores.js'
   import CodeEditor from '../lib/CodeEditor.svelte'
   import WorkflowRunner from '../lib/WorkflowRunner.svelte'
 
@@ -151,10 +151,15 @@
       }
       if (surface === 'terminal') {
         const termId = await api.startTerminal(agent ? agent.id : '', cli, local ? '' : model, folder, lEnd, lKey, lModel)
-        api.recordCodeSession(cli, local ? '' : model, folder, lEnd, lKey, lModel).catch(() => {})
+        let chatId = ''
+        try {
+          chatId = await api.recordCodeSession(cli, local ? '' : model, folder, lEnd, lKey, lModel)
+          if (chatId) await api.bindChatToTerminal(termId, chatId)
+        } catch { /* the live terminal remains usable even if persistence fails */ }
         dlg = null
-        pendingTerm.set({ termId, cli, cwd: folder, label: (agent ? agent.name : cli) + (local ? ' · local' : ''), note: '' })
+        pendingTerm.set({ termId, chatId, cli, cwd: folder, label: (agent ? agent.name : cli) + (local ? ' · local' : ''), note: '' })
         activePage.set('code')
+        pageRevision.update((n) => n + 1)
         return
       }
       // studio

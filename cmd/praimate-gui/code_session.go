@@ -1,12 +1,12 @@
 package main
 
-// Code sessions are live PTY terminals (StartTerminal) — the real CLI,
-// with no PrAImate-captured transcript. To make them listable like chats
-// and studio sessions, we persist a lightweight chat record tagged
-// surface="code" (folder + cli + model + optional local route). The
-// Chats tab lists these under "Code sessions" and reopens them by
-// relaunching a terminal in the folder. RecordCodeSession is called once
-// at launch (not on reopen), so the list grows with new sessions only.
+// Code sessions are live PTY terminals (StartTerminal) — the real CLI.
+// While a PTY is alive, its bounded output history is replayed when the Code
+// page is reopened. We also persist a lightweight chat record tagged
+// surface="code" (folder + cli + model + optional local route), so the Chats
+// tab can reattach to the original PTY or launch a replacement after it has
+// exited. RecordCodeSession is called once at launch, so replacements do not
+// create duplicate session rows.
 
 import (
 	"fmt"
@@ -51,9 +51,19 @@ func (a *App) RecordCodeSession(cli, model, cwd, localEndpoint, localAPIKey, loc
 // BindChatToTerminal pairs a live PTY with its chat row so the Sessions
 // panel can resume the running terminal instead of starting a fresh
 // duplicate. Called by Code.svelte right after RecordCodeSession.
-func (a *App) BindChatToTerminal(termID, chatID string) {
+func (a *App) BindChatToTerminal(termID, chatID string) error {
 	if a.terms == nil || termID == "" || chatID == "" {
-		return
+		return fmt.Errorf("terminal id and chat id are required")
 	}
-	a.terms.bindChat(termID, chatID)
+	return a.terms.bindChat(termID, chatID)
+}
+
+// GetCodeSessionSnapshot returns the persisted transcript for a Code chat.
+// If termID is live, EndOffset also identifies which queued events are
+// already present in the transcript.
+func (a *App) GetCodeSessionSnapshot(chatID, termID string) (TerminalSnapshot, error) {
+	if a.terms == nil {
+		return TerminalSnapshot{}, fmt.Errorf("terminal manager is not available")
+	}
+	return a.terms.codeSnapshot(chatID, termID)
 }

@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte'
   import { api } from './lib/api.js'
-  import { activePage, prefetchCLIs, agentStudio } from './lib/stores.js'
+  import { activePage, pageRevision, prefetchCLIs, agentStudio } from './lib/stores.js'
   import { initTheme, themeMode, setThemeMode } from './lib/theme.js'
   import logo from './assets/monke-icon.png'
   import mascot from './assets/monke-mascot.png'
@@ -108,8 +108,8 @@
   $: themeIcon =
     $themeMode === 'dark' ? icons.moon : $themeMode === 'light' ? icons.sun : icons.monitor
 
-  // Re-key the page component on each activePage change so a page like
-  // Chats re-runs onMount (and picks up a freshly started chat).
+  // Re-key the page component on navigation (and explicit attach revisions)
+  // so Code/Chats consume freshly queued cross-page requests.
   $: current = pages.find((p) => p.id === $activePage) || pages[0]
 </script>
 
@@ -174,7 +174,7 @@
     {#if health && !health.ok}
       <div class="banner">Backend failed to initialise: {health.error}</div>
     {/if}
-    {#key $activePage}
+    {#key `${$activePage}:${$pageRevision}`}
       <svelte:component this={current.component} />
     {/key}
   </main>

@@ -5,7 +5,7 @@
   import '@xterm/xterm/css/xterm.css'
   import { api } from '../lib/api.js'
   import SkillsPicker from '../lib/SkillsPicker.svelte'
-  import { term, onTermData, onTermExit } from '../lib/terminal.js'
+  import { term, onTermData, onTermExit, decodeBase64Bytes } from '../lib/terminal.js'
   import { pendingTerm } from '../lib/stores.js'
   import { get } from 'svelte/store'
 
@@ -196,28 +196,33 @@
       return
     }
     sessionLabel = (agent ? agent.name : cli) + (local ? ' · local' : '')
-    // Persist a "Code session" record so it appears in the Chats tab.
-    // Fire-and-forget — failure to record never blocks the live session.
-    api.recordCodeSession(
-      cli,
-      local ? '' : (modelSupported ? model.trim() : ''),
-      cwd,
-      local ? localOpt.endpoint : '',
-      local ? localOpt.apiKey : '',
-      local ? localModel.trim() : '',
-    ).then(async (chatId) => {
-      if (chatId && termId) api.bindChatToTerminal(termId, chatId).catch(() => {})
+    // Persist and bind before yielding control, otherwise a quick navigation
+    // can leave a live PTY that the Sessions panel cannot find again.
+    try {
+      const chatId = await api.recordCodeSession(
+        cli,
+        local ? '' : (modelSupported ? model.trim() : ''),
+        cwd,
+        local ? localOpt.endpoint : '',
+        local ? localOpt.apiKey : '',
+        local ? localModel.trim() : '',
+      )
       sessionChatId = chatId || ''
+      if (sessionChatId && termId) await api.bindChatToTerminal(termId, sessionChatId)
       if (sessionChatId) {
         try { sessionSkills = (await api.chatSkills(sessionChatId)) || [] } catch {}
       }
-    }).catch(() => {})
+    } catch { /* recording must not stop the terminal */ }
     started = true
     await tick()
-    mountXterm()
+    try {
+      await mountXterm()
+    } catch (e) {
+      error = `Terminal renderer failed: ${String(e)}`
+    }
   }
 
-  function mountXterm() {
+  async function mountXterm() {
     xterm = new Terminal({
       fontFamily: 'JetBrains Mono, ui-monospace, monospace',
       fontSize: 13,
@@ -232,8 +237,15 @@
 
     // keystrokes → PTY
     xterm.onData((d) => term.write(termId, d))
-    // PTY → screen
-    unsubData = onTermData(termId, (data) => xterm.write(data))
+    // PTY → screen. Subscribe before requesting the snapshot, queueing live
+    // chunks until replay finishes. Byte offsets remove the overlap between
+    // the snapshot and chunks emitted while the request was in flight.
+    let replaying = true
+    const queued = []
+    unsubData = onTermData(termId, (data, meta) => {
+      if (replaying) queued.push({ data, meta })
+      else xterm?.write(data)
+    })
     unsubExit = onTermExit(termId, () => {
       exited = true
       xterm.write('\r\n\x1b[2m[process exited — press “New session” to start again]\x1b[0m\r\n')
@@ -249,54 +261,109 @@
     sync()
     ro = new ResizeObserver(sync)
     ro.observe(el)
+
+    let cursor = 0
+    try {
+      // Bound Code chats use the persisted transcript, which includes output
+      // from prior processes and survives an application restart. The backend
+      // returns the current process offset alongside it so queued live events
+      // are still de-duplicated exactly once.
+      let snap
+      if (sessionChatId) {
+        try {
+          snap = await term.codeSnapshot(sessionChatId, termId)
+        } catch {
+          // Session persistence is best-effort. If its history file or PTY
+          // binding failed, replay the live buffer instead of leaving a
+          // healthy terminal blank after its initial output was emitted.
+          snap = await term.snapshot(termId)
+        }
+      } else {
+        snap = await term.snapshot(termId)
+      }
+      cursor = Number(snap?.endOffset || 0)
+      if (snap?.data) xterm?.write(decodeBase64Bytes(snap.data))
+    } catch { /* a very short-lived process may already be gone */ }
+    for (const item of queued) {
+      if (!item.meta) {
+        xterm?.write(item.data)
+        continue
+      }
+      const start = Number(item.meta.startOffset || 0)
+      const end = Number(item.meta.endOffset || start + item.data.length)
+      if (end <= cursor) continue
+      const skip = Math.max(0, cursor - start)
+      xterm?.write(skip ? item.data.slice(skip) : item.data)
+      cursor = end
+    }
+    replaying = false
   }
 
-  function teardown() {
+  function teardown(closeTerminal = false) {
     unsubData(); unsubExit()
     if (ro) { ro.disconnect(); ro = null }
-    if (termId) term.close(termId)
+    if (closeTerminal && termId) term.close(termId)
     if (xterm) { xterm.dispose(); xterm = null }
     termId = null
   }
 
   function reset() {
-    teardown()
+    teardown(true)
     started = false
     exited = false
+    sessionChatId = ''
+    sessionSkills = []
   }
 
   // Attach to a PTY the Chats / Sessions page already started, OR
-  // launch a fresh one in the same folder when the prior PTY is gone.
+  // resume the CLI's latest native session in the same folder when the prior
+  // PTY is gone (or fall back to a normal launch for unsupported CLIs).
   // The Sessions panel signals "PTY is gone" by setting termId=''; we
-  // start the CLI from scratch in that case so the user gets a working
-  // editor, not an empty terminal.
+  // launch with the native resume selector in that case.
   async function attachPending(p) {
     sessionLabel = p.label
     cli = p.cli
     cwd = p.cwd
+    sessionChatId = p.chatId || ''
+    if (sessionChatId) {
+      try { sessionSkills = (await api.chatSkills(sessionChatId)) || [] } catch { sessionSkills = [] }
+    }
     if (p.termId) {
       // Live PTY — just reattach xterm to the existing stream.
       termId = p.termId
       started = true
       await tick()
-      mountXterm()
+      try {
+        await mountXterm()
+      } catch (e) {
+        error = `Terminal renderer failed: ${String(e)}`
+        return
+      }
       if (p.note) {
         xterm.write(`\x1b[2m[${p.note}]\x1b[0m\r\n`)
       }
       return
     }
-    // No live PTY — spawn a fresh one in the recorded folder + CLI.
+    // No live PTY — start the recorded CLI with its native resume flag.
     // Mirrors the normal start() flow without the agent/local-LLM
     // bells; those came off the original chat record.
     try {
-      termId = await term.start('', cli, '', cwd, '', '', '')
+      termId = await term.start(
+        '', cli, p.model || '', cwd,
+        p.localEndpoint || '', p.localApiKey || '', p.localModel || '', true)
+      if (sessionChatId) await api.bindChatToTerminal(termId, sessionChatId)
     } catch (e) {
       error = String(e)
       return
     }
     started = true
     await tick()
-    mountXterm()
+    try {
+      await mountXterm()
+    } catch (e) {
+      error = `Terminal renderer failed: ${String(e)}`
+      return
+    }
     if (p.note) {
       xterm.write(`\x1b[2m[${p.note}]\x1b[0m\r\n`)
     }
@@ -322,7 +389,9 @@
       attachPending(p)
     }
   })
-  onDestroy(() => { unsubInstall(); teardown() })
+  // Page navigation/minimising detaches the renderer but intentionally keeps
+  // the PTY alive. Stop/New session are the explicit process-ending actions.
+  onDestroy(() => { unsubInstall(); teardown(false) })
 </script>
 
 <div class="row" style="margin-bottom:4px">

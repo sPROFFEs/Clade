@@ -1,8 +1,9 @@
 <script>
   import { onMount, onDestroy, tick } from 'svelte'
   import { api, onChatStream, onApproval } from '../lib/api.js'
-  import { activePage, openChatId, pendingTerm } from '../lib/stores.js'
+  import { activePage, pageRevision, openChatId, pendingTerm } from '../lib/stores.js'
   import SkillsPicker from '../lib/SkillsPicker.svelte'
+  import { findTerminalForChat } from '../lib/terminal.js'
 
   let skillsPickerOpen = false
 
@@ -38,6 +39,10 @@
     return cli === 'opencode' || cli === 'praimate-code'
   }
 
+  function supportsNativeTerminalResume(cli) {
+    return ['claude', 'openclaude', 'codex', 'opencode', 'praimate-code'].includes(cli)
+  }
+
   function toolLevelsForCli(cli) {
     return isOpenCodeLikeCli(cli) ? OPENCODE_TOOL_LEVELS : TOOL_LEVELS
   }
@@ -66,6 +71,8 @@
   let localOpt = null // { configured, endpoint, apiKey, models[], error }
   let newUseLocal = false
   let newLocalModel = ''
+  let mcpServers = []
+  let newMCPs = []
 
   // Per-chat settings editor (CLI / model / tools), mirroring the TUI's
   // per-chat settings sheet. Works on the open thread AND from list rows.
@@ -104,21 +111,32 @@
     }
   }
 
-  // Reopen a code session: relaunch a terminal in its folder (restoring
-  // the local route if it had one) and jump to the Code page.
+  // Reopen a code session: reattach its live PTY when possible. The Code
+  // page starts and re-binds a replacement only when that process is gone.
   async function reopenCode(chat) {
     error = ''
     try {
       const l = chat.Settings?.local
-      const termId = await api.startTerminal(
-        '', chat.CLIAgent, chat.Settings?.model || '', chat.WorkspacePath,
-        l?.endpoint || '', l?.apiKey || '', l?.model || '')
+      const terms = (await api.listTerminalSessions().catch(() => [])) || []
+      const live = findTerminalForChat(terms, chat)
+      if (live && !live.chatId) {
+        await api.bindChatToTerminal(live.id, chat.ID)
+        live.chatId = chat.ID
+      }
       pendingTerm.set({
-        termId, cli: chat.CLIAgent, cwd: chat.WorkspacePath,
+        termId: live?.id || '', chatId: chat.ID,
+        cli: chat.CLIAgent, cwd: chat.WorkspacePath,
         label: (chat.CLIAgent || 'CLI') + (l?.endpoint ? ' · local' : ''),
-        note: 'reopened — the CLI resumes its own session',
+        model: chat.Settings?.model || '',
+        localEndpoint: l?.endpoint || '', localApiKey: l?.api_key || '', localModel: l?.model || '',
+        note: live
+          ? 'reattached to the running session'
+          : supportsNativeTerminalResume(chat.CLIAgent)
+            ? 'previous PTY ended — resumed the most recent native session in this folder'
+            : 'previous PTY ended — this CLI has no automatic native resume; started a new process with the archived transcript above',
       })
       activePage.set('code')
+      pageRevision.update((n) => n + 1)
     } catch (e) {
       error = String(e)
     }
@@ -155,6 +173,7 @@
       modelLoading: true,
       skills: (chat.Settings?.skills || []).slice(),
       skillsCatalogue: [],
+      mcps: (chat.Settings?.mcp_servers || []).slice(),
     }
     if (clis.length === 0) {
       api.listCLIs().then((r) => { clis = r || [] }).catch(() => {})
@@ -164,6 +183,16 @@
       .catch(() => { if (cfg && cfg.chat.ID === chat.ID) { cfg.modelLoading = false; cfg = cfg } })
     api.skillsList()
       .then((r) => { if (cfg && cfg.chat.ID === chat.ID) { cfg.skillsCatalogue = r || []; cfg = cfg } })
+      .catch(() => {})
+    api.mcpServers()
+      .then((r) => {
+        mcpServers = (r || []).filter((s) => s.enabled)
+        if (cfg && cfg.chat.ID === chat.ID) {
+          const enabled = new Set(mcpServers.map((s) => s.id))
+          cfg.mcps = (cfg.mcps || []).filter((id) => enabled.has(id))
+          cfg = cfg
+        }
+      })
       .catch(() => {})
   }
 
@@ -186,6 +215,7 @@
         cfg.chat.ID, cfg.cli, cfg.model.trim(), normalizeToolsForCli(cfg.cli, cfg.tools),
         cfg.localEndpoint.trim(), cfg.localApiKey, cfg.localModel.trim())
       try { await api.setChatSkills(cfg.chat.ID, cfg.skills || []) } catch (e) { /* non-fatal */ }
+      await api.setChatMCPServers(cfg.chat.ID, cfg.mcps || [])
       const id = cfg.chat.ID
       cfg = null
       await load()
@@ -207,12 +237,14 @@
     newTools = ''
     newUseLocal = false
     newLocalModel = ''
+    newMCPs = []
     try {
       clis = (await api.listCLIs()) || []
       const firstAvailable = clis.find((c) => c.available)
       newCli = firstAvailable ? firstAvailable.id : (clis[0]?.id ?? '')
       await refreshModels()
       try { localOpt = await api.localLLMModels() } catch { localOpt = null }
+      try { mcpServers = ((await api.mcpServers()) || []).filter((s) => s.enabled) } catch { mcpServers = [] }
     } catch (e) {
       error = String(e)
     }
@@ -256,6 +288,7 @@
       } else if (tools) {
         await api.setChatTools(chat.ID, tools)
       }
+      if (newMCPs.length) await api.setChatMCPServers(chat.ID, newMCPs)
       creating = false
       await load()
       const c = chats.find((x) => x.ID === chat.ID) || chat
@@ -279,6 +312,7 @@
         note: res.note,
       })
       activePage.set('code')
+      pageRevision.update((n) => n + 1)
     } catch (e) {
       error = String(e)
     }
@@ -420,6 +454,9 @@
   }
 
   function onKey(e) {
+    // Enter may be part of an IME composition (accented/non-Latin input), not
+    // an intent to send the message.
+    if (e.isComposing || e.keyCode === 229) return
     // Enter sends; Shift+Enter inserts a newline.
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
@@ -558,6 +595,28 @@
         <button class="btn sm" on:click={() => (cfg.skills = [])} title="Clear all skills for this chat">Clear</button>
       {/if}
     </div>
+
+    <label class="lbl" style="margin-top:10px">MCP servers <span class="card-sub" style="font-weight:400">— exposed only to this chat.</span></label>
+    {#if mcpServers.length === 0}
+      <div class="card-sub">No enabled MCP servers. Connect and enable one on the MCP page first.</div>
+    {:else}
+      <div class="mcp-grid">
+        {#each mcpServers as server}
+          <label class="mcp-choice">
+            <input
+              type="checkbox"
+              checked={cfg.mcps?.includes(server.id)}
+              on:change={(e) => {
+                cfg.mcps = e.currentTarget.checked
+                  ? [...(cfg.mcps || []), server.id]
+                  : (cfg.mcps || []).filter((id) => id !== server.id)
+                cfg = cfg
+              }} />
+            <span><strong>{server.name}</strong> <span class="card-sub">{server.transport}</span></span>
+          </label>
+        {/each}
+      </div>
+    {/if}
 
     <div class="row" style="margin-top:12px">
       <button class="btn primary" on:click={saveConfig} disabled={cfgSaving}>{cfgSaving ? 'Saving…' : 'Save'}</button>
@@ -798,6 +857,19 @@
           <button class="btn sm" class:primary={newTools === lvl.id} title={lvl.hint} on:click={() => (newTools = lvl.id)}>{lvl.label}</button>
         {/each}
       </div>
+      <label class="lbl">MCP servers <span class="card-sub">(optional, per chat)</span></label>
+      {#if mcpServers.length === 0}
+        <div class="card-sub">No enabled MCP servers. Add one on the MCP page first.</div>
+      {:else}
+        <div class="mcp-grid">
+          {#each mcpServers as server}
+            <label class="mcp-choice">
+              <input type="checkbox" value={server.id} bind:group={newMCPs} />
+              <span><strong>{server.name}</strong> <span class="card-sub">{server.transport}</span></span>
+            </label>
+          {/each}
+        </div>
+      {/if}
       <div class="row" style="margin-top:12px">
         <button class="btn primary" on:click={startClean} disabled={starting || !newCli}>
           {starting ? 'Starting…' : 'Start chat'}
@@ -850,7 +922,7 @@
 
   {#if codeChats.length > 0}
     <h1 style="font-size:16px; margin-top:24px">Code sessions</h1>
-    <p class="subtitle">Live CLI sessions in a project folder. Reopen relaunches the CLI in the same folder (it resumes its own native session).</p>
+    <p class="subtitle">Live CLI sessions in a project folder. Reopen reattaches the same running process and restores its terminal history; only ended processes start again.</p>
     {#each codeChats as chat}
       <div class="card row">
         <div class="grow">
@@ -987,4 +1059,21 @@
     align-items: center;
     gap: 6px;
   }
+  .mcp-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 6px;
+    margin-top: 5px;
+  }
+  .mcp-choice {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 7px 9px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  .mcp-choice:hover { background: var(--bg-raised); }
 </style>

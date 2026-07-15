@@ -78,6 +78,16 @@ type ChatSettings struct {
 	// skill isn't designed for the current CLI.
 	Skills []string `json:"skills,omitempty"`
 
+	// MCPServers lists the connected MCP server IDs enabled for this
+	// conversation. Unlike the global MCP enabled flag, this is a per-chat
+	// choice: only these servers are written into the CLI's project config
+	// and exposed to the model when a turn runs.
+	MCPServers []string `json:"mcp_servers,omitempty"`
+	// MCPConfigured distinguishes an explicit empty selection (remove MCPs
+	// previously generated for this chat) from an older/default chat that has
+	// never configured MCP at all and must not touch project config files.
+	MCPConfigured bool `json:"mcp_configured,omitempty"`
+
 	// Surface records which GUI surface owns the chat ("studio" for
 	// document-studio chats). The Chats page uses it to list studio
 	// sessions separately and offer "reopen studio".

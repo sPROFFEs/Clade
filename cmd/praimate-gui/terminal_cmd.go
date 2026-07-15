@@ -51,6 +51,28 @@ func terminalCommand(cli, model string) (name string, args []string, err error) 
 	}
 }
 
+// terminalResumeCommand reopens the most recent native interactive session in
+// cwd for CLIs that expose a deterministic non-picker flag. The caller still
+// supplies cwd through Cmd.Dir, so "most recent" is folder-scoped.
+func terminalResumeCommand(cli, model string) (name string, args []string, supported bool, err error) {
+	name, args, err = terminalCommand(cli, model)
+	if err != nil {
+		return "", nil, false, err
+	}
+	switch cli {
+	case "claude", "openclaude", "opencode", "praimate-code":
+		return name, append(args, "--continue"), true, nil
+	case "codex":
+		args = []string{"resume", "--last"}
+		if model != "" {
+			args = append(args, "--model", model)
+		}
+		return name, args, true, nil
+	default:
+		return name, args, false, nil
+	}
+}
+
 // terminalLocalEnv builds the environment that points a terminal CLI at
 // a local LLM endpoint (Ollama / vLLM / GPUStack / LiteLLM). Mirrors the
 // launcher's per-CLI env for the agent-launch path, scoped to the CLIs

@@ -256,6 +256,16 @@ func (c *Core) ContinueChatStream(ctx context.Context, chatID, userMessage, cwd,
 			Endpoint: l.Endpoint, APIKey: l.APIKey, Model: l.Model,
 		})
 	}
+	// MCP selection is per chat. Re-emit the project-scoped config on every
+	// turn so edits in the settings sheet (including clearing all MCPs) take
+	// effect without creating a new conversation.
+	if chat.Settings.MCPConfigured || len(chat.Settings.MCPServers) > 0 {
+		mcpEnv, err := c.PrepareSelectedMCPForRun(ctx, chat.Settings.MCPServers, chat.CLIAgent, cwd)
+		if err != nil {
+			return nil, err
+		}
+		env = mergeStringMaps(env, mcpEnv)
+	}
 	resumeOpts := ResumeOpts{Message: outbound, Cwd: cwd, Model: model, Tools: chat.Settings.Tools, Approval: approval, Env: env}
 	shotOpts := SingleShotOpts{
 		Cwd:          cwd,
@@ -414,5 +424,9 @@ func (c *Core) StartInteractiveChat(ctx context.Context, agentID, cli, cwd strin
 		AgentID:       agentID,
 		CLIAgent:      cli,
 		WorkspacePath: cwd,
+		Settings: ChatSettings{
+			MCPServers:    append([]string(nil), agent.MCPServers...),
+			MCPConfigured: len(agent.MCPServers) > 0,
+		},
 	})
 }

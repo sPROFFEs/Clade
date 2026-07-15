@@ -103,21 +103,23 @@ export const api = {
   setSkillsDefaults: (ids) => call('SetSkillsDefaults', ids || []),
   chatSkills: (chatID) => call('ChatSkills', chatID),
   setChatSkills: (chatID, ids) => call('SetChatSkills', chatID, ids || []),
+  setChatMCPServers: (chatID, ids) => call('SetChatMCPServers', chatID, ids || []),
   activeChatIDs: () => call('ActiveChatIDs'),
   openEditorFolder: () => call('OpenEditorFolder'),
   openAgentKnowledgeFolder: (id) => call('OpenAgentKnowledgeFolder', id),
   openEditorWindow: (folder, agentID, cli, model, chatID, localEndpoint, localApiKey, localModel) =>
     call('OpenEditorWindow', folder, agentID, cli, model || '', chatID, localEndpoint || '', localApiKey || '', localModel || ''),
-  startTerminal: (agentID, cli, model, cwd, localEndpoint, localApiKey, localModel) =>
-    call('StartTerminal', agentID, cli, model || '', cwd, localEndpoint || '', localApiKey || '', localModel || ''),
+  startTerminal: (agentID, cli, model, cwd, localEndpoint, localApiKey, localModel, resume = false) =>
+    call('StartTerminal', agentID, cli, model || '', cwd, localEndpoint || '', localApiKey || '', localModel || '', !!resume),
   localLLMModels: () => call('LocalLLMModels'),
   recordCodeSession: (cli, model, cwd, localEndpoint, localApiKey, localModel) =>
     call('RecordCodeSession', cli, model || '', cwd, localEndpoint || '', localApiKey || '', localModel || ''),
   bindChatToTerminal: (termID, chatID) => call('BindChatToTerminal', termID, chatID),
   listTerminalSessions: () => call('ListTerminalSessions'),
   startAgentHelperChat: (cli, model, cwd, agentID) => call('StartAgentHelperChat', cli, model || '', cwd || '', agentID || ''),
-  syncAgentYAMLToDisk: (id) => call('SyncAgentYAMLToDisk', id),
-  readAgentYAMLFromDisk: (id) => call('ReadAgentYAMLFromDisk', id),
+  syncAgentYAMLToDisk: (id, cwd) => call('SyncAgentYAMLToDisk', id, cwd || ''),
+  readAgentYAMLFromDisk: (id, cwd) => call('ReadAgentYAMLFromDisk', id, cwd || ''),
+  writeAgentYAMLDraftToDisk: (id, cwd, body) => call('WriteAgentYAMLDraftToDisk', id, cwd || '', body),
   createAgentFromName: (name) => call('CreateAgentFromName', name),
   agentKnowledgeTree: (id) => call('AgentKnowledgeTree', id),
   agentReadKnowledgeFile: (id, rel) => call('AgentReadKnowledgeFile', id, rel),

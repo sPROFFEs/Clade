@@ -13,8 +13,8 @@
   // tooltip.
   import { onMount, onDestroy } from 'svelte'
   import { api } from './api.js'
-  import { term } from './terminal.js'
-  import { activePage, openChatId, pendingTerm } from './stores.js'
+  import { term, findTerminalForChat } from './terminal.js'
+  import { activePage, pageRevision, openChatId, pendingTerm } from './stores.js'
 
   let chats = []
   let active = new Set()
@@ -36,6 +36,17 @@
       active = new Set(ids || [])
       const m = new Map()
       for (const t of (terms || [])) if (t.chatId) m.set(t.chatId, t)
+      // Heal sessions created by older builds where a quick navigation could
+      // leave the PTY unbound. The fallback is deliberately unique-by-folder
+      // and CLI, so it cannot steal another chat's running process.
+      for (const c of chats) {
+        if (surfaceOf(c) !== 'code' || m.has(c.ID)) continue
+        const recovered = findTerminalForChat(terms, c)
+        if (!recovered) continue
+        try { await api.bindChatToTerminal(recovered.id, c.ID) } catch { continue }
+        recovered.chatId = c.ID
+        m.set(c.ID, recovered)
+      }
       liveTerms = m
     } finally {
       loading = false
@@ -52,6 +63,10 @@
 
   function surfaceLabel(s) {
     return s === 'studio' ? 'Studio' : s === 'code' ? 'Code · TUI' : s === 'helper' ? 'Agent helper' : 'Chat'
+  }
+
+  function supportsNativeTerminalResume(cli) {
+    return ['claude', 'openclaude', 'codex', 'opencode', 'praimate-code'].includes(cli)
   }
 
   function fmtAgo(iso) {
@@ -95,19 +110,29 @@
     if (s === 'code') {
       // Code TUI chats live on the Code page. If we have a live PTY
       // for this chat, reattach to its existing stream — no second
-      // process. If not (GUI was restarted or the process died),
-      // start a fresh one in the same folder. The presence of a
+      // process. If not (GUI was restarted or the process died), use
+      // that CLI's native resume command in the same folder. The presence of a
       // live term is also what the green "live" dot in the row
       // signals to the user.
       const live = liveTerms.get(c.ID)
       pendingTerm.set({
         termId: live ? live.id : '',
+        chatId: c.ID,
         cli: c.CLIAgent || '',
         cwd: c.WorkspacePath || '',
         label: c.Title || '',
-        note: live ? '' : '(previous PTY is gone — starting a fresh session in the same folder)',
+        model: c.Settings?.model || '',
+        localEndpoint: c.Settings?.local?.endpoint || '',
+        localApiKey: c.Settings?.local?.api_key || '',
+        localModel: c.Settings?.local?.model || '',
+        note: live
+          ? ''
+          : supportsNativeTerminalResume(c.CLIAgent)
+            ? 'previous PTY ended — resumed the most recent native session in this folder'
+            : 'previous PTY ended — this CLI has no automatic native resume; started a new process with the archived transcript above',
       })
       activePage.set('code')
+      pageRevision.update((n) => n + 1)
       return
     }
     openChatId.set(c.ID)

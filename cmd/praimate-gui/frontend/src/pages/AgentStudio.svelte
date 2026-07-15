@@ -77,6 +77,7 @@
   let helperChatId = ''
   let helperCli = ''
   let helperModel = ''
+  let helperCwd = initCfg.cwd || ''
   let clis = []
   let modelSuggestions = []
   let modelLoading = false
@@ -224,6 +225,7 @@
           const saved = await api.saveAgentYAML(body)
           agentId = saved.id
           agentName = saved.name
+          try { await api.syncAgentYAMLToDisk(saved.id, helperCwd) } catch {}
         } else {
           await api.agentWriteKnowledgeFile(agentId, t.key, body)
         }
@@ -240,7 +242,7 @@
   }
 
   // bootHelperChat starts (or restarts) the authoring assistant's chat
-  // pinned to the current agent's on-disk folder. Idempotent — if a
+  // pinned to the user-visible working folder. Idempotent — if a
   // helper is already running on a STALE agentId it's torn down first
   // so we don't leak chats or write into the wrong cwd.
   async function bootHelperChat() {
@@ -251,8 +253,9 @@
       messages = []
     }
     try {
-      const c = await api.startAgentHelperChat(helperCli, helperModel, '', agentId)
+      const c = await api.startAgentHelperChat(helperCli, helperModel, helperCwd, agentId)
       helperChatId = c.ID
+      helperCwd = c.WorkspacePath || helperCwd
     } catch (e) {
       error = String(e)
     }
@@ -261,7 +264,7 @@
   async function reloadDefFromDisk() {
     if (!agentId) return
     try {
-      const body = await api.readAgentYAMLFromDisk(agentId)
+      const body = await api.readAgentYAMLFromDisk(agentId, helperCwd)
       const def = tabs.find((t) => t.isDef)
       if (def) {
         def.content = body
@@ -282,9 +285,8 @@
         const saved = await api.saveAgentYAML(body)
         agentId = saved.id
         agentName = saved.name
-        // Mirror the new YAML to <AgentDir>/agent.yaml so the helper CLI
-        // continues to see the authoritative copy.
-        try { await api.syncAgentYAMLToDisk(saved.id) } catch {}
+        // Mirror the new YAML to ./agent.yaml in the helper workspace.
+        try { await api.syncAgentYAMLToDisk(saved.id, helperCwd) } catch {}
         notice = `Saved ${saved.name}`
         await refreshTree()
         await loadKnowledge()
@@ -446,12 +448,39 @@
     messages = [...messages, { Role: 'user', Content: text, TS: new Date().toISOString(), _pending: true }]
     await scrollChat()
     try {
+      // Give the helper the exact draft visible in the editor, not only the
+      // last DB-saved version mirrored when the chat started.
+      const def = tabs.find((t) => t.isDef)
+      const before = def?.ref?.getValue() ?? def?.content ?? ''
+      if (agentId && def) await api.writeAgentYAMLDraftToDisk(agentId, helperCwd, before)
       await api.sendChatStream(helperChatId, text, [])
       messages = (await api.chatMessages(helperChatId)) || messages
+      // Pull a successful tool edit straight back into the editor. Keep it
+      // dirty until “Save agent” validates and commits it to the DB.
+      if (agentId && def) {
+        try {
+          const after = await api.readAgentYAMLFromDisk(agentId, helperCwd)
+          if (after !== before) {
+            def.content = after
+            await tick()
+            def.ref?.setExternal(after)
+            def.dirty = true
+            tabs = tabs
+            notice = 'The assistant updated agent.yaml — review it, then click Save agent.'
+          }
+        } catch (e) {
+          // The assistant turn is already complete. A refresh failure should
+          // not discard its persisted reply or the optimistic user message.
+          error = `Assistant replied, but agent.yaml could not be refreshed: ${String(e)}`
+        }
+      }
     } catch (e) { error = String(e); messages = messages.filter((m) => !m._pending) }
     finally { sending = false; stream = null; approvals = []; await scrollChat() }
   }
-  function onKey(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }
+  function onKey(e) {
+    if (e.isComposing || e.keyCode === 229) return
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
+  }
   async function stopChat() { try { await api.cancelChatTurn(helperChatId) } catch {} }
   async function applyHelperConfig() {
     if (!helperChatId) return
@@ -467,6 +496,15 @@
     if (seq === modelLoadSeq) modelLoading = false
     helperModel = ''
     await applyHelperConfig()
+  }
+  async function chooseHelperCwd() {
+    try {
+      const folder = await api.pickFolder()
+      if (!folder || folder === helperCwd) return
+      helperCwd = folder
+      await bootHelperChat()
+      notice = `Assistant working folder: ${helperCwd}`
+    } catch (e) { error = String(e) }
   }
   async function scrollChat() { await tick(); if (threadEl) threadEl.scrollTop = threadEl.scrollHeight }
   function fmtDate(ts) { try { return new Date(ts).toLocaleTimeString() } catch { return '' } }
@@ -694,6 +732,10 @@
       <select class="field sm" style="max-width:130px" bind:value={helperCli} on:change={onHelperCli}>{#each clis as c}<option value={c.id} disabled={!c.available}>{c.id}{c.available ? '' : ' (n/a)'}</option>{/each}</select>
       <input class="field sm mono grow" list="helper-models" placeholder={helperModelSupported ? 'model (blank = default)' : 'no model flag'} bind:value={helperModel} on:change={applyHelperConfig} disabled={!helperModelSupported} />
       <datalist id="helper-models">{#each modelSuggestions as m}<option value={m}></option>{/each}</datalist>
+    </div>
+    <div class="row2" style="padding:0 2px 6px">
+      <input class="field sm mono grow" value={helperCwd} title={helperCwd} placeholder="assistant working folder" readonly />
+      <button class="btn sm" title="Choose the folder where praimate-code reads and writes ./agent.yaml" on:click={chooseHelperCwd}>Folder…</button>
     </div>
     {#if modelLoading}<div class="hint" style="padding:0 2px 6px">Loading models...</div>{/if}
     <div class="thread" bind:this={threadEl}>

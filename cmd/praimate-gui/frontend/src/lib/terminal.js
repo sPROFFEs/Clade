@@ -9,16 +9,29 @@ function app() {
 
 export const term = {
   pickFolder: () => app()?.PickProjectFolder() ?? Promise.reject(new Error('no backend')),
-  start: (agentID, cli, model, cwd, localEndpoint, localApiKey, localModel) =>
-    app()?.StartTerminal(agentID, cli, model || '', cwd, localEndpoint || '', localApiKey || '', localModel || '') ??
+  start: (agentID, cli, model, cwd, localEndpoint, localApiKey, localModel, resume = false) =>
+    app()?.StartTerminal(agentID, cli, model || '', cwd, localEndpoint || '', localApiKey || '', localModel || '', !!resume) ??
     Promise.reject(new Error('no backend')),
-  write: (id, bytes) => {
-    // bytes is a string of raw chars from xterm onData; encode to base64.
-    const b64 = btoa(unescape(encodeURIComponent(bytes)))
-    return app()?.WriteTerminal(id, b64)
-  },
+  write: (id, text) => app()?.WriteTerminal(id, encodeTerminalInput(text)),
   resize: (id, cols, rows) => app()?.ResizeTerminal(id, cols, rows),
+  snapshot: (id) => app()?.GetTerminalSnapshot(id) ?? Promise.reject(new Error('no backend')),
+  codeSnapshot: (chatID, termID) => app()?.GetCodeSessionSnapshot(chatID, termID || '') ?? Promise.reject(new Error('no backend')),
   close: (id) => app()?.CloseTerminal(id),
+}
+
+// xterm's onData value is a JavaScript Unicode string, while a PTY consumes
+// bytes. TextEncoder handles accents, combining characters and astral symbols
+// without the deprecated escape/unescape conversion (which can throw on lone
+// surrogate input). Base64 keeps both UTF-8 and terminal control bytes intact
+// across the Wails JSON bridge.
+export function encodeTerminalInput(text) {
+  const bytes = new TextEncoder().encode(text || '')
+  let raw = ''
+  const chunkSize = 0x8000
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    raw += String.fromCharCode(...bytes.subarray(i, i + chunkSize))
+  }
+  return btoa(raw)
 }
 
 // onData subscribes to PTY output for one terminal id. Returns an
@@ -27,11 +40,21 @@ export const term = {
 export function onTermData(id, handler) {
   if (!(typeof window !== 'undefined' && window.runtime?.EventsOn)) return () => {}
   const evt = 'term:data:' + id
-  window.runtime.EventsOn(evt, (b64) => {
-    const raw = decodeURIComponent(escape(atob(b64)))
-    handler(raw)
+  window.runtime.EventsOn(evt, (payload) => {
+    // Older backends emitted a bare base64 string; accept both shapes so the
+    // frontend remains usable during a dev hot-reload.
+    const b64 = typeof payload === 'string' ? payload : payload?.data
+    if (!b64) return
+    handler(decodeBase64Bytes(b64), typeof payload === 'string' ? null : payload)
   })
   return () => window.runtime.EventsOff(evt)
+}
+
+export function decodeBase64Bytes(b64) {
+  const raw = atob(b64 || '')
+  const out = new Uint8Array(raw.length)
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i)
+  return out
 }
 
 export function onTermExit(id, handler) {
@@ -39,4 +62,32 @@ export function onTermExit(id, handler) {
   const evt = 'term:exit:' + id
   window.runtime.EventsOn(evt, handler)
   return () => window.runtime.EventsOff(evt)
+}
+
+function normalizedPath(path) {
+  return String(path || '').replace(/[\\/]+$/, '').toLocaleLowerCase()
+}
+
+function terminalNameForCLI(cli) {
+  return cli === 'deepseek' ? 'deepseek-tui' : String(cli || '')
+}
+
+// Old GUI builds could create the chat row just after navigation had already
+// detached the Code page, leaving a live terminal without chatId. Recover
+// only when cwd (+ CLI when available) identifies one unbound PTY uniquely.
+export function findTerminalForChat(terms, chat) {
+  const all = terms || []
+  const direct = all.find((t) => t.chatId === chat?.ID)
+  if (direct) return direct
+
+  const cwd = normalizedPath(chat?.WorkspacePath)
+  if (!cwd) return null
+  let candidates = all.filter((t) => !t.chatId && normalizedPath(t.cwd) === cwd)
+  const expectedName = terminalNameForCLI(chat?.CLIAgent)
+  if (expectedName) {
+    const named = candidates.filter((t) => t.name === expectedName)
+    if (named.length === 1) return named[0]
+    if (named.length > 1) return null
+  }
+  return candidates.length === 1 ? candidates[0] : null
 }

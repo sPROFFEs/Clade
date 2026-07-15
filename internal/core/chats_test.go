@@ -53,6 +53,23 @@ func TestAddMessage_BumpsChatUpdatedAt(t *testing.T) {
 	}
 }
 
+func TestAddMessage_PreservesUnicode(t *testing.T) {
+	c := newMemCore(t)
+	ctx := context.Background()
+	ch, _ := c.CreateChat(ctx, CreateChatRequest{Title: "unicode", CLIAgent: "claude"})
+	want := "Canción, pingüino, ¿qué tal? — € 😀 e\u0301"
+	if _, err := c.AddMessage(ctx, ch.ID, "user", want, nil); err != nil {
+		t.Fatalf("AddMessage: %v", err)
+	}
+	msgs, err := c.ListMessages(ctx, ch.ID, 0)
+	if err != nil {
+		t.Fatalf("ListMessages: %v", err)
+	}
+	if len(msgs) != 1 || msgs[0].Content != want {
+		t.Fatalf("Unicode message changed: %#v", msgs)
+	}
+}
+
 func TestEndChat_StampsExitKind(t *testing.T) {
 	c := newMemCore(t)
 	ctx := context.Background()

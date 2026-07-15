@@ -7,7 +7,10 @@ package main
 // agent. Tagged surface="agent-helper" so it stays out of the Chats list.
 
 import (
+	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/sPROFFEs/PrAImate/internal/core"
@@ -21,13 +24,10 @@ const helperAgentID = "agent-builder"
 
 // StartAgentHelperChat opens the studio's assistant pane as a throwaway
 // chat preloaded with the agent-builder system prompt. When `targetAgentID`
-// is non-empty, the helper's cwd is the agent's on-disk root
-// (<config>/praimate/agents/<id>/) and the current DB-state YAML is
-// mirrored to `agent.yaml` in that folder — so the wrapped CLI can read
-// and edit the agent and its knowledge files as real files. Without
-// `targetAgentID` the helper falls back to the GUI cwd (the legacy
-// behaviour, kept so the New-Agent flow keeps working before the agent
-// has a row in the DB).
+// is non-empty, the current DB-state YAML is mirrored to `agent.yaml` in
+// the explicitly requested working directory. When no directory is supplied,
+// the helper uses the target agent's data directory; it never falls back to
+// the process directory from which `praimate --gui` happened to be launched.
 func (a *App) StartAgentHelperChat(cli, model, cwd, targetAgentID string) (*core.Chat, error) {
 	c, err := a.requireCore()
 	if err != nil {
@@ -37,26 +37,17 @@ func (a *App) StartAgentHelperChat(cli, model, cwd, targetAgentID string) (*core
 		cli = "claude"
 	}
 
-	// When we know which agent is open in the studio, pin the helper
-	// to that agent's on-disk folder and mirror the current YAML so the
-	// CLI sees a real file at `./agent.yaml`. This is the user-visible
-	// fix for "the CLI keeps running in /home/user with nothing to edit".
-	var yamlPath string
-	if targetAgentID != "" {
-		if dir, derr := core.AgentDir(targetAgentID); derr == nil {
-			if agent, gerr := c.GetAgent(a.ctx, targetAgentID); gerr == nil && agent != nil {
-				if p, werr := core.WriteAgentYAMLToDisk(agent); werr == nil {
-					yamlPath = p
-				}
-			}
-			cwd = dir
-		}
+	cwd, err = agentHelperWorkspace(targetAgentID, cwd)
+	if err != nil {
+		return nil, err
 	}
-	if cwd == "" {
-		if editorFolder != "" {
-			cwd = editorFolder
-		} else {
-			cwd, _ = os.Getwd()
+	if targetAgentID != "" {
+		agent, getErr := c.GetAgent(a.ctx, targetAgentID)
+		if getErr != nil {
+			return nil, getErr
+		}
+		if _, writeErr := writeAgentYAMLToWorkspace(agent, cwd); writeErr != nil {
+			return nil, writeErr
 		}
 	}
 
@@ -75,25 +66,44 @@ func (a *App) StartAgentHelperChat(cli, model, cwd, targetAgentID string) (*core
 	// rewrite `./agent.yaml` and the `./knowledge/` files for the user.
 	// Without this the wrapped CLI runs read-only and tells the user
 	// "I can't save agent.yaml from this environment".
+	tools := "edits"
+	if cli == "opencode" || cli == "praimate-code" {
+		// OpenCode's headless run mode has no edits-only flag. Without the
+		// explicit bypass it can reject the helper's write tool and merely
+		// print a YAML block instead of updating ./agent.yaml.
+		tools = "full"
+	}
 	chat, err := c.CreateChat(a.ctx, core.CreateChatRequest{
 		Title:         title,
 		AgentID:       agentID,
 		CLIAgent:      cli,
 		WorkspacePath: cwd,
-		Settings:      core.ChatSettings{Model: model, Surface: "agent-helper", Tools: "edits"},
+		Settings:      core.ChatSettings{Model: model, Surface: "agent-helper", Tools: tools},
 	})
 	if err != nil {
 		return nil, err
 	}
-	_ = yamlPath // reserved for future telemetry — the file is now on disk at cwd/agent.yaml
 	return chat, nil
 }
 
-// SyncAgentYAMLToDisk re-renders the current DB YAML for `id` into
-// <AgentDir>/agent.yaml. Called by the frontend after the user clicks
-// "Save agent" in the studio so the helper CLI continues to see the
-// authoritative copy on the next turn.
-func (a *App) SyncAgentYAMLToDisk(id string) (string, error) {
+// WriteAgentYAMLDraftToDisk mirrors the editor's current (possibly not yet
+// valid/saved) draft before a helper turn. This keeps the CLI from editing a
+// stale DB snapshot when the user has typed changes in the center pane.
+func (a *App) WriteAgentYAMLDraftToDisk(id, cwd, body string) error {
+	path, err := agentYAMLWorkspacePath(id, cwd)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(body), 0o644)
+}
+
+// SyncAgentYAMLToDisk re-renders the current DB YAML into the helper's
+// working directory. Called after "Save agent" so the CLI sees the
+// authoritative copy on its next turn.
+func (a *App) SyncAgentYAMLToDisk(id, cwd string) (string, error) {
 	c, err := a.requireCore()
 	if err != nil {
 		return "", err
@@ -102,22 +112,87 @@ func (a *App) SyncAgentYAMLToDisk(id string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return core.WriteAgentYAMLToDisk(agent)
+	// Preserve the canonical config copy used by knowledge/RAG management,
+	// but return and update the helper's visible workspace copy.
+	_, _ = core.WriteAgentYAMLToDisk(agent)
+	return writeAgentYAMLToWorkspace(agent, cwd)
 }
 
-// ReadAgentYAMLFromDisk returns the contents of <AgentDir>/agent.yaml.
+// ReadAgentYAMLFromDisk returns the helper workspace's ./agent.yaml.
 // Used by the studio's "Reload from disk" button so the user can pull
 // the helper's edits back into the editor pane in one click.
-func (a *App) ReadAgentYAMLFromDisk(id string) (string, error) {
-	dir, err := core.AgentDir(id)
+func (a *App) ReadAgentYAMLFromDisk(id, cwd string) (string, error) {
+	path, err := agentYAMLWorkspacePath(id, cwd)
 	if err != nil {
 		return "", err
 	}
-	body, err := os.ReadFile(dir + string(os.PathSeparator) + "agent.yaml")
+	body, err := os.ReadFile(path)
 	if err != nil {
 		return "", err
 	}
 	return string(body), nil
+}
+
+func agentHelperWorkspace(agentID, cwd string) (string, error) {
+	cwd = strings.TrimSpace(cwd)
+	create := false
+	if cwd == "" {
+		cwd = strings.TrimSpace(editorFolder)
+	}
+	if cwd == "" {
+		var err error
+		cwd, err = core.AgentDir(strings.TrimSpace(agentID))
+		if err != nil {
+			return "", fmt.Errorf("resolve agent data directory: %w", err)
+		}
+		create = true
+	}
+	abs, err := filepath.Abs(cwd)
+	if err != nil {
+		return "", fmt.Errorf("resolve helper working directory: %w", err)
+	}
+	if create {
+		if err := os.MkdirAll(abs, 0o755); err != nil {
+			return "", fmt.Errorf("create agent data directory: %w", err)
+		}
+	}
+	info, err := os.Stat(abs)
+	if err != nil {
+		return "", fmt.Errorf("open helper working directory: %w", err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("helper working directory is not a directory: %s", abs)
+	}
+	return abs, nil
+}
+
+func agentYAMLWorkspacePath(id, cwd string) (string, error) {
+	if strings.TrimSpace(id) == "" {
+		return "", fmt.Errorf("agent id is required")
+	}
+	workspace, err := agentHelperWorkspace(id, cwd)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(workspace, "agent.yaml"), nil
+}
+
+func writeAgentYAMLToWorkspace(agent *core.Agent, cwd string) (string, error) {
+	if agent == nil {
+		return "", fmt.Errorf("write agent.yaml: nil agent")
+	}
+	path, err := agentYAMLWorkspacePath(agent.ID, cwd)
+	if err != nil {
+		return "", err
+	}
+	body, err := core.MarshalAgentYAML(agent)
+	if err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 func contains(xs []string, s string) bool {

@@ -5,6 +5,10 @@ import { api } from './api.js'
 // activePage; openChatId, when set, tells the Chats page to open that
 // chat as a live thread (used when Agents starts a new chat).
 export const activePage = writable('code')
+// Increment after setting pendingTerm when Code must consume a fresh attach
+// request. This also handles clicking a Code session while Code is already
+// the active page (setting the same activePage value alone does not remount).
+export const pageRevision = writable(0)
 export const openChatId = writable(null)
 
 // agentStudio, when set, opens the full-screen agent authoring studio.
@@ -43,5 +47,5 @@ export async function prefetchCLIs(force = false) {
 // pendingTerm, when set, tells the Code page to attach to an
 // already-started PTY instead of launching one — used when the Chats
 // page reopens a TUI workspace chat in the terminal.
-// Shape: { termId, cli, cwd, label, note }
+// Shape: { termId, chatId, cli, cwd, label, model, local*, note }
 export const pendingTerm = writable(null)

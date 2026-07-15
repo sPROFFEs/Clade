@@ -216,7 +216,7 @@ func (a *App) PickProjectFolder() (string, error) {
 // context file (CLAUDE.md / AGENTS.md) so the CLI adopts the persona,
 // without us reimplementing its loop. Returns the terminal session id;
 // output streams over "term:data:<id>" events.
-func (a *App) StartTerminal(agentID, cli, model, cwd, localEndpoint, localAPIKey, localModel string) (string, error) {
+func (a *App) StartTerminal(agentID, cli, model, cwd, localEndpoint, localAPIKey, localModel string, resume bool) (string, error) {
 	c, err := a.requireCore()
 	if err != nil {
 		return "", err
@@ -239,6 +239,16 @@ func (a *App) StartTerminal(agentID, cli, model, cwd, localEndpoint, localAPIKey
 	name, args, err := terminalCommand(cli, model)
 	if err != nil {
 		return "", err
+	}
+	if resume {
+		var supported bool
+		name, args, supported, err = terminalResumeCommand(cli, model)
+		if err != nil {
+			return "", err
+		}
+		// For CLIs without a safe non-interactive resume selector, retain the
+		// normal launch rather than opening an interactive picker unexpectedly.
+		_ = supported
 	}
 	if agentID != "" {
 		if agent, gerr := c.GetAgent(a.ctx, agentID); gerr == nil {
@@ -274,6 +284,12 @@ func (a *App) WriteTerminal(id, b64 string) error {
 
 func (a *App) ResizeTerminal(id string, cols, rows int) error {
 	return a.terms.resize(id, cols, rows)
+}
+
+// GetTerminalSnapshot returns the retained output of a live PTY so the Code
+// page can reconstruct xterm after it was minimized/navigated away from.
+func (a *App) GetTerminalSnapshot(id string) (TerminalSnapshot, error) {
+	return a.terms.snapshot(id)
 }
 
 func (a *App) CloseTerminal(id string) {
@@ -428,7 +444,13 @@ func (a *App) DeleteChat(chatID string) error {
 	if err != nil {
 		return err
 	}
-	return c.DeleteChat(a.ctx, chatID)
+	if err := c.DeleteChat(a.ctx, chatID); err != nil {
+		return err
+	}
+	if a.terms != nil {
+		_ = a.terms.removeHistory(chatID)
+	}
+	return nil
 }
 
 // --- Clean chats (CLI + model, no agent) ----------------------------------
@@ -677,7 +699,10 @@ func (a *App) OpenWorkspaceChat(chatID string) (*OpenWorkspaceChatResult, error)
 	if err != nil {
 		return nil, err
 	}
-	a.terms.bindChat(termID, chatID)
+	if err := a.terms.bindChat(termID, chatID); err != nil {
+		a.terms.close(termID)
+		return nil, err
+	}
 	return &OpenWorkspaceChatResult{
 		TermID: termID,
 		CLI:    string(chat.AgentID),

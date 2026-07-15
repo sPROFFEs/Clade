@@ -2,6 +2,8 @@ package core
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -175,5 +177,40 @@ func TestUpdateChatConfig_SwitchesCLIAndClearsSession(t *testing.T) {
 	}
 	if err := c.UpdateChatConfig(ctx, ch.ID, "not-a-cli", "", ""); err == nil {
 		t.Error("unknown CLI must be rejected")
+	}
+}
+
+func TestContinueChat_PreparesOnlySelectedMCPServers(t *testing.T) {
+	mock := &mockAdapter{name: "claude", replies: []string{"done"}}
+	withMockAdapter(t, mock)
+	c, _ := New(Options{Store: openTempStore(t)})
+	ctx := context.Background()
+	enabled := true
+	for _, server := range []ConnectMCPRequest{
+		{ID: "selected", Name: "Selected", Transport: MCPTransportHTTP, URL: "https://selected.example/mcp", Enabled: &enabled},
+		{ID: "other", Name: "Other", Transport: MCPTransportHTTP, URL: "https://other.example/mcp", Enabled: &enabled},
+	} {
+		if _, err := c.ConnectMCP(ctx, server); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cwd := t.TempDir()
+	chat, err := c.CreateChat(ctx, CreateChatRequest{
+		Title: "mcp", CLIAgent: "claude", WorkspacePath: cwd,
+		Settings: ChatSettings{MCPServers: []string{"selected"}, MCPConfigured: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.ContinueChat(ctx, chat.ID, "go", cwd, ""); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(cwd, ".mcp.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	if !strings.Contains(text, `"selected"`) || strings.Contains(text, `"other"`) {
+		t.Fatalf("per-chat MCP config mismatch:\n%s", text)
 	}
 }
