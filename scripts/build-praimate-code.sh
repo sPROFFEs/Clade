@@ -22,6 +22,13 @@
 #   OUT=/some/dir scripts/build-praimate-code.sh    # custom output dir
 #   OPENCODE_SRC=/path/to/opencode scripts/build-praimate-code.sh  # source override
 #   OPENCODE_REF=v1.17.4 scripts/build-praimate-code.sh  # clone this ref instead of vendored
+#   BASELINE=1 scripts/build-praimate-code.sh       # no-AVX2 build → praimate-code-baseline
+#
+# BASELINE builds: Bun's default x64 binaries require AVX2; on older
+# CPUs and VMs without AVX2 passthrough they crash with an illegal
+# instruction (0xc000001d on Windows). BASELINE=1 compiles upstream's
+# "-baseline" target instead — the installer downloads that asset when
+# it detects a no-AVX2 host. Only meaningful on x64.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -112,21 +119,39 @@ bash "$REPO_ROOT/scripts/praimate-code-rebrand.sh" "$SRC" || {
   echo "  (rebrand pass skipped/failed; continuing with upstream branding)" >&2
 }
 
-echo "→ building standalone binary (native target only)"
+BASELINE="${BASELINE:-0}"
+BUILD_FLAGS="--single"
+OUTNAME="praimate-code$EXT"
+if [ "$BASELINE" = 1 ]; then
+  BUILD_FLAGS="--single --baseline"
+  OUTNAME="praimate-code-baseline$EXT"
+fi
+
+if [ "$BASELINE" = 1 ]; then
+  echo "→ building standalone binary (native target, baseline/no-AVX2 variant)"
+else
+  echo "→ building standalone binary (native target only)"
+fi
 # --single restricts build.ts to the current platform, so it doesn't
 # download a Bun runtime for every OS/arch (which is slow and fragile
 # over the network). We cross-build other targets in separate runs.
-( cd "$SRC/packages/opencode" && bun run build --single )
+# With --baseline build.ts emits BOTH the default and the -baseline
+# target for this platform; the find below picks the right one.
+( cd "$SRC/packages/opencode" && bun run build $BUILD_FLAGS )
 
-# build.ts emits dist/<name>/bin/opencode — find it.
-BUILT="$(find "$SRC/packages/opencode/dist" -type f -name "opencode$EXT" 2>/dev/null | head -1)"
+# build.ts emits dist/<name>/bin/opencode — find the variant we want.
+if [ "$BASELINE" = 1 ]; then
+  BUILT="$(find "$SRC/packages/opencode/dist" -type f -path "*baseline*" -name "opencode$EXT" 2>/dev/null | head -1)"
+else
+  BUILT="$(find "$SRC/packages/opencode/dist" -type f -not -path "*baseline*" -name "opencode$EXT" 2>/dev/null | head -1)"
+fi
 if [ -z "$BUILT" ]; then
   echo "error: could not find built opencode binary under $SRC/packages/opencode/dist"
   exit 1
 fi
 
 mkdir -p "$OUT"
-install -m 0755 "$BUILT" "$OUT/praimate-code$EXT"
+install -m 0755 "$BUILT" "$OUT/$OUTNAME"
 cp "$SRC/LICENSE" "$OUT/PRAIMATE-CODE-LICENSE"
 cat > "$OUT/PRAIMATE-CODE-NOTICE" <<EOF
 PrAImate Code is a rebranded build of OpenCode.
@@ -141,5 +166,5 @@ The original copyright notice is retained in PRAIMATE-CODE-LICENSE.
 EOF
 
 echo
-echo "✓ built $OUT/praimate-code$EXT"
-ls -lh "$OUT/praimate-code$EXT"
+echo "✓ built $OUT/$OUTNAME"
+ls -lh "$OUT/$OUTNAME"

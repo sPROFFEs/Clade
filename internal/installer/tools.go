@@ -171,6 +171,13 @@ func toolCandidatePaths(id ToolID, binary string) []string {
 	return paths
 }
 
+// errProbeTimeout marks a --version probe that hit its deadline: the
+// binary exists and runs but is slow to start. Post-install
+// verification treats this as "probably fine" rather than a broken
+// install (Defender scanning a freshly written 170MB exe can push the
+// first start past the deadline).
+var errProbeTimeout = errors.New("--version probe timed out")
+
 // probeToolVersion matches probeVersion in internal/launcher/agents.go:
 // 8s deadline (Node / uv tools on Windows can take 3-6s to cold-start),
 // with the timeout-vs-real-failure distinction surfaced as a readable
@@ -184,8 +191,11 @@ func probeToolVersion(parent context.Context, path string) (string, error) {
 	out, err := probe.CombinedOutput()
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
-			return "", fmt.Errorf("--version timed out after %s (binary is slow to start, "+
-				"not necessarily broken — try invoking it directly to confirm)", deadline)
+			return "", fmt.Errorf("%w after %s (binary is slow to start, "+
+				"not necessarily broken — try invoking it directly to confirm)", errProbeTimeout, deadline)
+		}
+		if IsIllegalInstruction(err) {
+			return "", fmt.Errorf("%w (illegal instruction — CPU lacks AVX2; reinstall to get the baseline build)", err)
 		}
 		return "", err
 	}
@@ -503,14 +513,24 @@ func praimateCodeMethods(current OS) []Method {
 		dest += ".exe"
 	}
 	asset := praimateCodeAssetName()
-	return []Method{{
+	m := Method{
 		ID:            "download",
 		Label:         "Install prebuilt PrAImate Code (bundled copy or release download)",
 		Command:       assetDownloadDisplayCmd(asset, dest),
 		DownloadAsset: asset,
 		DownloadDest:  dest,
 		Recommended:   true,
-	}}
+		// Bun-compiled binary: verify it actually runs on this CPU after
+		// install, falling back to the -baseline (no-AVX2) build when the
+		// default one faults with an illegal instruction. Without this,
+		// the install "succeeds" but every probe/launch dies with
+		// 0xc000001d and the CLIs tab keeps saying "not installed".
+		VerifyRun: true,
+	}
+	if fb := praimateCodeBaselineAssetName(); fb != "" && fb != asset {
+		m.FallbackAsset = fb
+	}
+	return []Method{m}
 }
 
 // ErrNoPrebuiltAsset signals to the caller that the requested binary is
@@ -535,12 +555,30 @@ func InstallPraimateCode(ctx context.Context, w io.Writer) error {
 }
 
 // praimateCodeAssetName is the release asset filename for the host.
-// Mirrors the naming the build pipeline uploads.
+// Mirrors the naming the build pipeline uploads. On an amd64 host
+// without AVX2 (VMs, older CPUs) the default Bun build crashes with an
+// illegal instruction (0xc000001d on Windows), so the "-baseline"
+// variant is selected up front.
 func praimateCodeAssetName() string {
-	osPart := runtime.GOOS
-	archPart := runtime.GOARCH
-	name := fmt.Sprintf("praimate-code-%s-%s", osPart, archPart)
-	if runtime.GOOS == "windows" {
+	return praimateCodeAssetNameFor(runtime.GOOS, runtime.GOARCH, hostNeedsBaselineBuild())
+}
+
+// praimateCodeBaselineAssetName is the no-AVX2 variant for the host —
+// the post-install verification fallback when the default build turns
+// out not to run (CPUID said AVX2 but the hypervisor faults on it).
+func praimateCodeBaselineAssetName() string {
+	if runtime.GOARCH != "amd64" {
+		return "" // baseline variants only exist for x64
+	}
+	return praimateCodeAssetNameFor(runtime.GOOS, runtime.GOARCH, true)
+}
+
+func praimateCodeAssetNameFor(goos, goarch string, baseline bool) string {
+	name := fmt.Sprintf("praimate-code-%s-%s", goos, goarch)
+	if baseline && goarch == "amd64" {
+		name += "-baseline"
+	}
+	if goos == "windows" {
 		name += ".exe"
 	}
 	return name

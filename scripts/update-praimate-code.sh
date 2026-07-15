@@ -154,6 +154,17 @@ else
   else
     note "WARN: update-advisory patch not detected in the binary"
   fi
+
+  # Baseline (no-AVX2) variant — x64 only. Bun's default x64 build
+  # crashes with an illegal instruction (0xc000001d on Windows) on CPUs
+  # and VMs without AVX2; the installer downloads the -baseline asset
+  # on such hosts, so the release must ship it.
+  if [ "$GOARCH" = amd64 ]; then
+    say "building the baseline (no-AVX2) variant"
+    BASELINE=1 bash "$BUILD_SCRIPT"
+    BASELINE_BIN="dist/$GOOS-$GOARCH/praimate-code-baseline$EXT"
+    [ -f "$BASELINE_BIN" ] || die "baseline build finished but $BASELINE_BIN was not produced"
+  fi
 fi
 
 # ---- 6. repo update: perform or explain -------------------------------------
@@ -183,6 +194,13 @@ if [ "$SKIP_BUILD" != 1 ]; then
     cp "$BIN" "dist/$ASSET"
     ( cd dist && sha256sum "$ASSET" > "$ASSET.sha256" )
     gh release upload "$PRAIMATE_VERSION" "dist/$ASSET" "dist/$ASSET.sha256" --clobber
+    if [ "$GOARCH" = amd64 ] && [ -f "${BASELINE_BIN:-}" ]; then
+      BASELINE_ASSET="praimate-code-$GOOS-$GOARCH-baseline$EXT"
+      say "uploading $BASELINE_ASSET (no-AVX2 variant) to release $PRAIMATE_VERSION"
+      cp "$BASELINE_BIN" "dist/$BASELINE_ASSET"
+      ( cd dist && sha256sum "$BASELINE_ASSET" > "$BASELINE_ASSET.sha256" )
+      gh release upload "$PRAIMATE_VERSION" "dist/$BASELINE_ASSET" "dist/$BASELINE_ASSET.sha256" --clobber
+    fi
     # Keep the aggregate checksum file honest if the sibling .sha256
     # files are still lying around from the release build.
     if ls dist/praimate-*.sha256 >/dev/null 2>&1; then
@@ -193,6 +211,7 @@ if [ "$SKIP_BUILD" != 1 ]; then
     note "done — the GUI/TUI 'Install PrAImate Code' download now serves $TAG"
   else
     say "next step — publish the new binary (or re-run with --release):"
+    note "(remember the baseline variant too: praimate-code-$GOOS-$GOARCH-baseline$EXT)"
     note "cp $BIN dist/$ASSET"
     note "cd dist && sha256sum $ASSET > $ASSET.sha256"
     note "gh release upload $PRAIMATE_VERSION dist/$ASSET dist/$ASSET.sha256 --clobber"

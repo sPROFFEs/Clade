@@ -145,6 +145,61 @@ func downloadTo(ctx context.Context, url, destPath string, wantSize int64) error
 	return nil
 }
 
+// verifyInstalledBinary runs `<DownloadDest> --version` after a
+// download/sidecar install (methods with VerifyRun set). The point:
+// Bun-compiled x64 builds (praimate-code) require AVX2, and on a CPU
+// or VM without it the binary faults with an illegal instruction —
+// on Windows `exit status 0xc000001d` — on EVERY invocation. Before
+// this check the install claimed success, detection then reported the
+// tool broken/"not installed", and reinstalling downloaded the same
+// incompatible binary again. Now the mismatch is caught here and,
+// when the method names a FallbackAsset (the "-baseline" no-AVX2
+// build), fixed automatically.
+func verifyInstalledBinary(ctx context.Context, m Method, w io.Writer) error {
+	if !m.VerifyRun {
+		return nil
+	}
+	base := filepath.Base(m.DownloadDest)
+	fmt.Fprintf(w, "→ verifying %s runs on this machine...\n", base)
+	version, err := probeToolVersion(ctx, m.DownloadDest)
+	if err == nil {
+		fmt.Fprintf(w, "✓ verified: %s\n", version)
+		return nil
+	}
+	if errors.Is(err, errProbeTimeout) {
+		// Slow first start (AV scan of a fresh 170MB exe) — not broken.
+		fmt.Fprintf(w, "  (version probe timed out — the binary starts slowly but was installed)\n")
+		return nil
+	}
+	if !IsIllegalInstruction(err) {
+		return fmt.Errorf("installed %s but it failed to run: %w", base, err)
+	}
+	if m.FallbackAsset == "" || m.FallbackAsset == m.DownloadAsset {
+		return fmt.Errorf("%s crashed with an illegal instruction — this CPU cannot run the build "+
+			"(it requires AVX2) and no baseline variant is available for %s/%s: %w",
+			base, runtime.GOOS, runtime.GOARCH, err)
+	}
+	fmt.Fprintf(w, "  %s crashed with an illegal instruction — this CPU lacks AVX2 support.\n", base)
+	fmt.Fprintf(w, "→ falling back to the baseline (no-AVX2) build %s...\n", m.FallbackAsset)
+	if err := DownloadReleaseAsset(ctx, m.FallbackAsset, m.DownloadDest, w); err != nil {
+		if errors.Is(err, ErrNoPrebuiltAsset) {
+			return fmt.Errorf("this CPU needs the baseline (no-AVX2) build, but the release does not "+
+				"publish %s yet — please report this so the asset gets added: %w", m.FallbackAsset, err)
+		}
+		return err
+	}
+	version, err = probeToolVersion(ctx, m.DownloadDest)
+	if err != nil {
+		if errors.Is(err, errProbeTimeout) {
+			fmt.Fprintf(w, "  (version probe timed out — the binary starts slowly but was installed)\n")
+			return nil
+		}
+		return fmt.Errorf("baseline build %s also failed to run: %w", m.FallbackAsset, err)
+	}
+	fmt.Fprintf(w, "✓ baseline build verified: %s\n", version)
+	return nil
+}
+
 // installFromBundledSidecar checks whether the binary a download method
 // wants already ships next to the running praimate executable (the
 // release archives bundle praimate-code / praimate-graphify there when
@@ -152,6 +207,12 @@ func downloadTo(ctx context.Context, url, destPath string, wantSize int64) error
 // Returns (true, err) when a sidecar was found and installed (or the
 // copy failed); (false, nil) when the caller should download instead.
 func installFromBundledSidecar(m Method, w io.Writer) (bool, error) {
+	// The bundled sidecars are the default (AVX2) x64 builds; on a host
+	// that needs the baseline variant, skip straight to the release
+	// download so the right asset is fetched.
+	if m.VerifyRun && hostNeedsBaselineBuild() {
+		return false, nil
+	}
 	exe, err := os.Executable()
 	if err != nil {
 		return false, nil

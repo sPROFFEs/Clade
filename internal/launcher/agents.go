@@ -237,6 +237,14 @@ func knownInstallPaths(id AgentID, binary string) []string {
 				dirs = append(dirs, filepath.Join(appdata, "npm"))
 			}
 		}
+	case AgentPraimateCode:
+		// InstallPraimateCode drops the binary into <config>/praimate/bin.
+		// ImportPraimateBinToPath normally puts that dir on PATH, but probe
+		// it explicitly so detection works even when the PATH import hasn't
+		// run in this process (fresh GUI start, tests, `praimate code`).
+		if binDir, err := installer.PraimateBinDir(); err == nil {
+			dirs = append(dirs, binDir)
+		}
 	case AgentOpenClaude:
 		// OpenClaude installs into a PrAImate-managed prefix (hoisted
 		// node-linker) to dodge its phantom @aws-sdk dependency — its
@@ -294,6 +302,11 @@ func probeVersion(parent context.Context, path string) (string, error) {
 		if ctx.Err() == context.DeadlineExceeded {
 			return "", fmt.Errorf("%w after %s (binary is slow to start, "+
 				"not necessarily broken — try invoking it directly to confirm)", ErrProbeTimeout, deadline)
+		}
+		if installer.IsIllegalInstruction(err) {
+			// Bun AVX2 build on a non-AVX2 CPU — the raw "exit status
+			// 0xc000001d" reads like a corrupt download; say what it means.
+			return "", fmt.Errorf("%w (illegal instruction — CPU lacks AVX2; reinstall to get the baseline build)", err)
 		}
 		return "", err
 	}

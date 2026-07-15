@@ -88,6 +88,16 @@ type Method struct {
 	// is still set for display but isn't executed.
 	DownloadAsset string
 	DownloadDest  string
+
+	// VerifyRun, when true, makes Run probe `<DownloadDest> --version`
+	// after a download/sidecar install so a binary that can't execute on
+	// this machine fails the install loudly instead of "succeeding" and
+	// then showing up as broken in detection forever. FallbackAsset,
+	// when set, is downloaded in place of DownloadAsset if the probe
+	// dies with an illegal instruction (Bun AVX2 build on a non-AVX2
+	// CPU → the "-baseline" variant).
+	VerifyRun     bool
+	FallbackAsset string
 }
 
 // Shell tells Run how to execute Command. Direct means no shell wrapping
@@ -625,9 +635,15 @@ func RunWithOptions(ctx context.Context, m Method, opts RunOptions, stdout, stde
 	// the network.
 	if m.DownloadAsset != "" {
 		if handled, err := installFromBundledSidecar(m, stdout); handled {
+			if err != nil {
+				return err
+			}
+			return verifyInstalledBinary(ctx, m, stdout)
+		}
+		if err := DownloadReleaseAsset(ctx, m.DownloadAsset, m.DownloadDest, stdout); err != nil {
 			return err
 		}
-		return DownloadReleaseAsset(ctx, m.DownloadAsset, m.DownloadDest, stdout)
+		return verifyInstalledBinary(ctx, m, stdout)
 	}
 	var extraEnv []string
 	// Honor the Node opt-in first — if pnpm setup follows, it needs
