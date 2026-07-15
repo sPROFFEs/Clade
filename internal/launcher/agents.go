@@ -308,6 +308,14 @@ func probeVersion(parent context.Context, path string) (string, error) {
 			// 0xc000001d" reads like a corrupt download; say what it means.
 			return "", fmt.Errorf("%w (illegal instruction — CPU lacks AVX2; reinstall to get the baseline build)", err)
 		}
+		// Surface what the binary printed before dying (Bun crash
+		// reports, Node stack traces) — "exit status 3" alone hides it.
+		if line := strings.TrimSpace(strings.SplitN(strings.TrimSpace(string(out)), "\n", 2)[0]); line != "" {
+			if len(line) > 160 {
+				line = line[:157] + "..."
+			}
+			return "", fmt.Errorf("%w — %s", err, line)
+		}
 		return "", err
 	}
 	line := strings.SplitN(strings.TrimSpace(string(out)), "\n", 2)[0]

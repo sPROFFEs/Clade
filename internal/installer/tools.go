@@ -197,10 +197,33 @@ func probeToolVersion(parent context.Context, path string) (string, error) {
 		if IsIllegalInstruction(err) {
 			return "", fmt.Errorf("%w (illegal instruction — CPU lacks AVX2; reinstall to get the baseline build)", err)
 		}
+		// Keep what the binary printed before dying — a Bun crash
+		// report's first line names the actual fault (GC bug, missing
+		// CPU feature caught by its crash handler, ...), which the bare
+		// "exit status 3" hides.
+		if msg := firstOutputLine(out); msg != "" {
+			return "", fmt.Errorf("%w — %s", err, msg)
+		}
 		return "", err
 	}
 	line := strings.SplitN(strings.TrimSpace(string(out)), "\n", 2)[0]
 	return strings.TrimSpace(line), nil
+}
+
+// firstOutputLine returns the first non-empty line of a probe's
+// combined output, capped for display in error strings.
+func firstOutputLine(out []byte) string {
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if len(line) > 160 {
+			line = line[:157] + "..."
+		}
+		return line
+	}
+	return ""
 }
 
 // ManagedToolPrefix returns the PrAImate-owned directory where a managed
