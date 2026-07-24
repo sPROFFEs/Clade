@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"github.com/sPROFFEs/PrAImate/internal/installer"
-	"github.com/sPROFFEs/PrAImate/pkg/workpath"
+	"git.jtsec.local/lab/PrAImate/internal/installer"
+	"git.jtsec.local/lab/PrAImate/pkg/workpath"
 )
 
 // missingImportedToolNotes surfaces a one-line hint when a workpath

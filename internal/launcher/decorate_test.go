@@ -190,13 +190,6 @@ func TestDecorate_MemoryDirectiveInjectedIntoAgentInstructions(t *testing.T) {
 			},
 			wantSection: "AGENTS.md",
 		},
-		{
-			name: "gemini",
-			agent: Agent{
-				ID: AgentGemini, Binary: "gemini", WpcTarget: "gemini", Available: true,
-			},
-			wantSection: "GEMINI.md",
-		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

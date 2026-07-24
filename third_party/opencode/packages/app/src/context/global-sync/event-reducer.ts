@@ -194,7 +194,10 @@ export function applyDirectoryEvent(input: {
     }
     case "todo.updated": {
       const props = event.properties as { sessionID: string; todos: Todo[] }
-      input.setStore("todo", props.sessionID, reconcile(props.todos, { key: "id" }))
+      // Todo has no `id` field; its durable identity is the list position.
+      // Reconciling by the missing key makes every item compare as undefined,
+      // so later status updates can leave the first todo frozen in_progress.
+      input.setStore("todo", props.sessionID, reconcile(props.todos))
       input.setSessionTodo?.(props.sessionID, props.todos)
       break
     }

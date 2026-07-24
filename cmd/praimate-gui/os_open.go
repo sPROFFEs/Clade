@@ -12,7 +12,7 @@ import (
 	"os/exec"
 	"runtime"
 
-	"github.com/sPROFFEs/PrAImate/internal/core"
+	"git.jtsec.local/lab/PrAImate/internal/core"
 )
 
 func openPathInFileManager(dir string) error {

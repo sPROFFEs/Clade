@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sPROFFEs/PrAImate/internal/installer"
+	"git.jtsec.local/lab/PrAImate/internal/installer"
 )
 
 // ErrProbeTimeout is returned by probeVersion when the binary exists
@@ -21,14 +21,16 @@ import (
 // 10+s for a cold start.
 var ErrProbeTimeout = errors.New("--version probe timed out")
 
-// AgentID is one of "claude", "codex", "opencode", "gemini", "deepseek".
+// AgentID identifies a supported CLI agent.
 type AgentID string
 
 const (
-	AgentClaude       AgentID = "claude"
-	AgentOpenClaude   AgentID = "openclaude"
-	AgentCodex        AgentID = "codex"
-	AgentOpenCode     AgentID = "opencode"
+	AgentClaude     AgentID = "claude"
+	AgentOpenClaude AgentID = "openclaude"
+	AgentCodex      AgentID = "codex"
+	AgentOpenCode   AgentID = "opencode"
+	// Retained only to read legacy persisted settings; neither ID is in
+	// KnownAgents and neither can be installed or selected.
 	AgentGemini       AgentID = "gemini"
 	AgentDeepSeek     AgentID = "deepseek"
 	AgentPraimateCode AgentID = "praimate-code"
@@ -115,30 +117,6 @@ func KnownAgents() []Agent {
 			// file praimate-code picks up at launch.
 			WpcTarget:   "codex",
 			InstallHint: "install from the CLIs tab, or: praimate -install-tool... (downloads the bundled build)",
-		},
-		{
-			ID:          AgentGemini,
-			Label:       "Gemini CLI",
-			Binary:      "gemini",
-			WpcTarget:   "gemini",
-			InstallHint: "pnpm add -g @google/gemini-cli   (npm package; needs Node 20+)",
-		},
-		{
-			ID:    AgentDeepSeek,
-			Label: "DeepSeek-TUI",
-			// Upstream ships both `deepseek` (dispatcher) and
-			// `deepseek-tui`; the dispatcher is what users invoke.
-			Binary: "deepseek",
-			// DeepSeek-TUI auto-loads AGENTS.md at session start (its
-			// `init` subcommand creates one as a starter file), with
-			// .claude/skills/ as a fallback discovery path. We
-			// compile via the codex target so AGENTS.md lands at the
-			// sandbox root and the agent picks up the workpath in its
-			// system prompt from turn 1.
-			WpcTarget: "codex",
-			// pnpm-only hint — see comment on AgentOpenClaude above for
-			// the supply-chain rationale.
-			InstallHint: "pnpm add -g deepseek-tui   |   brew tap Hmbown/deepseek-tui && brew install deepseek-tui   (macOS)   |   scoop install deepseek-tui   (Windows)",
 		},
 	}
 }

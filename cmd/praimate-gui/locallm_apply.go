@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sPROFFEs/PrAImate/internal/ollama"
+	"git.jtsec.local/lab/PrAImate/internal/ollama"
 )
 
 // LocalCLIStatus reports which config-file CLIs currently have the local
@@ -24,7 +24,6 @@ import (
 type LocalCLIStatus struct {
 	Codex    bool `json:"codex"`
 	Opencode bool `json:"opencode"` // also governs praimate-code (shared config)
-	Deepseek bool `json:"deepseek"`
 }
 
 // LocalCLIStatusNow probes the on-disk config of the config-file CLIs.
@@ -32,7 +31,6 @@ func (a *App) LocalCLIStatusNow() LocalCLIStatus {
 	return LocalCLIStatus{
 		Codex:    ollama.CodexConfigured(),
 		Opencode: ollama.OpenCodeConfigured(),
-		Deepseek: ollama.DeepSeekConfigured(),
 	}
 }
 
@@ -69,12 +67,6 @@ func (a *App) ApplyLocalToCLI(cli, model string) (string, error) {
 			return "", err
 		}
 		return "opencode + praimate-code routed to the local model — wrote " + path, nil
-	case "deepseek":
-		path, err := ollama.ApplyDeepSeek(s)
-		if err != nil {
-			return "", err
-		}
-		return "deepseek routed to the local model — wrote " + path, nil
 	case "codex":
 		// codex needs an OpenAI /v1/responses-compatible endpoint; probe
 		// before writing so the user gets a clear error instead of codex
@@ -99,7 +91,7 @@ func (a *App) ApplyLocalToCLI(cli, model string) (string, error) {
 		}
 		return msg, nil
 	default:
-		return "", fmt.Errorf("apply-to-local supports opencode/praimate-code, codex, deepseek — claude/openclaude use the per-chat toggle, gemini isn't wired")
+		return "", fmt.Errorf("apply-to-local supports opencode/praimate-code and codex — claude/openclaude use the per-chat toggle")
 	}
 }
 
@@ -113,12 +105,6 @@ func (a *App) DisableLocalForCLI(cli string) (string, error) {
 			return "", err
 		}
 		return "opencode + praimate-code local route removed — " + path, nil
-	case "deepseek":
-		path, err := ollama.DisableDeepSeek()
-		if err != nil {
-			return "", err
-		}
-		return "deepseek local route removed — " + path, nil
 	case "codex":
 		path, err := ollama.DisableCodex()
 		if err != nil {

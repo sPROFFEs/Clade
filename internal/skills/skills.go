@@ -29,7 +29,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sPROFFEs/PrAImate/internal/gitutil"
+	"git.jtsec.local/lab/PrAImate/internal/gitutil"
 )
 
 // FetchResult records what happened to one skill URL.

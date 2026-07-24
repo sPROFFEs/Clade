@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sPROFFEs/PrAImate/pkg/targets"
-	"github.com/sPROFFEs/PrAImate/pkg/workpath"
+	"git.jtsec.local/lab/PrAImate/pkg/targets"
+	"git.jtsec.local/lab/PrAImate/pkg/workpath"
 )
 
 // PrepareSandbox loads the workpath, validates it, and compiles it into

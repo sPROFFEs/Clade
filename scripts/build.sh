@@ -20,7 +20,7 @@
 # GUI coverage with --with-gui:
 #   - native os/arch       — full cgo build (Linux needs webkit2gtk-4.1
 #                            dev headers; macOS needs Xcode CLT)
-#   - windows-amd64        — ALWAYS cross-compilable: Wails v2's Windows
+#   - windows-amd64/arm64  — cross-compilable: Wails v2's Windows
 #                            backend is pure Go syscalls (WebView2 loads
 #                            at runtime), so CGO_ENABLED=0 works
 #   - everything else      — skipped; those platforms build from source
@@ -36,7 +36,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-VERSION="${VERSION:-1.0.9}"
+VERSION="${VERSION:-1.0.10}"
 EXTRA_LDFLAGS="${LDFLAGS:--s -w}"  # strip symbols by default — tiny binaries
 ARCHIVE=1
 WITH_GUI=0
@@ -61,13 +61,14 @@ done
 
 # Combined linker flags: strip + version injection. The Go linker accepts
 # multiple -X entries inside one -ldflags string.
-LDFLAGS="$EXTRA_LDFLAGS -X github.com/sPROFFEs/PrAImate/internal/version.Current=$VERSION"
+LDFLAGS="$EXTRA_LDFLAGS -X git.jtsec.local/lab/PrAImate/internal/version.Current=$VERSION"
 
 echo "Building version $VERSION"
 
 if [ ${#TARGETS[@]} -eq 0 ]; then
   TARGETS=(
     windows-amd64
+    windows-arm64
     linux-amd64
     linux-arm64
     darwin-amd64
@@ -95,13 +96,13 @@ build_one() {
   GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 \
     go build -trimpath -ldflags "$LDFLAGS" -o "$out/praimate$ext" ./cmd/praimate
 
-  # GUI: native target (full cgo) + windows-amd64 (pure-Go cross).
+  # GUI: native target (full cgo) + Windows targets (pure-Go cross).
   if [ "$WITH_GUI" = "1" ]; then
     if [ "$triplet" = "$NATIVE_TRIPLET" ]; then
       echo "  + praimate-gui (native)"
       bash cmd/praimate-gui/build.sh
       cp "cmd/praimate-gui/praimate-gui$ext" "$out/praimate-gui$ext"
-    elif [ "$triplet" = "windows-amd64" ]; then
+    elif [ "$goos" = "windows" ]; then
       echo "  + praimate-gui (windows cross)"
       # Frontend must already be built (the native branch or a prior
       # run does it); build it here if dist assets are missing.
@@ -109,7 +110,7 @@ build_one() {
         ( cd cmd/praimate-gui/frontend && npm install && npm run build )
       fi
       ( cd cmd/praimate-gui && \
-        GOOS=windows GOARCH=amd64 CGO_ENABLED=0 \
+        GOOS=windows GOARCH="$goarch" CGO_ENABLED=0 \
         go build -trimpath -tags desktop,production \
           -ldflags "-s -w -H windowsgui" -o praimate-gui.exe . )
       cp cmd/praimate-gui/praimate-gui.exe "$out/praimate-gui.exe"
@@ -172,6 +173,7 @@ build_one() {
         # found in archive"). Windows' native bsdtar produces correct
         # zips; git-bash's GNU tar does NOT (-a is silently wrong).
         if command -v zip >/dev/null 2>&1; then
+          rm -f "dist/praimate-$triplet.zip"
           ( cd dist && zip -qr "praimate-$triplet.zip" "$triplet" )
         elif [ -x "/c/Windows/System32/tar.exe" ]; then
           ( cd dist && /c/Windows/System32/tar.exe \

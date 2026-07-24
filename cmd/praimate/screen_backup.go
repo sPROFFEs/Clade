@@ -23,8 +23,8 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/sPROFFEs/PrAImate/internal/backup"
-	"github.com/sPROFFEs/PrAImate/internal/launcher"
+	"git.jtsec.local/lab/PrAImate/internal/backup"
+	"git.jtsec.local/lab/PrAImate/internal/launcher"
 )
 
 // Thin shims so the file can use lookup/set/unset env without

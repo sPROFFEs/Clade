@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/sPROFFEs/PrAImate/internal/store"
+	"git.jtsec.local/lab/PrAImate/internal/store"
 )
 
 func TestNew_RequiresAtLeastOneInput(t *testing.T) {

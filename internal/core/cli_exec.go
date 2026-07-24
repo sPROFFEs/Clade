@@ -265,37 +265,6 @@ func NewPraimateCodeAdapter() *execAdapter {
 	}
 }
 
-// NewGeminiAdapter drives `gemini` in non-interactive mode with the
-// prompt piped on stdin (documented: `echo "..." | gemini`), text
-// output, auto-approving tools so it never blocks on a prompt.
-func NewGeminiAdapter() *execAdapter {
-	return &execAdapter{
-		name: "gemini", bin: "gemini", stdinMsg: true,
-		build: func(in buildIn) ([]string, string) {
-			args := []string{"-o", "text", "--approval-mode", "yolo"}
-			if in.Model != "" {
-				args = append(args, "-m", in.Model)
-			}
-			return args, ""
-		},
-	}
-}
-
-// NewDeepSeekAdapter drives `deepseek exec` non-interactively, text out.
-// DeepSeek-TUI has no documented stdin-prompt mode, so the message stays
-// in argv — multi-line messages may truncate through a Windows .CMD
-// shim; revisit if upstream grows stdin support.
-func NewDeepSeekAdapter() *execAdapter {
-	return &execAdapter{
-		name: "deepseek", bin: "deepseek",
-		// No documented model flag — model is ignored (the TUI's config
-		// file picks the model for deepseek).
-		build: func(in buildIn) ([]string, string) {
-			return []string{"exec", "--output-format", "text", in.Message}, ""
-		},
-	}
-}
-
 // RegisterAllCLIAdapters installs every built-in CLI adapter into the
 // global registry. Idempotent. Called once at process start by both the
 // TUI and the GUI so workflows run on whichever CLI an agent declares.
@@ -305,6 +274,4 @@ func RegisterAllCLIAdapters() {
 	RegisterCLIAdapter(NewCodexAdapter())
 	RegisterCLIAdapter(NewOpenCodeAdapter())
 	RegisterCLIAdapter(NewPraimateCodeAdapter())
-	RegisterCLIAdapter(NewGeminiAdapter())
-	RegisterCLIAdapter(NewDeepSeekAdapter())
 }

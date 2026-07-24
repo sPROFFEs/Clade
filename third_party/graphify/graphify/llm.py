@@ -88,7 +88,15 @@ BACKENDS: dict[str, dict] = {
         "vision": True,
     },
     "openai": {
-        "base_url": "https://api.openai.com/v1",
+        # Honour OpenAI-compatible gateways (Ollama, vLLM, LM Studio,
+        # LiteLLM, GPUStack) selected by the caller. PrAImate launches
+        # graphify in a child process with OPENAI_BASE_URL set to its saved
+        # Local LLM endpoint; ignoring it silently sent the request to the
+        # public OpenAI URL instead.
+        "base_url": os.environ.get(
+            "OPENAI_BASE_URL",
+            os.environ.get("OPENAI_API_BASE", "https://api.openai.com/v1"),
+        ),
         "default_model": "gpt-4.1-mini",
         "env_key": "OPENAI_API_KEY",
         "model_env_key": "GRAPHIFY_OPENAI_MODEL",

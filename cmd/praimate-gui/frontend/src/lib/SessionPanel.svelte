@@ -32,7 +32,7 @@
         api.activeChatIDs().catch(() => []),
         api.listTerminalSessions().catch(() => []),
       ])
-      chats = (cs || []).slice(0, 40)
+      chats = cs || []
       active = new Set(ids || [])
       const m = new Map()
       for (const t of (terms || [])) if (t.chatId) m.set(t.chatId, t)
@@ -83,8 +83,8 @@
     return `${Math.round(h / 24)}d ago`
   }
 
-  async function closeSession(c) {
-    if (!confirm(`Close "${c.Title || c.ID}"? Any in-flight reply is cancelled, the PTY (if any) is killed, and the chat row is deleted.`)) return
+  async function closeSession(c, confirmClose = true) {
+    if (confirmClose && !confirm(`Close "${c.Title || c.ID}"? Any in-flight reply is cancelled, the PTY (if any) is killed, and the chat row is deleted.`)) return
     // 1. Cancel any in-flight turn — no-op if nothing's running.
     try { await api.cancelChatTurn(c.ID) } catch {}
     // 2. Kill the bound PTY if it's still up.
@@ -93,6 +93,11 @@
     // 3. Drop the chat row so it stops showing up.
     try { await api.deleteChat(c.ID) } catch {}
     await load()
+  }
+
+  async function closeAllSessions() {
+    if (!chats.length || !confirm(`Close all ${chats.length} sessions? Any in-flight replies will be cancelled and running PTYs will be stopped.`)) return
+    for (const c of chats) await closeSession(c, false)
   }
 
   async function jump(c) {
@@ -163,6 +168,7 @@
     <div class="sheet">
       <div class="sheet-head">
         <strong class="grow">Open sessions</strong>
+        <button class="close-all" title="Close every open session" on:click={closeAllSessions} disabled={loading || chats.length === 0}>Close all</button>
         <button class="x" title="Refresh" on:click={load} disabled={loading}>↻</button>
         <button class="x" title="Close" on:click={() => (open = false)}>×</button>
       </div>
@@ -219,6 +225,8 @@
   }
   .sheet-head { display: flex; gap: 6px; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--border); }
   .sheet-head .x { background: none; border: none; color: var(--text-dim); cursor: pointer; padding: 2px 8px; font-size: 14px; }
+  .close-all { background: none; border: 1px solid var(--border); border-radius: 5px; color: var(--err); cursor: pointer; font-size: 11px; padding: 3px 6px; }
+  .close-all:disabled { cursor: default; opacity: .5; }
   .empty { padding: 16px; color: var(--text-dim); font-size: 12px; }
 
   .row {

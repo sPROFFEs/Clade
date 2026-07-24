@@ -14,7 +14,7 @@ import (
 
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
-	"github.com/sPROFFEs/PrAImate/internal/core"
+	"git.jtsec.local/lab/PrAImate/internal/core"
 )
 
 // SkillsList returns the combined catalogue (built-ins + user-added).

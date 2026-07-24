@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "test:terminal": "node --test src/lib/terminal.test.js"
+    "test:terminal": "node --test src/lib/terminal.test.js",
+    "test:studio": "node --test src/pages/AgentStudio.test.js"
   },
   "dependencies": {
     "@codemirror/lang-json": "^6.0.2",

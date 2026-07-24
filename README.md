@@ -4,6 +4,9 @@
 
 # PrAImate
 
+> Official releases and source updates are published from
+> [sPROFFEs/PrAImate](https://github.com/sPROFFEs/PrAImate).
+
 ```
    .-"-.     ██████╗ ██████╗  █████╗ ██╗███╗   ███╗ █████╗ ████████╗███████╗
   /|6 6|\    ██╔══██╗██╔══██╗██╔══██╗██║████╗ ████║██╔══██╗╚══██╔══╝██╔════╝
@@ -15,13 +18,12 @@
                   one harness, every agent - shared memory & MCP
 ```
 
-PrAImate is a local harness for the coding CLIs already used in the
-team: Claude Code, Codex CLI, OpenCode, Gemini CLI, DeepSeek-TUI, and
-the bundled **PrAImate Code** build. It provides the layer around those
-tools: agents, workflows, memory, MCP configuration, automation, local
-tool management, and optional git-backed backup.
+PrAImate is a local harness for Claude Code, OpenClaude, Codex CLI,
+OpenCode, and the bundled **PrAImate Code** build. It provides the layer
+around those tools: agents, workflows, memory, MCP configuration,
+automation, local tool management, and optional git-backed backup.
 
-The current project version is **1.0.8**.
+The current project version is **1.0.10**.
 
 ## Binaries
 
@@ -32,7 +34,7 @@ Release archives and source builds revolve around four executables:
 | `praimate` | Main TUI, chat/workspace launcher, updater, managed-tool installer, and `praimate code` dispatcher. |
 | `praimate-gui` | Wails/Svelte desktop app launched through `praimate --gui`. Shares the same DB, chats, agents, memory, MCP, and automation as the TUI. |
 | `praimate-code` | Bundled, version-pinned, rebranded OpenCode build. Launched directly or through `praimate code`. |
-| `wpc` | Workpath compiler. Validates and compiles portable workpaths into Claude/Codex/OpenCode/Gemini/Cursor/mika/generic target files. |
+| `wpc` | Workpath compiler. Validates and compiles portable workpaths into Claude/Codex/OpenCode/Cursor/mika/generic target files. |
 
 Both app surfaces use the same local SQLite database at
 `~/.praimate/db.sqlite`.
@@ -76,13 +78,13 @@ Both app surfaces use the same local SQLite database at
 Linux / macOS:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/sPROFFEs/PrAImate/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/sPROFFEs/praimate/main/scripts/install.sh | bash
 ```
 
 Windows PowerShell:
 
 ```powershell
-iwr -useb https://raw.githubusercontent.com/sPROFFEs/PrAImate/main/scripts/install.ps1 | iex
+iwr -useb https://raw.githubusercontent.com/sPROFFEs/praimate/main/scripts/install.ps1 | iex
 ```
 
 The installer resolves the latest GitHub release unless `RELEASE_TAG`
@@ -124,6 +126,9 @@ build needs:
 sudo apt-get install -y npm pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev
 ```
 
+Installers, release downloads, source builds, and `praimate -update`
+resolve from the public GitHub repository using normal OS TLS verification.
+
 ## Quick Start
 
 ```sh
@@ -133,15 +138,7 @@ praimate code           # bundled PrAImate Code CLI
 praimate -check-update  # check GitHub for a newer release
 praimate -update        # self-update installed binaries
 praimate -version       # banner + version
-
-praimate install-tool praimate-code   # download the prebuilt PrAImate Code
-praimate install-tool graphify        # install a managed helper tool
 ```
-
-If `praimate code` can't find PrAImate Code it offers to download the
-prebuilt binary on the spot (about 150 MB, one time). Installs use a
-native downloader — no curl or PowerShell involved — and fall back to a
-guided compile-from-source when no prebuilt exists for your platform.
 
 First run asks for a workspaces root and can seed sample workpaths and
 starter agents. From there:
@@ -171,7 +168,7 @@ scripts/build.sh
 scripts/build.sh --with-gui
 scripts/build.sh --with-code
 scripts/build.sh --with-graphify
-scripts/build.sh --version=1.0.8
+scripts/build.sh --version=1.0.10
 ```
 
 `scripts/build.sh` stamps the version into `praimate`, builds supported
@@ -186,18 +183,6 @@ OUT=dist/$(go env GOOS)-$(go env GOARCH) scripts/build-praimate-code.sh
 
 It requires `bun` and around 8 GB of free scratch space. Set
 `PRAIMATE_BUILD_DIR=/path/on/a/larger/disk` when `/tmp` is too small.
-
-To bump the vendored OpenCode to a newer upstream release while keeping
-the PrAImate rebrand (banner + disabled update advisory), use the
-updater — it re-vendors, verifies the rebrand anchors before building,
-compiles, checks the banner made it into the binary, and can commit,
-push, and upload the release asset:
-
-```sh
-scripts/update-praimate-code.sh                    # bump to latest upstream
-scripts/update-praimate-code.sh v1.17.20           # bump to a specific tag
-scripts/update-praimate-code.sh --push --release   # + commit/push + upload asset
-```
 
 The GUI can also be built directly:
 

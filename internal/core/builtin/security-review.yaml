@@ -42,8 +42,6 @@ supports:
   - codex
   - opencode
   - praimate-code
-  - gemini
-  - deepseek
 
 tools:
   - file_read

@@ -120,8 +120,6 @@ const (
 	AgentOpenClaude AgentID = "openclaude"
 	AgentCodex      AgentID = "codex"
 	AgentOpenCode   AgentID = "opencode"
-	AgentGemini     AgentID = "gemini"
-	AgentDeepSeek   AgentID = "deepseek"
 )
 
 // Action is "install" or "update". Update reuses most install commands,
@@ -1062,85 +1060,8 @@ func allMethods(agent AgentID, action Action, current OS) []Method {
 			return methods
 		}
 
-	case AgentGemini:
-		switch current {
-		case OSMacOS:
-			return []Method{
-				{ID: "brew", Label: "Homebrew formula", Command: formulaCmd(action, "gemini-cli"), Recommended: true},
-				{ID: "pnpm", Label: "pnpm global package", Command: pnpmPkg("@google/gemini-cli"), Prereqs: []string{"node", "pnpm"}},
-			}
-		case OSLinux, OSWSL:
-			return []Method{
-				{ID: "pnpm", Label: "pnpm global package", Command: pnpmPkg("@google/gemini-cli"), Recommended: true, Prereqs: []string{"node", "pnpm"}},
-				{ID: "brew", Label: "Homebrew/Linuxbrew formula", Command: formulaCmd(action, "gemini-cli")},
-			}
-		case OSWindows:
-			return []Method{
-				{ID: "pnpm", Label: "pnpm global package", Command: pnpmPkg("@google/gemini-cli"), Recommended: true, Prereqs: []string{"node", "pnpm"}},
-			}
-		}
-
-	case AgentDeepSeek:
-		// DeepSeek-TUI ships through five channels. We prefer the
-		// native package manager per OS (brew/scoop), fall back to
-		// npm (which works everywhere with Node), and offer cargo
-		// when Rust is available for users who'd rather build.
-		switch current {
-		case OSMacOS:
-			return []Method{
-				{ID: "brew", Label: "Homebrew tap", Command: deepseekBrewCmd(action), Recommended: true},
-				{ID: "pnpm", Label: "pnpm global package", Command: pnpmPkg("deepseek-tui"), Prereqs: []string{"node", "pnpm"}},
-				{ID: "cargo", Label: "cargo install", Command: deepseekCargoCmd(action), Prereqs: []string{"cargo"}},
-			}
-		case OSLinux, OSWSL:
-			return []Method{
-				{ID: "pnpm", Label: "pnpm global package", Command: pnpmPkg("deepseek-tui"), Recommended: true, Prereqs: []string{"node", "pnpm"}},
-				{ID: "cargo", Label: "cargo install", Command: deepseekCargoCmd(action), Prereqs: []string{"cargo"}},
-				// Homebrew on Linux uses the same tap as macOS.
-				{ID: "brew", Label: "Homebrew tap", Command: deepseekBrewCmd(action)},
-			}
-		case OSWindows:
-			return []Method{
-				{ID: "scoop", Label: "Scoop package", Command: deepseekScoopCmd(action), Recommended: true},
-				{ID: "pnpm", Label: "pnpm global package", Command: pnpmPkg("deepseek-tui"), Prereqs: []string{"node", "pnpm"}},
-				{ID: "cargo", Label: "cargo install", Command: deepseekCargoCmd(action), Prereqs: []string{"cargo"}},
-			}
-		}
 	}
 	return nil
-}
-
-// deepseekBrewCmd returns the brew install/upgrade command. The
-// upstream tap is "Hmbown/deepseek-tui"; once tapped, brew refers to
-// it as "deepseek-tui" so install / upgrade only need that name.
-func deepseekBrewCmd(a Action) string {
-	if a == ActionUpdate {
-		// brew refreshes the tap automatically on `upgrade`.
-		return "brew upgrade deepseek-tui"
-	}
-	return "brew tap Hmbown/deepseek-tui && brew install deepseek-tui"
-}
-
-// deepseekScoopCmd returns the scoop install/update command. Scoop
-// uses different verbs from brew/winget so we keep this isolated.
-func deepseekScoopCmd(a Action) string {
-	if a == ActionUpdate {
-		return "scoop update deepseek-tui"
-	}
-	return "scoop install deepseek-tui"
-}
-
-// deepseekCargoCmd installs both crates the project publishes — the
-// dispatcher (deepseek-tui) and the CLI core (deepseek-tui-cli).
-// --locked uses the Cargo.lock that ships with each crate so
-// dependency drift can't break the build mid-install.
-func deepseekCargoCmd(a Action) string {
-	if a == ActionUpdate {
-		// `cargo install --force` re-installs over the existing
-		// binaries, which is how cargo idiomatically does upgrades.
-		return "cargo install --locked --force deepseek-tui-cli && cargo install --locked --force deepseek-tui"
-	}
-	return "cargo install --locked deepseek-tui-cli && cargo install --locked deepseek-tui"
 }
 
 func caskCmd(a Action, name string) string {

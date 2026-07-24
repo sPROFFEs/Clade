@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sPROFFEs/PrAImate/pkg/workpath"
+	"git.jtsec.local/lab/PrAImate/pkg/workpath"
 )
 
 // loadByo loads the shared fixture used by every target test.
@@ -32,7 +32,7 @@ func mustRead(t *testing.T, path string) string {
 }
 
 func TestRegistry_HasAllTargets(t *testing.T) {
-	want := []string{"claude", "codex", "cursor", "gemini", "generic", "mika"}
+	want := []string{"claude", "codex", "cursor", "generic", "mika"}
 	got := Names()
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("Names() = %v, want %v", got, want)
@@ -175,6 +175,7 @@ func TestCodex_EmitsAgentsMD(t *testing.T) {
 }
 
 func TestGemini_EmitsGeminiMD(t *testing.T) {
+	t.Skip("Gemini CLI support has been removed")
 	wp := loadByo(t)
 	out := t.TempDir()
 	tgt, err := Get("gemini")
@@ -234,7 +235,7 @@ func TestTargets_PlatformPairedScriptsAllCopied(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, name := range []string{"claude", "codex", "gemini", "generic", "mika"} {
+	for _, name := range []string{"claude", "codex", "generic", "mika"} {
 		t.Run(name, func(t *testing.T) {
 			out := t.TempDir()
 			tgt, _ := Get(name)
@@ -362,6 +363,7 @@ func TestClaude_StagesKnowledgeAndManifest(t *testing.T) {
 }
 
 func TestGemini_StagesKnowledgeAndManifest(t *testing.T) {
+	t.Skip("Gemini CLI support has been removed")
 	wp := buildKnowledgeWorkpath(t)
 	out := t.TempDir()
 	tgt, _ := Get("gemini")

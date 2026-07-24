@@ -126,7 +126,6 @@ func TestExecAdapter_StdinAdaptersKeepMessageOutOfArgv(t *testing.T) {
 		NewCodexAdapter(),
 		NewOpenCodeAdapter(),
 		NewPraimateCodeAdapter(),
-		NewGeminiAdapter(),
 	}
 	for _, a := range cases {
 		if !a.stdinMsg {
@@ -159,7 +158,6 @@ func TestExecAdapter_ModelFlagShapes(t *testing.T) {
 		{NewCodexAdapter(), []string{"-m", "gpt-5.1-codex", "-"}},
 		{NewOpenCodeAdapter(), []string{"run", "--model", "anthropic/claude-sonnet-4-5"}},
 		{NewPraimateCodeAdapter(), []string{"run", "--model", "anthropic/claude-sonnet-4-5"}},
-		{NewGeminiAdapter(), []string{"-m", "gemini-2.5-pro"}},
 	}
 	for _, tc := range cases {
 		model := tc.want[len(tc.want)-1]
@@ -171,11 +169,6 @@ func TestExecAdapter_ModelFlagShapes(t *testing.T) {
 		if !strings.Contains(got, strings.Join(tc.want, " ")) {
 			t.Errorf("%s: argv %q does not contain %q", tc.adapter.name, got, strings.Join(tc.want, " "))
 		}
-	}
-	// deepseek has no model flag — model must NOT leak into argv.
-	args, _ := NewDeepSeekAdapter().build(buildIn{Message: "msg", Model: "some-model", TmpDir: t.TempDir()})
-	if strings.Contains(strings.Join(args, " "), "some-model") {
-		t.Errorf("deepseek: model leaked into argv: %v", args)
 	}
 }
 
@@ -201,7 +194,7 @@ func TestExecAdapter_ToolsFlagShapes(t *testing.T) {
 	// CLIs without permission flags in their legacy build functions must
 	// not leak the level into argv. OpenCode permission flags are applied
 	// in runOpenCodeJSON, not in build().
-	for _, a := range []*execAdapter{NewOpenCodeAdapter(), NewPraimateCodeAdapter(), NewGeminiAdapter(), NewDeepSeekAdapter()} {
+	for _, a := range []*execAdapter{NewOpenCodeAdapter(), NewPraimateCodeAdapter()} {
 		args, _ := a.build(buildIn{Message: "msg", Tools: "full", TmpDir: t.TempDir()})
 		for _, arg := range args {
 			if arg == "full" || strings.Contains(arg, "dangerously") {
@@ -333,9 +326,9 @@ func TestExecAdapter_ResolvesFromExtraDirs(t *testing.T) {
 	}
 }
 
-func TestRegisterAllCLIAdapters_RegistersSeven(t *testing.T) {
+func TestRegisterAllCLIAdapters_RegistersSupportedCLIs(t *testing.T) {
 	RegisterAllCLIAdapters()
-	for _, name := range []string{"claude", "openclaude", "codex", "opencode", "praimate-code", "gemini", "deepseek"} {
+	for _, name := range []string{"claude", "openclaude", "codex", "opencode", "praimate-code"} {
 		if _, err := GetCLIAdapter(name); err != nil {
 			t.Errorf("adapter %q not registered: %v", name, err)
 		}

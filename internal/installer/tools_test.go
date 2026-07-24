@@ -4,6 +4,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"git.jtsec.local/lab/PrAImate/internal/version"
 )
 
 func TestToolCatalog_GraphifyShape(t *testing.T) {
@@ -56,9 +58,9 @@ func TestToolCatalog_GraphifyBundledMethod(t *testing.T) {
 	if !bundled.Recommended {
 		t.Error("bundled method should be recommended")
 	}
-	// The API URL is the GitHub releases/latest endpoint on api.github.com;
-	// the asset URL is on github.com/<owner>/<repo>/releases/download.
-	if !strings.Contains(bundled.Command, "api.github.com/repos/sPROFFEs/PrAImate/releases/latest") ||
+	// Both release discovery and asset downloads use the canonical GitHub
+	// repository configured by the version package.
+	if !strings.Contains(bundled.Command, version.RepoURL) ||
 		!strings.Contains(bundled.Command, "releases/download/") {
 		t.Errorf("bundled command not a release download: %q", bundled.Command)
 	}

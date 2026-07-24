@@ -17,7 +17,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/sPROFFEs/PrAImate/internal/core"
+	"git.jtsec.local/lab/PrAImate/internal/core"
 )
 
 // AgentFileNode is one entry in the agent's knowledge tree.

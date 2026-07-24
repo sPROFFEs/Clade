@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sPROFFEs/PrAImate/pkg/workpath"
+	"git.jtsec.local/lab/PrAImate/pkg/workpath"
 )
 
 // claudeTarget emits a Claude Code skill bundle.

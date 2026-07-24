@@ -28,12 +28,12 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/sPROFFEs/PrAImate/internal/backup"
-	"github.com/sPROFFEs/PrAImate/internal/installer"
-	"github.com/sPROFFEs/PrAImate/internal/launcher"
-	"github.com/sPROFFEs/PrAImate/internal/ollama"
-	"github.com/sPROFFEs/PrAImate/internal/updater"
-	"github.com/sPROFFEs/PrAImate/internal/version"
+	"git.jtsec.local/lab/PrAImate/internal/backup"
+	"git.jtsec.local/lab/PrAImate/internal/installer"
+	"git.jtsec.local/lab/PrAImate/internal/launcher"
+	"git.jtsec.local/lab/PrAImate/internal/ollama"
+	"git.jtsec.local/lab/PrAImate/internal/updater"
+	"git.jtsec.local/lab/PrAImate/internal/version"
 )
 
 func main() {

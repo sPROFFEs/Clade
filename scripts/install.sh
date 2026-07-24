@@ -2,7 +2,7 @@
 # PrAImate installer for Linux + macOS.
 #
 # One-liner:
-#   curl -fsSL https://raw.githubusercontent.com/sPROFFEs/PrAImate/main/scripts/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/sPROFFEs/praimate/main/scripts/install.sh | bash
 #
 # Or with options (after `-s --` they go to the script, not bash):
 #   curl -fsSL https://… | bash -s -- --source      # build from source
@@ -29,10 +29,9 @@
 
 set -euo pipefail
 
-REPO="sPROFFEs/PrAImate"
-FORGE_URL="https://github.com"
-RAW_REPO_URL="$FORGE_URL/$REPO"
-# GitHub's API lives on api.github.com under /repos/<owner>/<repo>/…
+REPO="sPROFFEs/praimate"
+GITHUB_URL="https://github.com"
+REPO_URL="$GITHUB_URL/$REPO"
 RELEASE_API_URL="https://api.github.com/repos/$REPO/releases/latest"
 SOURCE_BRANCH="main"
 # Release tag to pull assets from. When unset we resolve "latest" via
@@ -74,9 +73,6 @@ EOF
 done
 
 # ---------- uninstall ----------
-# Removes what install.sh created. Without --purge the user's data
-# (config, managed tools, chat DB) stays so a reinstall picks up where
-# they left off.
 do_uninstall() {
   local dests=() d removed=0
   if [[ -n "$PREFIX" ]]; then
@@ -101,7 +97,6 @@ do_uninstall() {
         && { printf '  removed %s\n' "$(dirname "$d")/share/praimate"; removed=1; }
     fi
   done
-  # Desktop integration (Linux; macOS installs create none of these).
   local apps="$HOME/.local/share/applications" desk_dir
   desk_dir="$(command -v xdg-user-dir >/dev/null 2>&1 && xdg-user-dir DESKTOP || echo "$HOME/Desktop")"
   local e
@@ -291,6 +286,75 @@ if [[ ! -w "$DEST" ]]; then
   fi
 fi
 
+# ---------- managed bundle files ----------
+# Every install must reflect the selected bundle exactly. In particular,
+# optional tools may disappear from a later release; leaving their old
+# binaries behind makes the new praimate launch stale companions.
+remove_managed_file() {
+  local path="$1" label="$2"
+  if [[ -e "$path" || -L "$path" ]]; then
+    $SUDO rm -f -- "$path"
+    c_dim "  removed stale $label"
+  fi
+}
+
+graphify_bin() {
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    printf '%s' "$HOME/Library/Application Support/praimate/bin/praimate-graphify"
+  else
+    printf '%s' "${XDG_CONFIG_HOME:-$HOME/.config}/praimate/bin/praimate-graphify"
+  fi
+}
+
+sync_samples() {
+  local bundle="$1" samples_dest
+  samples_dest="$(dirname "$DEST")/share/praimate/samples"
+  if [[ -d "$bundle/samples" ]]; then
+    # This is an installer-managed share directory, not the user's
+    # workspace. Replacing it avoids retaining samples removed upstream.
+    $SUDO rm -rf -- "$samples_dest"
+    $SUDO mkdir -p "$samples_dest"
+    $SUDO cp -R "$bundle/samples/." "$samples_dest/"
+    c_dim "  samples → $samples_dest"
+  else
+    $SUDO rm -rf -- "$samples_dest"
+    c_dim "  removed stale samples"
+  fi
+}
+
+sync_bundle_extras() {
+  local bundle="$1" graphify
+
+  if [[ -f "$bundle/praimate-gui" ]]; then
+    $SUDO install -m 0755 "$bundle/praimate-gui" "$DEST/praimate-gui"
+    c_grn "  praimate-gui installed (launch with: praimate --gui)"
+  else
+    remove_managed_file "$DEST/praimate-gui" "praimate-gui"
+  fi
+
+  if [[ -f "$bundle/praimate-code" ]]; then
+    $SUDO install -m 0755 "$bundle/praimate-code" "$DEST/praimate-code"
+    [[ -f "$bundle/PRAIMATE-CODE-LICENSE" ]] && $SUDO cp "$bundle/PRAIMATE-CODE-LICENSE" "$DEST/"
+    [[ -f "$bundle/PRAIMATE-CODE-NOTICE" ]] && $SUDO cp "$bundle/PRAIMATE-CODE-NOTICE" "$DEST/"
+    c_grn "  praimate-code installed (launch with: praimate code)"
+  else
+    remove_managed_file "$DEST/praimate-code" "praimate-code"
+    remove_managed_file "$DEST/PRAIMATE-CODE-LICENSE" "Praimate Code license"
+    remove_managed_file "$DEST/PRAIMATE-CODE-NOTICE" "Praimate Code notice"
+  fi
+
+  graphify="$(graphify_bin)"
+  if [[ -f "$bundle/praimate-graphify" ]]; then
+    mkdir -p "$(dirname "$graphify")"
+    install -m 0755 "$bundle/praimate-graphify" "$graphify"
+    c_grn "  bundled graphify installed (used for agent RAG indexing)"
+  else
+    remove_managed_file "$graphify" "praimate-graphify"
+  fi
+
+  sync_samples "$bundle"
+}
+
 # ---------- binary path: GitHub release ----------
 detect_downloader() {
   if command -v curl >/dev/null 2>&1; then printf 'curl'
@@ -339,7 +403,7 @@ install_from_release() {
     RELEASE_TAG="$(resolve_latest_tag)"
   fi
   local fname="praimate-${TRIPLET}.tar.gz"
-  local url="$FORGE_URL/$REPO/releases/download/${RELEASE_TAG}/${fname}"
+  local url="$REPO_URL/releases/download/${RELEASE_TAG}/${fname}"
   c_dim "  tag:     $RELEASE_TAG"
   c_dim "  asset:   $fname"
   c_dim "  url:     $url"
@@ -362,50 +426,7 @@ install_from_release() {
   step "Installing to $DEST"
   $SUDO install -m 0755 "$extracted/praimate" "$DEST/praimate"
   $SUDO install -m 0755 "$extracted/wpc"   "$DEST/wpc"
-  # Desktop GUI ships prebuilt in linux-amd64 / windows-amd64 archives.
-  # Install it next to praimate so `praimate --gui` finds it. Absent in
-  # other archives — skip quietly there.
-  if [[ -f "$extracted/praimate-gui" ]]; then
-    $SUDO install -m 0755 "$extracted/praimate-gui" "$DEST/praimate-gui"
-    c_grn "  praimate-gui installed (launch with: praimate --gui)"
-  fi
-  # PrAImate Code (bundled coding CLI). Large (~150MB); only in archives
-  # built with --with-code. Installed next to praimate so `praimate code`
-  # finds it.
-  if [[ -f "$extracted/praimate-code" ]]; then
-    $SUDO install -m 0755 "$extracted/praimate-code" "$DEST/praimate-code"
-    [[ -f "$extracted/PRAIMATE-CODE-LICENSE" ]] && $SUDO cp "$extracted/PRAIMATE-CODE-LICENSE" "$DEST/" 2>/dev/null || true
-    c_grn "  praimate-code installed (launch with: praimate code)"
-  fi
-  # Bundled standalone graphify (when built --with-graphify) goes into
-  # the praimate config bin dir, where ResolveGraphify looks for it first
-  # — our zero-dependency RAG indexing fallback.
-  if [[ -f "$extracted/praimate-graphify" ]]; then
-    local cfgbin
-    if [[ "$(uname -s)" == "Darwin" ]]; then
-      cfgbin="$HOME/Library/Application Support/praimate/bin"
-    else
-      cfgbin="${XDG_CONFIG_HOME:-$HOME/.config}/praimate/bin"
-    fi
-    mkdir -p "$cfgbin"
-    install -m 0755 "$extracted/praimate-graphify" "$cfgbin/praimate-graphify"
-    c_grn "  bundled graphify installed (used for agent RAG indexing)"
-  fi
-  # Ship the bundled samples next to the binary at the XDG-style path
-  # the launcher already probes (see internal/launcher SampleCandidates:
-  # "<execDir>/../share/praimate/samples/workpaths"). Without this, the
-  # first-run "seed example templates" step finds nothing and the user
-  # ends up with no workspaces and no praimate-workspaces dir created.
-  if [[ -d "$extracted/samples" ]]; then
-    local samples_dest
-    samples_dest="$(dirname "$DEST")/share/praimate/samples"
-    $SUDO mkdir -p "$samples_dest"
-    # cp -R preserves the workpaths/ subdir structure the launcher expects.
-    # Use --no-preserve=ownership when running under sudo so the files end
-    # up readable by everyone, not just the invoking user.
-    $SUDO cp -R "$extracted/samples/." "$samples_dest/"
-    c_dim "  samples → $samples_dest"
-  fi
+  sync_bundle_extras "$extracted"
   c_grn "  ✓ praimate + wpc installed"
 }
 
@@ -507,7 +528,7 @@ install_from_source() {
     step "Cloning repo"
     tmp="$(mktemp -d)"
     git clone --depth 1 --branch "$SOURCE_BRANCH" \
-      "${RAW_REPO_URL}.git" "$tmp/PrAImate" \
+      "${REPO_URL}.git" "$tmp/PrAImate" \
       || { c_red "git clone failed"; exit 1; }
     src="$tmp/PrAImate"
   fi
@@ -543,6 +564,11 @@ install_from_source() {
     $SUDO install -m 0755 "$gui_bin" "$DEST/praimate-gui$ext"
     installed="$installed + praimate-gui"
   fi
+  remove_managed_file "$DEST/praimate-code" "praimate-code"
+  remove_managed_file "$DEST/PRAIMATE-CODE-LICENSE" "Praimate Code license"
+  remove_managed_file "$DEST/PRAIMATE-CODE-NOTICE" "Praimate Code notice"
+  remove_managed_file "$(graphify_bin)" "praimate-graphify"
+  sync_samples "$src"
   c_grn "  ✓ $installed installed"
 }
 
@@ -551,18 +577,8 @@ install_local() {
   step "Installing to $DEST"
   $SUDO install -m 0755 "$LOCAL_BINS/praimate" "$DEST/praimate"
   $SUDO install -m 0755 "$LOCAL_BINS/wpc"   "$DEST/wpc"
-  installed="praimate + wpc"
-  if [[ -f "$LOCAL_BINS/praimate-gui" ]]; then
-    $SUDO install -m 0755 "$LOCAL_BINS/praimate-gui" "$DEST/praimate-gui"
-    installed="$installed + praimate-gui"
-  fi
-  if [[ -f "$LOCAL_BINS/praimate-code" ]]; then
-    $SUDO install -m 0755 "$LOCAL_BINS/praimate-code" "$DEST/praimate-code"
-    [[ -f "$LOCAL_BINS/PRAIMATE-CODE-LICENSE" ]] && $SUDO cp "$LOCAL_BINS/PRAIMATE-CODE-LICENSE" "$DEST/" 2>/dev/null || true
-    [[ -f "$LOCAL_BINS/PRAIMATE-CODE-NOTICE" ]] && $SUDO cp "$LOCAL_BINS/PRAIMATE-CODE-NOTICE" "$DEST/" 2>/dev/null || true
-    installed="$installed + praimate-code"
-  fi
-  c_grn "  ✓ $installed installed"
+  sync_bundle_extras "$LOCAL_BINS"
+  c_grn "  ✓ praimate + wpc installed"
 }
 
 # ---------- dispatch ----------
@@ -707,11 +723,6 @@ exec "$__praimate_dir/$__praimate_bin" "$@"
 WRAP
       chmod 755 "$DEST/praimate-launch"
 
-      # praimate-gui-launch is the same script, exec'd via a symlink so
-      # the wrapper resolves its target binary from its own basename
-      # (strip the "-launch" suffix). One script, both binaries.
-      ln -sf praimate-launch "$DEST/praimate-gui-launch"
-
       cat > "$apps/praimate.desktop" <<DESK
 [Desktop Entry]
 Type=Application
@@ -723,6 +734,9 @@ $icon_line
 Categories=Development;Utility;
 DESK
       if [[ -x "$DEST/praimate-gui" ]]; then
+        # praimate-gui-launch is the same script, exec'd via a symlink so
+        # the wrapper resolves its target binary from its own basename.
+        ln -sf praimate-launch "$DEST/praimate-gui-launch"
         cat > "$apps/praimate-gui.desktop" <<DESK
 [Desktop Entry]
 Type=Application
@@ -733,6 +747,8 @@ Terminal=false
 $icon_line
 Categories=Development;Utility;
 DESK
+      else
+        rm -f "$DEST/praimate-gui-launch" "$apps/praimate-gui.desktop"
       fi
       # Both files need the exec bit or Nautilus/GNOME Files renders
       # them as plain text instead of resolving Icon=/Name= — and a
@@ -747,6 +763,9 @@ DESK
       # click → "Allow Launching" before the icon resolves.
       local desk_dir
       desk_dir="$(command -v xdg-user-dir >/dev/null 2>&1 && xdg-user-dir DESKTOP || echo "$HOME/Desktop")"
+      if [[ ! -x "$DEST/praimate-gui" ]]; then
+        rm -f "$desk_dir/praimate-gui.desktop"
+      fi
       if [[ -d "$desk_dir" ]]; then
         for f in praimate.desktop praimate-gui.desktop; do
           [[ -f "$apps/$f" ]] || continue
@@ -780,6 +799,8 @@ DESK
   <key>CFBundlePackageType</key><string>APPL</string>
 </dict></plist>
 PLIST
+      else
+        rm -rf -- "$HOME/Applications/PrAImate GUI.app"
       fi
       c_grn "  shortcuts created in ~/Applications (and Desktop)"
       ;;

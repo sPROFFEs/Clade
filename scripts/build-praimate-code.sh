@@ -22,6 +22,7 @@
 #   OUT=/some/dir scripts/build-praimate-code.sh    # custom output dir
 #   OPENCODE_SRC=/path/to/opencode scripts/build-praimate-code.sh  # source override
 #   OPENCODE_REF=v1.17.4 scripts/build-praimate-code.sh  # clone this ref instead of vendored
+#   PRAIMATE_CODE_TARGET=windows-amd64 scripts/build-praimate-code.sh
 #   BASELINE=1 scripts/build-praimate-code.sh       # no-AVX2 build → praimate-code-baseline
 #
 # BASELINE builds: Bun's default x64 binaries require AVX2; on older
@@ -41,8 +42,15 @@ VENDORED_OPENCODE="$REPO_ROOT/third_party/opencode"
 OPENCODE_REF="${OPENCODE_REF:-}"
 OPENCODE_URL="https://github.com/sst/opencode"
 
-GOOS="$(go env GOOS 2>/dev/null || uname -s | tr '[:upper:]' '[:lower:]')"
-GOARCH="$(go env GOARCH 2>/dev/null || echo amd64)"
+NATIVE_GOOS="$(go env GOOS 2>/dev/null || uname -s | tr '[:upper:]' '[:lower:]')"
+NATIVE_GOARCH="$(go env GOARCH 2>/dev/null || echo amd64)"
+TARGET="${PRAIMATE_CODE_TARGET:-$NATIVE_GOOS-$NATIVE_GOARCH}"
+GOOS="${TARGET%-*}"
+GOARCH="${TARGET#*-}"
+case "$GOOS-$GOARCH" in
+  linux-amd64|linux-arm64|darwin-amd64|darwin-arm64|windows-amd64|windows-arm64) ;;
+  *) echo "error: unsupported PRAIMATE_CODE_TARGET: $TARGET" >&2; exit 2 ;;
+esac
 OUT="${OUT:-$REPO_ROOT/dist/$GOOS-$GOARCH}"
 EXT=""
 [ "$GOOS" = "windows" ] && EXT=".exe"
@@ -105,6 +113,32 @@ else
   exit 1
 fi
 
+# The vendored app/public directory is expected to contain copies of the
+# shared UI favicon and social-preview assets. Some archive tools preserve
+# their contents as malformed symlinks, which makes Vite fail while copying
+# its public directory. Restore them in the disposable build copy from the
+# canonical assets already vendored alongside the app.
+restore_app_public_assets() {
+  local public="$SRC/packages/app/public"
+  local favicon="$SRC/packages/ui/src/assets/favicon"
+  local images="$SRC/packages/ui/src/assets/images"
+  local asset
+
+  for asset in \
+    apple-touch-icon-v3.png apple-touch-icon.png \
+    favicon-96x96-v3.png favicon-96x96.png \
+    favicon-v3.ico favicon-v3.svg favicon.ico favicon.svg \
+    site.webmanifest web-app-manifest-192x192.png web-app-manifest-512x512.png
+  do
+    install -m 0644 "$favicon/$asset" "$public/$asset"
+  done
+  for asset in social-share.png social-share-zen.png; do
+    install -m 0644 "$images/$asset" "$public/$asset"
+  done
+}
+
+restore_app_public_assets
+
 echo "→ bun install (this is the heavy step)"
 ( cd "$SRC" && bun install )
 
@@ -120,21 +154,21 @@ bash "$REPO_ROOT/scripts/praimate-code-rebrand.sh" "$SRC" || {
 }
 
 BASELINE="${BASELINE:-0}"
-BUILD_FLAGS="--single"
+BUILD_FLAGS="--single --target=$GOOS-$GOARCH"
 OUTNAME="praimate-code$EXT"
 if [ "$BASELINE" = 1 ]; then
-  BUILD_FLAGS="--single --baseline"
+  BUILD_FLAGS="--single --target=$GOOS-$GOARCH --baseline"
   OUTNAME="praimate-code-baseline$EXT"
 fi
 
 if [ "$BASELINE" = 1 ]; then
-  echo "→ building standalone binary (native target, baseline/no-AVX2 variant)"
+  echo "→ building standalone binary ($GOOS-$GOARCH, baseline/no-AVX2 variant)"
 else
-  echo "→ building standalone binary (native target only)"
+  echo "→ building standalone binary ($GOOS-$GOARCH)"
 fi
-# --single restricts build.ts to the current platform, so it doesn't
+# --single restricts build.ts to the selected platform, so it doesn't
 # download a Bun runtime for every OS/arch (which is slow and fragile
-# over the network). We cross-build other targets in separate runs.
+# over the network). Targets are built in separate runs.
 # With --baseline build.ts emits BOTH the default and the -baseline
 # target for this platform; the find below picks the right one.
 ( cd "$SRC/packages/opencode" && bun run build $BUILD_FLAGS )

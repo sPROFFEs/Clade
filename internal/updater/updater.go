@@ -23,7 +23,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sPROFFEs/PrAImate/internal/version"
+	"git.jtsec.local/lab/PrAImate/internal/version"
 )
 
 // Release is the slice of the GitHub /releases/latest payload we need.
@@ -46,8 +46,7 @@ type Asset struct {
 var httpClient = &http.Client{Timeout: 60 * time.Second}
 
 // LatestURL is the GitHub API endpoint queried for the most recent
-// release of the configured repo. Note the api.github.com host — GitHub
-// keeps its API on a separate hostname from the browser web UI.
+// release of the configured repo.
 func LatestURL() string {
 	return version.ReleaseLatestAPIURL
 }
@@ -60,7 +59,7 @@ func FetchLatest() (*Release, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", "praimate-updater/"+version.Current)
 
 	resp, err := httpClient.Do(req)

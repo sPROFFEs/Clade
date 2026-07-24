@@ -12,8 +12,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/sPROFFEs/PrAImate/internal/launcher"
-	"github.com/sPROFFEs/PrAImate/internal/ollama"
+	"git.jtsec.local/lab/PrAImate/internal/launcher"
+	"git.jtsec.local/lab/PrAImate/internal/ollama"
 )
 
 // TestOllamaFlow_FullWizardWritesPerChatClaudeSettings: drives every step

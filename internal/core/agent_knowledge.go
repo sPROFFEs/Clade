@@ -55,6 +55,56 @@ func AgentKnowledgeDir(id string) (string, error) {
 	return filepath.Join(dir, "knowledge"), nil
 }
 
+// AgentRequirementsDir holds scripts included with an agent pack. Scripts are
+// kept separate from knowledge so they never become RAG input.
+func AgentRequirementsDir(id string) (string, error) {
+	dir, err := AgentDir(id)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "requirements"), nil
+}
+
+func requirementsScriptPath(id, name string) (string, error) {
+	if name == "" || filepath.Base(name) != name || strings.ContainsAny(name, `/\\`) {
+		return "", fmt.Errorf("requirements script must be a filename")
+	}
+	dir, err := AgentRequirementsDir(id)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, name), nil
+}
+
+// AgentRequirementsScriptPath resolves a validated script name to the
+// agent-managed requirements directory.
+func AgentRequirementsScriptPath(id, name string) (string, error) {
+	return requirementsScriptPath(id, name)
+}
+
+// WriteAgentRequirementsScript stores a picked setup script under the
+// agent-managed directory so it can be packaged on export.
+func WriteAgentRequirementsScript(id, name string, body []byte) error {
+	path, err := requirementsScriptPath(id, name)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, body, 0o700)
+}
+
+// ReadAgentRequirementsScript returns a script only from the agent-managed
+// requirements directory; callers cannot supply a path outside it.
+func ReadAgentRequirementsScript(id, name string) ([]byte, error) {
+	path, err := requirementsScriptPath(id, name)
+	if err != nil {
+		return nil, err
+	}
+	return os.ReadFile(path)
+}
+
 // WriteAgentYAMLToDisk renders the agent as YAML into <AgentDir>/agent.yaml
 // so the studio's helper CLI can read + edit it as a regular file. Used
 // at helper-chat launch; the file is the helper's source of truth for the
@@ -285,6 +335,33 @@ func (c *Core) ExportAgentPack(ctx context.Context, id, path string) error {
 			return cerr
 		})
 	}
+	requirementsDir, err := AgentRequirementsDir(id)
+	if err == nil {
+		if walkErr := filepath.WalkDir(requirementsDir, func(p string, d fs.DirEntry, werr error) error {
+			if werr != nil || d.IsDir() {
+				return nil
+			}
+			rel, rerr := filepath.Rel(requirementsDir, p)
+			if rerr != nil {
+				return nil
+			}
+			zf, zerr := zw.Create("requirements/" + filepath.ToSlash(rel))
+			if zerr != nil {
+				return zerr
+			}
+			in, oerr := os.Open(p)
+			if oerr != nil {
+				return oerr
+			}
+			defer in.Close()
+			_, cerr := io.Copy(zf, in)
+			return cerr
+		}); walkErr != nil && !os.IsNotExist(walkErr) {
+			_ = zw.Close()
+			_ = f.Close()
+			return fmt.Errorf("write requirements pack files: %w", walkErr)
+		}
+	}
 	if err := zw.Close(); err != nil {
 		_ = f.Close()
 		return err
@@ -292,10 +369,14 @@ func (c *Core) ExportAgentPack(ctx context.Context, id, path string) error {
 	return f.Close()
 }
 
-// ImportAgentPack imports a .praimate-agent zip: validates and upserts
-// agent.yaml, then REPLACES the agent's knowledge folder with the
-// pack's knowledge/** contents (zip-slip guarded).
+// ImportAgentPack imports a .praimate-agent zip. The pack is fully parsed and
+// extracted into a sibling staging directory before either the database or the
+// live agent folders are touched. Once validation succeeds, knowledge and
+// requirements are swapped with rollback protection and the agent is upserted.
 func (c *Core) ImportAgentPack(ctx context.Context, path string) (*Agent, error) {
+	if c.store == nil {
+		return nil, fmt.Errorf("ImportAgentPack: no store configured")
+	}
 	zr, err := zip.OpenReader(path)
 	if err != nil {
 		return nil, fmt.Errorf("open pack: %w", err)
@@ -321,39 +402,52 @@ func (c *Core) ImportAgentPack(ctx context.Context, path string) (*Agent, error)
 	if err != nil {
 		return nil, err
 	}
-	agent, err := c.ImportAgentYAML(ctx, body, "")
+	agent, err := ParseAgentYAML(strings.NewReader(string(body)))
 	if err != nil {
 		return nil, err
 	}
 
-	dir, err := AgentKnowledgeDir(agent.ID)
+	agentDir, err := AgentDir(agent.ID)
 	if err != nil {
-		return agent, err
+		return nil, err
 	}
-	// Replace, don't merge — the pack is the source of truth.
-	if err := os.RemoveAll(dir); err != nil {
-		return agent, err
+	parentDir := filepath.Dir(agentDir)
+	if err := os.MkdirAll(parentDir, 0o755); err != nil {
+		return nil, err
 	}
+	stageDir, err := os.MkdirTemp(parentDir, "."+filepath.Base(agentDir)+"-import-*")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(stageDir)
+
+	// Extract everything before replacing live data. A malformed entry, CRC
+	// failure, or short read therefore leaves the existing agent untouched.
 	for _, zf := range zr.File {
-		rel, ok := strings.CutPrefix(zf.Name, "knowledge/")
-		if !ok || rel == "" || strings.HasSuffix(zf.Name, "/") {
+		root, rel, ok := strings.Cut(zf.Name, "/")
+		if !ok || (root != "knowledge" && root != "requirements") || rel == "" || strings.HasSuffix(zf.Name, "/") {
 			continue
 		}
-		dst := filepath.Join(dir, filepath.FromSlash(rel))
-		if r, rerr := filepath.Rel(dir, dst); rerr != nil || strings.HasPrefix(r, "..") {
-			return agent, fmt.Errorf("pack entry %q escapes the knowledge folder", zf.Name)
+		targetDir := filepath.Join(stageDir, root)
+		dst := filepath.Join(targetDir, filepath.FromSlash(rel))
+		if r, rerr := filepath.Rel(targetDir, dst); rerr != nil || r == ".." || strings.HasPrefix(r, ".."+string(filepath.Separator)) {
+			return nil, fmt.Errorf("pack entry %q escapes the %s folder", zf.Name, root)
 		}
 		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-			return agent, err
+			return nil, err
 		}
 		in, oerr := zf.Open()
 		if oerr != nil {
-			return agent, oerr
+			return nil, oerr
 		}
-		out, cerr := os.Create(dst)
+		mode := os.FileMode(0o644)
+		if root == "requirements" {
+			mode = 0o700
+		}
+		out, cerr := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
 		if cerr != nil {
 			_ = in.Close()
-			return agent, cerr
+			return nil, cerr
 		}
 		_, err = io.Copy(out, in)
 		_ = in.Close()
@@ -361,10 +455,73 @@ func (c *Core) ImportAgentPack(ctx context.Context, path string) (*Agent, error)
 			err = cerr
 		}
 		if err != nil {
-			return agent, err
+			return nil, err
 		}
 	}
-	return agent, nil
+
+	type swap struct {
+		live   string
+		staged string
+		backup string
+		hadOld bool
+		moved  bool
+	}
+	swaps := []swap{
+		{
+			live:   filepath.Join(agentDir, "knowledge"),
+			staged: filepath.Join(stageDir, "knowledge"),
+			backup: filepath.Join(stageDir, ".backup-knowledge"),
+		},
+		{
+			live:   filepath.Join(agentDir, "requirements"),
+			staged: filepath.Join(stageDir, "requirements"),
+			backup: filepath.Join(stageDir, ".backup-requirements"),
+		},
+	}
+	if err := os.MkdirAll(agentDir, 0o755); err != nil {
+		return nil, err
+	}
+	rollback := func() {
+		for i := len(swaps) - 1; i >= 0; i-- {
+			s := &swaps[i]
+			if s.moved {
+				_ = os.RemoveAll(s.live)
+			}
+			if s.hadOld {
+				_ = os.Rename(s.backup, s.live)
+			}
+		}
+	}
+	for i := range swaps {
+		s := &swaps[i]
+		if _, statErr := os.Stat(s.live); statErr == nil {
+			if err := os.Rename(s.live, s.backup); err != nil {
+				rollback()
+				return nil, err
+			}
+			s.hadOld = true
+		} else if !os.IsNotExist(statErr) {
+			rollback()
+			return nil, statErr
+		}
+		if _, statErr := os.Stat(s.staged); statErr == nil {
+			if err := os.Rename(s.staged, s.live); err != nil {
+				rollback()
+				return nil, err
+			}
+			s.moved = true
+		} else if !os.IsNotExist(statErr) {
+			rollback()
+			return nil, statErr
+		}
+	}
+
+	stored, err := c.upsertAgent(ctx, agent)
+	if err != nil {
+		rollback()
+		return nil, err
+	}
+	return stored, nil
 }
 
 // ImportAgentAuto imports either format by extension: .praimate-agent

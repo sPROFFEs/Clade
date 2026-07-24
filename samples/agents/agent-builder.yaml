@@ -18,7 +18,7 @@ instructions: |
   - instructions: the system prompt the agent runs under. Write it in
     the second person ("You are..."), concrete and scoped.
   - supports: the list of third-party CLIs the agent can run on. Valid
-    values: claude, codex, opencode, openclaude, gemini, deepseek.
+    values: claude, codex, opencode, openclaude, praimate-code.
     Only list CLIs whose capabilities the instructions actually need.
   - tools: optional advisory list (file_read, file_write, file_edit,
     file_search, shell_run, git). Unsupported tools are dropped per-CLI.
@@ -76,8 +76,6 @@ supports:
   - codex
   - opencode
   - praimate-code
-  - gemini
-  - deepseek
 
 workflows:
   - name: Build an agent

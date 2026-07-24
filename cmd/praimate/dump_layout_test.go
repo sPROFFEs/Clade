@@ -7,7 +7,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/sPROFFEs/PrAImate/internal/launcher"
+	"git.jtsec.local/lab/PrAImate/internal/launcher"
 )
 
 func TestDumpLayout(t *testing.T) {

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sPROFFEs/PrAImate/pkg/workpath"
+	"git.jtsec.local/lab/PrAImate/pkg/workpath"
 )
 
 // samplesDir returns the absolute path to the repo's bundled samples,

@@ -6,8 +6,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/sPROFFEs/PrAImate/internal/core"
-	"github.com/sPROFFEs/PrAImate/internal/launcher"
+	"git.jtsec.local/lab/PrAImate/internal/core"
+	"git.jtsec.local/lab/PrAImate/internal/launcher"
 )
 
 // fakeCfg is the bare minimum Config the recipes screen needs. The TUI

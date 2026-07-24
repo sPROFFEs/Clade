@@ -8,8 +8,8 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/sPROFFEs/PrAImate/internal/core"
-	"github.com/sPROFFEs/PrAImate/internal/launcher"
+	"git.jtsec.local/lab/PrAImate/internal/core"
+	"git.jtsec.local/lab/PrAImate/internal/launcher"
 )
 
 type mcpTab int

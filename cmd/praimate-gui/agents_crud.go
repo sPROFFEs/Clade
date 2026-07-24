@@ -8,7 +8,7 @@ package main
 import (
 	"strings"
 
-	"github.com/sPROFFEs/PrAImate/internal/core"
+	"git.jtsec.local/lab/PrAImate/internal/core"
 )
 
 // AgentYAML returns the canonical YAML for an agent, for the editor.
@@ -76,5 +76,13 @@ surfaces:
 # Optional: MCP servers (by id from the MCP tab) and scripted workflows.
 mcp_servers: []
 workflows: []
+
+# Optional environment setup script. Attach it from the Agent Studio after
+# saving; it travels inside .praimate-agent packs and recipients must click
+# "Run requirements script" explicitly after import.
+# requirements:
+#   os: linux # linux, darwin, or windows
+#   script: setup.sh
+#   instructions: Install Docker before continuing.
 `, "\n")
 }

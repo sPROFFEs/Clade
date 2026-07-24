@@ -7,6 +7,10 @@
 The complete manual. For the short version (install + quick start),
 see the [README](../README.md).
 
+Gemini and DeepSeek references below document compatibility with legacy
+persisted chats only. They are no longer offered in the selectable CLI catalog;
+new chats use Claude Code, OpenClaude, Codex, OpenCode, or PrAImate Code.
+
 - [Surfaces](#surfaces)
 - [Updating](#updating)
 - [First run](#first-run)
@@ -42,7 +46,7 @@ Launch the GUI with `praimate --gui` — the TUI binary finds the
 `praimate-gui` binary shipped next to it (or on PATH) and starts it.
 
 Release archives include the prebuilt GUI for **linux-amd64** and
-**windows-amd64** (Windows needs no extra runtime — WebView2 is
+**Windows amd64/arm64** (Windows needs no extra runtime — WebView2 is
 system-provided on Windows 10+; Linux needs the `webkit2gtk-4.1`
 runtime package). linux-arm64 and macOS archives ship the TUI only
 because the GUI is cgo + webkit there and can't be cross-compiled;
@@ -61,7 +65,7 @@ praimate -update             # download + install the latest release (prompts y/
 praimate -update -y          # same, non-interactive (for CI / scripts)
 ```
 
-The updater queries `api.github.com/repos/sPROFFEs/PrAImate/releases/latest`,
+The updater queries `api.github.com/repos/sPROFFEs/praimate/releases/latest`,
 picks the archive whose name matches your OS+arch
 (`praimate-<os>-<arch>.{tar.gz,zip}`), extracts just the `praimate` binary,
 and swaps it in place of the running executable. Sibling binaries
@@ -70,6 +74,8 @@ refreshed too when you have them installed. On Windows the previous
 binary is preserved as `praimate.exe.old` (a running `.exe` can be
 renamed but not deleted); the next update cleans it up.
 
+The updater and installers use normal TLS verification when connecting
+to GitHub.
 
 ## First run
 
@@ -801,7 +807,7 @@ returns:
 
 Optional, off by default. When enabled, the workspaces root becomes a
 git repository whose history mirrors your chats and templates across
-machines. No GitHub REST API calls — pure git protocol over
+machines. No GitHub / Gitea REST API calls — pure git protocol over
 HTTPS or SSH, using the credentials your `git` client already has.
 
 ### Three ways to start

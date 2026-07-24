@@ -15,7 +15,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/sPROFFEs/PrAImate/internal/version"
+	"git.jtsec.local/lab/PrAImate/internal/version"
 )
 
 // Tracked state captured from the most recent tea.WindowSizeMsg. Package

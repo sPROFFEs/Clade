@@ -20,6 +20,10 @@
   let error = ''
   let notice = ''
 
+  function dismissError() {
+    error = ''
+  }
+
   // --- agent identity / new-agent name prompt ---
   // Read the store SYNCHRONOUSLY at init so the name prompt is the very
   // first thing painted for a new agent — no flash of the empty editor.
@@ -49,8 +53,6 @@
     { id: 'code', label: 'Code-only (AST, no docs)' },
     { id: 'openai', label: 'OpenAI (key)' },
     { id: 'claude', label: 'Claude API (key)' },
-    { id: 'gemini', label: 'Gemini (key)' },
-    { id: 'deepseek', label: 'DeepSeek (key)' },
   ]
   let ragBackend = 'claude-cli'
   let ragKey = ''
@@ -71,7 +73,14 @@
   let ragElapsed = 0
   let ragStart = 0
   let ragTimer = null
+  let ragStopping = false
   let unsubInstall = () => {}
+
+  // --- optional environment requirements script ---
+  let requirementsOS = 'linux'
+  let requirementsInstructions = ''
+  let requirementsScript = ''
+  let requirementsBusy = false
 
   // --- helper chat (right) ---
   let helperChatId = ''
@@ -126,7 +135,7 @@
   const langOf = fileLang
   async function revealKnowledgeFolder() {
     if (!agentId) return
-    try { await api.openAgentKnowledgeFolder(agentId) } catch (e) { error = String(e) }
+    try { await api.openAgentKnowledgeFolder(agentId); dismissError() } catch (e) { error = String(e) }
   }
 
   // --- load everything for an agent id ---
@@ -139,6 +148,9 @@
       const defYaml = await api.agentYAML(id)
       const a = (await api.listAgents())?.find((x) => x.id === id)
       agentName = a?.name || id
+      requirementsOS = a?.requirements?.os || 'linux'
+      requirementsInstructions = a?.requirements?.instructions || ''
+      requirementsScript = a?.requirements?.script || ''
       tabs = [{ key: DEF, label: 'agent.yaml', lang: 'yaml', content: defYaml, dirty: false, ref: null, isDef: true }]
       active = DEF
       await refreshTree()
@@ -194,6 +206,7 @@
       active = rel
       await tick()
       tabs.find((t) => t.key === rel)?.ref?.setExternal(content)
+      dismissError()
     } catch (e) { error = String(e) }
   }
   function closeTab(key) {
@@ -230,6 +243,7 @@
           await api.agentWriteKnowledgeFile(agentId, t.key, body)
         }
         t.dirty = false
+        dismissError()
       } catch (e) { error = String(e) }
     }
     tabs = tabs
@@ -256,6 +270,7 @@
       const c = await api.startAgentHelperChat(helperCli, helperModel, helperCwd, agentId)
       helperChatId = c.ID
       helperCwd = c.WorkspacePath || helperCwd
+      dismissError()
     } catch (e) {
       error = String(e)
     }
@@ -274,6 +289,7 @@
         tabs = tabs
         notice = 'Reloaded agent.yaml from disk'
       }
+      dismissError()
     } catch (e) { error = String(e) }
   }
   async function saveActive() {
@@ -296,6 +312,7 @@
       }
       t.dirty = false
       tabs = tabs
+      dismissError()
     } catch (e) { error = String(e) }
   }
 
@@ -311,11 +328,12 @@
       const d = tabs.find((t) => t.isDef)
       if (d) { d.content = y; d.dirty = false; d.ref?.setExternal(y); tabs = tabs }
       await loadKnowledge()
+      dismissError()
     } catch (e) { error = String(e) }
   }
   async function enableKnow() {
     if (!agentId) return
-    try { await api.enableAgentKnowledge(agentId); await refreshTree(); await loadKnowledge() }
+    try { await api.enableAgentKnowledge(agentId); await refreshTree(); await loadKnowledge(); dismissError() }
     catch (e) { error = String(e) }
   }
   async function addKnowFiles(folder) {
@@ -324,6 +342,7 @@
       if (!know?.exists) await api.enableAgentKnowledge(agentId)
       folder ? await api.pickAgentKnowledgeFolder(agentId) : await api.pickAgentKnowledgeFiles(agentId)
       await refreshTree(); await loadKnowledge()
+      dismissError()
     } catch (e) { error = String(e) }
   }
   async function newFilePrompt() {
@@ -334,6 +353,7 @@
       const rel = await api.agentCreateKnowledgeFile(agentId, name)
       await refreshTree(); await loadKnowledge()
       await openFile(rel)
+      dismissError()
     } catch (e) { error = String(e) }
   }
   async function renameFile(rel) {
@@ -347,6 +367,7 @@
       if (t) { t.key = dst; t.label = dst.split('/').pop(); t.lang = langOf(dst); tabs = tabs }
       if (active === rel) active = dst
       await refreshTree(); await loadKnowledge()
+      dismissError()
     } catch (e) { error = String(e) }
   }
   async function rmFile(rel) {
@@ -354,24 +375,58 @@
       await api.deleteAgentKnowledgeFile(agentId, rel)
       closeTab(rel)
       await refreshTree(); await loadKnowledge()
+      dismissError()
     } catch (e) { error = String(e) }
   }
   async function installGraphify() {
     if (knowBusy) return
     knowBusy = true
-    try { await api.installBundledGraphify(); notice = 'graphify installed.'; await loadKnowledge() }
+    try { await api.installBundledGraphify(); notice = 'graphify installed.'; await loadKnowledge(); dismissError() }
     catch (e) { error = String(e) } finally { knowBusy = false }
   }
   async function buildRAG() {
     if (!agentId || ragRunning) return
-    ragRunning = true; ragLog = []; ragElapsed = 0; ragStart = Date.now(); error = ''
+    ragRunning = true; ragStopping = false; ragLog = []; ragElapsed = 0; ragStart = Date.now(); error = ''
     ragTimer = setInterval(() => { ragElapsed = (Date.now() - ragStart) / 1000 }, 200)
     try {
       await api.buildAgentRAG(agentId, ragBackend, ragKey, ragModel)
       notice = 'RAG index built.'
       await refreshTree(); await loadKnowledge()
-    } catch (e) { error = 'RAG build failed: ' + String(e) }
+      dismissError()
+    } catch (e) {
+      if (ragStopping) notice = 'RAG indexing stopped.'
+      else error = 'RAG build failed: ' + String(e)
+    }
     finally { ragRunning = false; if (ragTimer) { clearInterval(ragTimer); ragTimer = null } }
+  }
+  async function pickRequirementsScript() {
+    if (!agentId || requirementsBusy) return
+    requirementsBusy = true
+    try {
+      const saved = await api.pickAgentRequirementsScript(agentId, requirementsOS, requirementsInstructions)
+      requirementsOS = saved.requirements?.os || requirementsOS
+      requirementsInstructions = saved.requirements?.instructions || ''
+      requirementsScript = saved.requirements?.script || ''
+      const yaml = await api.agentYAML(agentId)
+      const def = tabs.find((t) => t.isDef)
+      if (def) { def.content = yaml; def.dirty = false; def.ref?.setExternal(yaml); tabs = tabs }
+      notice = `Requirements script ${requirementsScript} attached.`
+      dismissError()
+    } catch (e) { error = String(e) }
+    finally { requirementsBusy = false }
+  }
+  async function stopRAG() {
+    if (!agentId || !ragRunning || ragStopping) return
+    ragStopping = true
+    try { await api.cancelAgentRAG(agentId) }
+    catch (e) { ragStopping = false; error = String(e) }
+  }
+  async function copyRAGLog() {
+    try {
+      await navigator.clipboard.writeText(ragLog.join('\n'))
+      notice = 'RAG log copied.'
+      dismissError()
+    } catch (e) { error = 'Could not copy RAG log: ' + String(e) }
   }
 
   // --- right-click ask menu → routes to the authoring assistant ---
@@ -539,7 +594,7 @@
     unsubApproval = onApproval(handleApproval)
     if (typeof window !== 'undefined' && window.runtime?.EventsOn) {
       window.runtime.EventsOn('praimate:install', (ev) => {
-        if (ev && ev.cli === 'graphify:' + agentId) ragLog = [...ragLog.slice(-800), ev.line]
+        if (ev && ev.cli === 'graphify:' + agentId) ragLog = [...ragLog, ev.line]
       })
       unsubInstall = () => window.runtime.EventsOff('praimate:install')
     }
@@ -556,7 +611,12 @@
     <div class="name-card">
       <h2>Name your agent</h2>
       <p class="sub">A folder is created under your praimate config and the template is loaded with this name.</p>
-      {#if error}<div class="banner">{error}</div>{/if}
+      {#if error}
+        <div class="banner error-banner" role="alert">
+          <span>{error}</span>
+          <button class="error-close" title="Cerrar error" aria-label="Cerrar error" on:click={dismissError}>×</button>
+        </div>
+      {/if}
       <input class="field" placeholder="e.g. Code Review" bind:value={newName} on:keydown={(e) => e.key === 'Enter' && createNamed()} autofocus />
       <div class="row2" style="margin-top:14px; justify-content:flex-end">
         <button class="btn" on:click={close}>Cancel</button>
@@ -649,7 +709,7 @@
               The local endpoint must serve this model under its OpenAI-compatible API. Without an explicit name, graphify defaults to an OpenAI model and your local server returns 404.
             </div>
           {/if}
-          <button class="btn sm primary" disabled={ragRunning} on:click={buildRAG}>{ragRunning ? 'Indexing…' : (know.hasIndex ? 'Re-index' : 'Build RAG index')}</button>
+          <button class="btn sm primary" on:click={ragRunning ? stopRAG : buildRAG} disabled={ragStopping}>{ragRunning ? (ragStopping ? 'Stopping…' : 'Stop indexing') : (know.hasIndex ? 'Re-index' : 'Build RAG index')}</button>
           {#if ragRunning || ragLog.length}
             <div class="rag-bar" class:run={ragRunning}><div class="rag-fill"></div></div>
             <div class="rag-meta">
@@ -657,6 +717,7 @@
               {:else if know.hasIndex}✓ index ready ({ragElapsed.toFixed(1)}s)
               {:else}done ({ragElapsed.toFixed(1)}s){/if}
             </div>
+            <div class="rag-log-head"><span>Graphify log</span><button class="btn sm" on:click={copyRAGLog} disabled={ragLog.length === 0}>Copy log</button></div>
             <pre class="rag-log">{ragLog.join('\n') || '(waiting for graphify output…)'}</pre>
           {:else if know.hasIndex}
             <div class="hint" style="color:var(--ok)">✓ RAG index present (see graphify-out above).</div>
@@ -667,6 +728,20 @@
       {:else}
         <div class="hint">Pick Raw (read files directly) or RAG (graphify-indexed retrieval) to give this agent a knowledge base.</div>
       {/if}
+      {/if}
+    </div>
+
+    <div class="kctl requirements">
+      <div class="lbl2">Environment requirements</div>
+      {#if !agentId}
+        <div class="hint">Save the new agent first to attach an optional setup script.</div>
+      {:else}
+        <div class="hint">This script is packed with the agent but never runs on import. The recipient must explicitly run it from the Agents page.</div>
+        <select class="field sm" bind:value={requirementsOS} disabled={requirementsBusy}>
+          <option value="linux">Linux</option><option value="darwin">macOS</option><option value="windows">Windows</option>
+        </select>
+        <textarea class="field sm" rows="3" placeholder="Additional instructions shown after the script runs" bind:value={requirementsInstructions} disabled={requirementsBusy}></textarea>
+        <button class="btn sm" on:click={pickRequirementsScript} disabled={requirementsBusy}>{requirementsBusy ? 'Attaching…' : requirementsScript ? `Replace ${requirementsScript}` : 'Attach requirements script…'}</button>
       {/if}
     </div>
   </aside>
@@ -694,7 +769,12 @@
       <button class="xbtn" title="Close all tabs" on:click={closeAllTabs} disabled={tabs.length < 2}>✕</button>
       <button class="btn primary" on:click={saveActive}>{activeTab?.isDef ? 'Save agent' : 'Save file'}</button>
     </div>
-    {#if error}<div class="banner">{error}</div>{/if}
+    {#if error}
+      <div class="banner error-banner" role="alert">
+        <span>{error}</span>
+        <button class="error-close" title="Cerrar error" aria-label="Cerrar error" on:click={dismissError}>×</button>
+      </div>
+    {/if}
     {#if notice}<div class="note">{notice}</div>{/if}
     <div class="editor-stack">
       {#each tabs as t (t.key)}
@@ -815,6 +895,8 @@
   .rag-bar.run .rag-fill { width: 35%; animation: slide 1.1s ease-in-out infinite; opacity: 0.85; }
   @keyframes slide { 0% { left: -35%; } 100% { left: 100%; } }
   .rag-meta { font-size: 11px; color: var(--text-dim); }
+  .rag-log-head { display: flex; align-items: center; justify-content: space-between; color: var(--text-dim); font-size: 11px; }
+  .rag-log-head .btn { margin: 0; padding: 3px 7px; }
   .spin { display: inline-block; animation: spin 1s steps(8) infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   /* The log fills the remaining vertical space so it's readable. */
@@ -846,6 +928,8 @@
   .editor-stack { flex: 1; min-height: 0; display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
   .editor-host { flex: 1; min-height: 0; display: flex; flex-direction: column; }
   .editor-host :global(.cm-host) { flex: 1; }
+  .error-banner { display: flex; align-items: center; gap: 10px; justify-content: space-between; }
+  .error-close { background: transparent; border: 0; color: currentColor; cursor: pointer; font-size: 18px; line-height: 1; padding: 0 2px; }
   .note { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; font-size: 12px; color: var(--text-dim); margin-bottom: 6px; }
 
   /* RIGHT */

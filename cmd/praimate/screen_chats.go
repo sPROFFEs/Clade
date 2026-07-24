@@ -12,7 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/sPROFFEs/PrAImate/internal/launcher"
+	"git.jtsec.local/lab/PrAImate/internal/launcher"
 )
 
 type chatListModel struct {

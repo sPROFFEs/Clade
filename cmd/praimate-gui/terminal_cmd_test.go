@@ -17,7 +17,6 @@ func TestTerminalResumeCommand(t *testing.T) {
 		{"opencode", "", "opencode", []string{"--continue"}, true},
 		{"claude", "sonnet", "claude", []string{"--model", "sonnet", "--continue"}, true},
 		{"codex", "gpt-5", "codex", []string{"resume", "--last", "--model", "gpt-5"}, true},
-		{"gemini", "gemini-2.5-pro", "gemini", []string{"-m", "gemini-2.5-pro"}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.cli, func(t *testing.T) {

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sPROFFEs/PrAImate/pkg/workpath"
+	"git.jtsec.local/lab/PrAImate/pkg/workpath"
 )
 
 // mikaTarget emits a mika-code workpath, the layout described in

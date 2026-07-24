@@ -31,9 +31,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/sPROFFEs/PrAImate/internal/installer"
-	"github.com/sPROFFEs/PrAImate/internal/launcher"
-	"github.com/sPROFFEs/PrAImate/pkg/workpath"
+	"git.jtsec.local/lab/PrAImate/internal/installer"
+	"git.jtsec.local/lab/PrAImate/internal/launcher"
+	"git.jtsec.local/lab/PrAImate/pkg/workpath"
 )
 
 // settingsItem indexes the rows in the settings list. Keep in sync

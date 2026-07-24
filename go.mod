@@ -1,4 +1,4 @@
-module github.com/sPROFFEs/PrAImate
+module git.jtsec.local/lab/PrAImate
 
 go 1.26.1
 

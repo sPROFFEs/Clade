@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/sPROFFEs/PrAImate/pkg/workpath"
+	"git.jtsec.local/lab/PrAImate/pkg/workpath"
 )
 
 // Target is the contract for a per-CLI compiler.
@@ -65,6 +65,5 @@ func init() {
 	Register(&mikaTarget{})
 	Register(&cursorTarget{})
 	Register(&codexTarget{})
-	Register(&geminiTarget{})
 	Register(&genericTarget{})
 }

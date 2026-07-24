@@ -12,7 +12,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/sPROFFEs/PrAImate/internal/core"
+	"git.jtsec.local/lab/PrAImate/internal/core"
 )
 
 // RecordCodeSession persists a surface="code" chat pointer for a freshly

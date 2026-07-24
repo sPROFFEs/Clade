@@ -59,7 +59,11 @@ export const api = {
   pickAgentKnowledgeFiles: (id) => call('PickAgentKnowledgeFiles', id),
   pickAgentKnowledgeFolder: (id) => call('PickAgentKnowledgeFolder', id),
   deleteAgentKnowledgeFile: (id, rel) => call('DeleteAgentKnowledgeFile', id, rel),
+  pickAgentRequirementsScript: (id, os, instructions) => call('PickAgentRequirementsScript', id, os, instructions || ''),
+  runAgentRequirements: (id) => call('RunAgentRequirements', id),
+  cancelAgentRequirements: (id) => call('CancelAgentRequirements', id),
   buildAgentRAG: (id, backend, apiKey, model) => call('BuildAgentRAG', id, backend || '', apiKey || '', model || ''),
+  cancelAgentRAG: (id) => call('CancelAgentRAG', id),
   installBundledGraphify: () => call('InstallBundledGraphify'),
   exportAgentPackDialog: (id) => call('ExportAgentPackDialog', id),
   importWorkpathTemplateDialog: () => call('ImportWorkpathTemplateDialog'),
@@ -224,6 +228,16 @@ export function onApproval(handler) {
   if (typeof window !== 'undefined' && window.runtime?.EventsOn) {
     window.runtime.EventsOn('praimate:approval', handler)
     return () => window.runtime.EventsOff('praimate:approval')
+  }
+  return () => {}
+}
+
+// onRequirementsProgress subscribes to lifecycle and live-output events from
+// an explicitly started agent requirements script.
+export function onRequirementsProgress(handler) {
+  if (typeof window !== 'undefined' && window.runtime?.EventsOn) {
+    window.runtime.EventsOn('praimate:requirements', handler)
+    return () => window.runtime.EventsOff('praimate:requirements')
   }
   return () => {}
 }

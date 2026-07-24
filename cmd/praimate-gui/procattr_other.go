@@ -24,3 +24,12 @@ func hideConsole(cmd *exec.Cmd) {
 		return nil
 	}
 }
+
+// hideRequirementsTerminal removes the controlling terminal inherited when
+// the GUI was launched from a shell. Without one, sudo uses SUDO_ASKPASS
+// instead of displaying an unreadable password prompt in the parent shell.
+func hideRequirementsTerminal(cmd *exec.Cmd) {
+	hideConsole(cmd)
+	cmd.SysProcAttr.Setpgid = false
+	cmd.SysProcAttr.Setsid = true
+}

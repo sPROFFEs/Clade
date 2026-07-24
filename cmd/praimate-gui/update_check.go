@@ -6,8 +6,8 @@ package main
 // updater is built to sequence properly).
 
 import (
-	"github.com/sPROFFEs/PrAImate/internal/updater"
-	"github.com/sPROFFEs/PrAImate/internal/version"
+	"git.jtsec.local/lab/PrAImate/internal/updater"
+	"git.jtsec.local/lab/PrAImate/internal/version"
 )
 
 // UpdateInfo is the check result for the Settings page.

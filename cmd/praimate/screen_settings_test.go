@@ -6,7 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/sPROFFEs/PrAImate/internal/launcher"
+	"git.jtsec.local/lab/PrAImate/internal/launcher"
 )
 
 func TestSettingsScreen_MenuRoundTripsOnTemplate(t *testing.T) {

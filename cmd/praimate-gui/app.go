@@ -25,13 +25,13 @@ import (
 
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
-	"github.com/sPROFFEs/PrAImate/internal/backup"
-	"github.com/sPROFFEs/PrAImate/internal/core"
-	"github.com/sPROFFEs/PrAImate/internal/installer"
-	"github.com/sPROFFEs/PrAImate/internal/launcher"
-	"github.com/sPROFFEs/PrAImate/internal/ollama"
-	"github.com/sPROFFEs/PrAImate/internal/store"
-	"github.com/sPROFFEs/PrAImate/internal/version"
+	"git.jtsec.local/lab/PrAImate/internal/backup"
+	"git.jtsec.local/lab/PrAImate/internal/core"
+	"git.jtsec.local/lab/PrAImate/internal/installer"
+	"git.jtsec.local/lab/PrAImate/internal/launcher"
+	"git.jtsec.local/lab/PrAImate/internal/ollama"
+	"git.jtsec.local/lab/PrAImate/internal/store"
+	"git.jtsec.local/lab/PrAImate/internal/version"
 )
 
 // App carries the shared Core plus the Wails context used for dialogs
@@ -57,6 +57,16 @@ type App struct {
 	chatCancelMu sync.Mutex
 	chatCancels  map[string]context.CancelFunc
 
+	// ragCancels maps agent IDs to active graphify extractions so the RAG
+	// controls can stop only their own child process. Guarded by ragCancelMu.
+	ragCancelMu sync.Mutex
+	ragCancels  map[string]*ragRun
+
+	// requirementsCancels maps agent IDs to active requirements scripts so
+	// their live progress panel can stop only the matching run.
+	requirementsCancelMu sync.Mutex
+	requirementsCancels  map[string]*requirementsRun
+
 	// approval is the lazily-started mid-turn approval broker ("ask"
 	// Tools level). Guarded by approvalMu.
 	approvalMu sync.Mutex
@@ -69,7 +79,12 @@ type App struct {
 }
 
 func NewApp() *App {
-	return &App{terms: newTermManager(), chatCancels: map[string]context.CancelFunc{}}
+	return &App{
+		terms:               newTermManager(),
+		chatCancels:         map[string]context.CancelFunc{},
+		ragCancels:          map[string]*ragRun{},
+		requirementsCancels: map[string]*requirementsRun{},
+	}
 }
 
 // startup opens the shared DB and seeds builtins. Mirrors the TUI's
@@ -472,8 +487,6 @@ var modelHints = map[string]string{
 	"codex":         "model id, e.g. gpt-5.1-codex",
 	"opencode":      "provider/model, e.g. anthropic/claude-sonnet-4-5",
 	"praimate-code": "provider/model, e.g. anthropic/claude-sonnet-4-5",
-	"gemini":        "model id, e.g. gemini-2.5-pro",
-	"deepseek":      "", // config-file driven; no per-run flag
 }
 
 // staticModelSuggestions are fallback datalist entries for CLIs without
@@ -483,7 +496,6 @@ var staticModelSuggestions = map[string][]string{
 	"claude":     {"sonnet", "opus", "haiku", "claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5"},
 	"openclaude": {"sonnet", "opus", "haiku", "claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5"},
 	"codex":      {"gpt-5.1-codex", "gpt-5.1-codex-mini", "gpt-5.1", "o4-mini"},
-	"gemini":     {"gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.0-flash"},
 }
 
 // ListCLIs returns every launchable CLI with availability probed

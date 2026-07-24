@@ -14,6 +14,20 @@ dist/
 dist/**/praimate-code
 cmd/praimate-gui/praimate-gui
 cmd/praimate-gui/praimate-gui.exe
+/cmd/praimate-gui/gui
+/.release-build-cache/
+
+# Release assets are uploaded to GitHub Releases, not committed to Git.
+/releases/
+/releases.zip
+
+# Local migration source archive and extracted reference tree.
+/PrAImate-main.tar.gz
+/PrAImate-main/
+
+# Local review notes and ad-hoc agent definitions from migration workspaces.
+/.opencode/plans/
+/scripts/agent.yaml
 
 # Dependency / build artifacts — never commit these. The vendored
 # third_party SOURCES are committed; their installed deps are not.

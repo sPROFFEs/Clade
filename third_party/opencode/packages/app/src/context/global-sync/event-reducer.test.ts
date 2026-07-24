@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { Message, Part, PermissionRequest, Project, QuestionRequest, Session } from "@opencode-ai/sdk/v2/client"
+import type { Message, Part, PermissionRequest, Project, QuestionRequest, Session, Todo } from "@opencode-ai/sdk/v2/client"
 import { createStore } from "solid-js/store"
 import type { State } from "./types"
 import { applyDirectoryEvent, applyGlobalEvent, cleanupDroppedSessionCaches } from "./event-reducer"
@@ -134,6 +134,30 @@ describe("applyGlobalEvent", () => {
 })
 
 describe("applyDirectoryEvent", () => {
+  test("replaces todo statuses even though todo items have no id", () => {
+    const sessionID = "ses_todo"
+    const initial = [
+      { content: "inspect", status: "in_progress", priority: "high" },
+      { content: "fix", status: "pending", priority: "medium" },
+    ] as Todo[]
+    const [store, setStore] = createStore(baseState({ todo: { [sessionID]: initial } }))
+
+    const next = [
+      { content: "inspect", status: "completed", priority: "high" },
+      { content: "fix", status: "in_progress", priority: "medium" },
+    ] as Todo[]
+    applyDirectoryEvent({
+      event: { type: "todo.updated", properties: { sessionID, todos: next } },
+      store,
+      setStore,
+      push() {},
+      directory: "/tmp",
+      loadLsp() {},
+    })
+
+    expect(store.todo[sessionID]?.map((item) => item.status)).toEqual(["completed", "in_progress"])
+  })
+
   test("initializes text delta accumulation from the current part text", () => {
     const part = { ...textPart("part", "session", "message"), text: "existing" }
     const [store, setStore] = createStore(baseState({ part: { message: [part] } }))

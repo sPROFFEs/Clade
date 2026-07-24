@@ -74,6 +74,47 @@ func TestAgentPack_ExportImportRoundTrip(t *testing.T) {
 	}
 }
 
+func TestAgentPack_RequirementsScriptRoundTrip(t *testing.T) {
+	withTempConfigDir(t)
+	ctx := context.Background()
+	c, _ := New(Options{Store: openTempStore(t)})
+
+	const yamlBody = `schema: praimate.agent/v1
+id: requirements-agent
+name: Requirements Agent
+instructions: prepare the environment
+supports: [claude]
+requirements:
+  os: linux
+  script: setup.sh
+  instructions: Install Docker before continuing.
+`
+	if _, err := c.ImportAgentYAML(ctx, []byte(yamlBody), ""); err != nil {
+		t.Fatalf("import yaml: %v", err)
+	}
+	if err := WriteAgentRequirementsScript("requirements-agent", "setup.sh", []byte("#!/bin/sh\necho ready\n")); err != nil {
+		t.Fatalf("write requirements script: %v", err)
+	}
+
+	pack := filepath.Join(t.TempDir(), "requirements-agent"+AgentPackExt)
+	if err := c.ExportAgentPack(ctx, "requirements-agent", pack); err != nil {
+		t.Fatalf("export pack: %v", err)
+	}
+
+	c2, _ := New(Options{Store: openTempStore(t)})
+	agent, err := c2.ImportAgentPack(ctx, pack)
+	if err != nil {
+		t.Fatalf("import pack: %v", err)
+	}
+	if agent.Requirements == nil || agent.Requirements.OS != "linux" || agent.Requirements.Script != "setup.sh" {
+		t.Fatalf("requirements metadata = %#v", agent.Requirements)
+	}
+	body, err := ReadAgentRequirementsScript(agent.ID, agent.Requirements.Script)
+	if err != nil || !strings.Contains(string(body), "echo ready") {
+		t.Fatalf("requirements script = %q (err %v)", body, err)
+	}
+}
+
 // The system prompt every surface sends must carry the knowledge
 // pointer — raw says "read the files", rag says "graphify query" — and
 // stays clean for agents without knowledge.
@@ -118,6 +159,63 @@ func TestImportAgentPack_RejectsZipSlip(t *testing.T) {
 	})
 	if _, err := c.ImportAgentPack(ctx, pack); err == nil {
 		t.Fatal("zip-slip entry must fail the import")
+	}
+}
+
+func TestImportAgentPack_InvalidPackPreservesExistingAgent(t *testing.T) {
+	withTempConfigDir(t)
+	ctx := context.Background()
+	c, _ := New(Options{Store: openTempStore(t)})
+
+	const original = `schema: praimate.agent/v1
+id: existing
+name: Existing Agent
+instructions: keep me
+supports: [claude]
+requirements:
+  os: linux
+  script: setup.sh
+`
+	if _, err := c.ImportAgentYAML(ctx, []byte(original), ""); err != nil {
+		t.Fatalf("import original: %v", err)
+	}
+	if _, err := AddAgentKnowledgeFiles("existing", []string{writeTempDoc(t, "keep.md", "keep knowledge")}); err != nil {
+		t.Fatalf("add original knowledge: %v", err)
+	}
+	if err := WriteAgentRequirementsScript("existing", "setup.sh", []byte("#!/bin/sh\necho keep\n")); err != nil {
+		t.Fatalf("write original requirements: %v", err)
+	}
+
+	pack := filepath.Join(t.TempDir(), "invalid"+AgentPackExt)
+	writeZip(t, pack, map[string]string{
+		"agent.yaml": `schema: praimate.agent/v1
+id: existing
+name: Replacement Agent
+instructions: replace me
+supports: [claude]
+`,
+		"knowledge/new.md":          "new knowledge",
+		"requirements/../../bad.sh": "escape",
+	})
+	if _, err := c.ImportAgentPack(ctx, pack); err == nil {
+		t.Fatal("invalid pack must fail")
+	}
+
+	agent, err := c.GetAgent(ctx, "existing")
+	if err != nil {
+		t.Fatalf("get preserved agent: %v", err)
+	}
+	if agent.Name != "Existing Agent" {
+		t.Fatalf("agent was changed after failed import: %q", agent.Name)
+	}
+	dir, _ := AgentKnowledgeDir("existing")
+	body, err := os.ReadFile(filepath.Join(dir, "keep.md"))
+	if err != nil || string(body) != "keep knowledge" {
+		t.Fatalf("knowledge was changed after failed import: %q (err %v)", body, err)
+	}
+	body, err = ReadAgentRequirementsScript("existing", "setup.sh")
+	if err != nil || !strings.Contains(string(body), "echo keep") {
+		t.Fatalf("requirements were changed after failed import: %q (err %v)", body, err)
 	}
 }
 

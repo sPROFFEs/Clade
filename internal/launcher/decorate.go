@@ -20,7 +20,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sPROFFEs/PrAImate/internal/skills"
+	"git.jtsec.local/lab/PrAImate/internal/skills"
 )
 
 // applyDecorations runs every per-workspace post-compile concern. Called

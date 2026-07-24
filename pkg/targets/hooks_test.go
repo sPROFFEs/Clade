@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sPROFFEs/PrAImate/pkg/workpath"
+	"git.jtsec.local/lab/PrAImate/pkg/workpath"
 )
 
 // scaffoldWorkpathWithHooks builds a tiny workpath in t.TempDir with
@@ -130,7 +130,7 @@ func TestNonClaudeTarget_HookNoteAppended(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadDir: %v", err)
 	}
-	for _, name := range []string{"codex", "gemini", "generic"} {
+	for _, name := range []string{"codex", "generic"} {
 		tgt, err := Get(name)
 		if err != nil {
 			t.Fatalf("Get(%s): %v", name, err)

@@ -1,6 +1,6 @@
 /** @jsxImportSource @opentui/solid */
 import { expect, test } from "bun:test"
-import type { GlobalEvent } from "@opencode-ai/sdk/v2"
+import type { GlobalEvent, Todo } from "@opencode-ai/sdk/v2"
 import { tmpdir } from "../../../fixture/fixture"
 import { json, mount, wait } from "./sync-fixture"
 
@@ -80,6 +80,56 @@ test("stale session hydration does not overwrite live message parts", async () =
     await hydrate
 
     expect(sync.data.part[messageID][0]).toMatchObject({ text: "visible live content" })
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("stale session hydration does not roll back live todo progress", async () => {
+  await using tmp = await tmpdir()
+  await Bun.write(`${tmp.path}/kv.json`, "{}")
+
+  let resolveTodo!: (response: Response) => void
+  const todo = new Promise<Response>((resolve) => {
+    resolveTodo = resolve
+  })
+  let requested = false
+  const { app, emit, sync } = await mount((url) => {
+    if (url.pathname === `/session/${sessionID}`) return json(session)
+    if (url.pathname === `/session/${sessionID}/message` || url.pathname === `/session/${sessionID}/diff`)
+      return json([])
+    if (url.pathname === `/session/${sessionID}/todo`) {
+      requested = true
+      return todo
+    }
+    return undefined
+  }, tmp.path)
+
+  try {
+    const hydrate = sync.session.sync(sessionID)
+    await wait(() => requested)
+    const current: Todo[] = [
+      { content: "inspect", status: "completed", priority: "high" },
+      { content: "fix", status: "in_progress", priority: "medium" },
+    ]
+    emit(
+      global({
+        id: "evt_todo",
+        type: "todo.updated",
+        properties: { sessionID, todos: current },
+      }),
+    )
+    await wait(() => sync.data.todo[sessionID]?.[1]?.status === "in_progress")
+
+    resolveTodo(
+      json([
+        { content: "inspect", status: "in_progress", priority: "high" },
+        { content: "fix", status: "pending", priority: "medium" },
+      ]),
+    )
+    await hydrate
+
+    expect(sync.data.todo[sessionID]).toEqual(current)
   } finally {
     app.renderer.destroy()
   }

@@ -24,8 +24,8 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/sPROFFEs/PrAImate/internal/launcher"
-	"github.com/sPROFFEs/PrAImate/internal/ollama"
+	"git.jtsec.local/lab/PrAImate/internal/launcher"
+	"git.jtsec.local/lab/PrAImate/internal/ollama"
 )
 
 // localLLMRow indexes the row list. Keep in sync with renderList.
@@ -55,7 +55,7 @@ const (
 //     only when >0.
 //   - openclaude: emits the `CLAUDE_CODE_OPENAI_CONTEXT_WINDOWS` /
 //     `CLAUDE_CODE_OPENAI_MAX_OUTPUT_TOKENS` env vars only when >0.
-//   - claude (Anthropic Claude Code), deepseek-tui, gemini: no
+//   - claude (Anthropic Claude Code): no
 //     documented config surface for caps today — caps entered here
 //     would be silently ignored even when the user fills them in.
 //     The Local-LLM tab footer notes that.

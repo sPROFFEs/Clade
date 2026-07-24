@@ -9,8 +9,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/sPROFFEs/PrAImate/internal/launcher"
-	"github.com/sPROFFEs/PrAImate/internal/ollama"
+	"git.jtsec.local/lab/PrAImate/internal/launcher"
+	"git.jtsec.local/lab/PrAImate/internal/ollama"
 )
 
 // LocalLLMDefaults mirrors launcher.Config's DefaultLocal* slice.

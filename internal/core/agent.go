@@ -35,9 +35,21 @@ type Agent struct {
 	// the agent exists without breaking anything.
 	Knowledge string `json:"knowledge,omitempty"`
 
+	// Requirements describes an optional, user-triggered environment setup
+	// script carried by a .praimate-agent pack. It is never run on import.
+	Requirements *AgentRequirements `json:"requirements,omitempty"`
+
 	// SourcePath is the YAML file the agent was last imported from, if
 	// any. Empty for agents created in-place via the TUI/GUI.
 	SourcePath string `json:"source_path,omitempty"`
+}
+
+// AgentRequirements is metadata for one platform-specific setup script.
+// Script is a filename inside the agent's managed requirements directory.
+type AgentRequirements struct {
+	OS           string `json:"os" yaml:"os"`
+	Script       string `json:"script" yaml:"script"`
+	Instructions string `json:"instructions,omitempty" yaml:"instructions,omitempty"`
 }
 
 // Workflow is a named, scripted task template inside an agent. Each

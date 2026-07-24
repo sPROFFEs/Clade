@@ -25,9 +25,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/sPROFFEs/PrAImate/internal/core"
-	"github.com/sPROFFEs/PrAImate/internal/installer"
-	"github.com/sPROFFEs/PrAImate/internal/store"
+	"git.jtsec.local/lab/PrAImate/internal/core"
+	"git.jtsec.local/lab/PrAImate/internal/installer"
+	"git.jtsec.local/lab/PrAImate/internal/store"
 )
 
 func codeBinaryName() string {

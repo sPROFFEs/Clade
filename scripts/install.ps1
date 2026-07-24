@@ -1,7 +1,7 @@
 # PrAImate installer for Windows.
 #
 # One-liner:
-#   iwr -useb https://raw.githubusercontent.com/sPROFFEs/PrAImate/main/scripts/install.ps1 | iex
+#   iwr -useb https://raw.githubusercontent.com/sPROFFEs/praimate/main/scripts/install.ps1 | iex
 #
 # Or with options (you must download then run for arguments to bind):
 #   iwr -useb https://… -OutFile install.ps1
@@ -29,9 +29,6 @@ param(
     [string]$Prefix = "",
     [switch]$AllUsers,
     [switch]$Yes,
-    # -Uninstall removes the installed binaries, shortcuts and the PATH
-    # entry (config, chats and the DB are kept). Add -Purge to also
-    # delete config, managed tools and the chat database.
     [switch]$Uninstall,
     [switch]$Purge
 )
@@ -39,23 +36,19 @@ param(
 $ErrorActionPreference = "Stop"
 
 # Windows PowerShell 5.1's .NET web stack can default to TLS 1.0, which
-# GitHub's servers reject mid-handshake ("The connection was closed
-# unexpectedly"). Opt into TLS 1.2 (and 1.3 where the OS supports it)
-# without clobbering whatever else is already enabled.
+# GitHub rejects. Opt into TLS 1.2 and 1.3 where the OS supports it.
 try {
     [Net.ServicePointManager]::SecurityProtocol = `
         [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
     [Net.ServicePointManager]::SecurityProtocol = `
-        [Net.ServicePointManager]::SecurityProtocol -bor 12288  # Tls13; enum member missing on older .NET
+        [Net.ServicePointManager]::SecurityProtocol -bor 12288
 } catch {}
-# Invoke-WebRequest's live progress bar slows large downloads ~10x on
-# PowerShell 5.1; silence it for this script only.
+# PowerShell 5.1's progress rendering makes large downloads much slower.
 $ProgressPreference = "SilentlyContinue"
 
-$Repo = "sPROFFEs/PrAImate"
-$ForgeURL = "https://github.com"
-$RepoURL = "$ForgeURL/$Repo"
-# GitHub's API lives on api.github.com under /repos/<owner>/<repo>/…
+$Repo = "sPROFFEs/praimate"
+$GitHubURL = "https://github.com"
+$RepoURL = "$GitHubURL/$Repo"
 $ReleaseApiURL = "https://api.github.com/repos/$Repo/releases/latest"
 $SourceBranch = "main"
 # Release tag to pull assets from. When unset we resolve "latest" via
@@ -103,9 +96,6 @@ function Get-ArchTriplet {
 $Triplet = Get-ArchTriplet
 
 # ---------- uninstall ----------
-# Removes what this installer created. Without -Purge the user's data
-# (config, managed tools, chat DB under %APPDATA%) stays so a reinstall
-# picks up where they left off.
 if ($Uninstall) {
     $dests = @()
     if ($Prefix) { $dests += $Prefix }
@@ -123,17 +113,11 @@ if ($Uninstall) {
             $p = Join-Path $d $f
             if (Test-Path $p) { Remove-Item -Force $p; Info "removed $f"; $removed = $true }
         }
-        # Bundled samples live next to the install dir.
         $share = Join-Path (Split-Path $d -Parent) "share\praimate"
         if (Test-Path $share) { Remove-Item -Recurse -Force $share; Info "removed $share" }
-        # Drop the dir itself when it's now empty.
         if ((Get-ChildItem $d -Force -ErrorAction SilentlyContinue | Measure-Object).Count -eq 0) {
             Remove-Item -Force $d
         }
-        # PATH entry (User scope for the default dir, Machine for ProgramFiles).
-        # Only rewrite when the dir is genuinely on the list — a blind
-        # split/rejoin would rewrite the value (dropping empty segments)
-        # even when there's nothing to remove.
         foreach ($scope in @("User","Machine")) {
             try {
                 $cur = [Environment]::GetEnvironmentVariable("PATH", $scope)
@@ -149,12 +133,9 @@ if ($Uninstall) {
                         Info "removed $d from $scope PATH"
                     }
                 }
-            } catch { }
+            } catch {}
         }
     }
-    # Shortcuts: only delete ones whose target lives inside a dir we're
-    # uninstalling — a custom -Prefix uninstall must not take out the
-    # shortcuts of a separate default-location install.
     Step "Removing shortcuts"
     $desk = [Environment]::GetFolderPath("Desktop")
     $startMenu = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
@@ -164,10 +145,12 @@ if ($Uninstall) {
             $lnk = Join-Path $dir $n
             if (-not (Test-Path $lnk)) { continue }
             $target = ""
-            try { $target = $ws.CreateShortcut($lnk).TargetPath } catch { }
+            try { $target = $ws.CreateShortcut($lnk).TargetPath } catch {}
             $mine = $false
             foreach ($d in $dests) {
-                if ($target -and $target.StartsWith($d.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) { $mine = $true }
+                if ($target -and $target.StartsWith($d.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
+                    $mine = $true
+                }
             }
             if ($mine) { Remove-Item -Force $lnk; Info "removed $lnk" }
         }
@@ -283,8 +266,6 @@ function Install-Binary {
     $tmp = New-Item -ItemType Directory -Force -Path (Join-Path $env:TEMP ("praimate-install-" + [Guid]::NewGuid().ToString("N")))
     try {
         $zip = Join-Path $tmp.FullName $fname
-        # Retry transient network drops; a 404 (asset really missing)
-        # fails immediately with a pointer at the releases page.
         $maxTries = 3
         for ($try = 1; $try -le $maxTries; $try++) {
             try {
@@ -316,7 +297,7 @@ function Install-Binary {
         Step "Installing to $Dest"
         Copy-Item -Path (Join-Path $extracted "praimate.exe") -Destination $Dest -Force
         Copy-Item -Path (Join-Path $extracted "wpc.exe")   -Destination $Dest -Force
-        # Desktop GUI ships prebuilt in the windows-amd64 archive.
+        # Desktop GUI ships prebuilt in both Windows architecture archives.
         # Install it next to praimate.exe so `praimate --gui` finds it.
         $guiSrc = Join-Path $extracted "praimate-gui.exe"
         if (Test-Path $guiSrc) {

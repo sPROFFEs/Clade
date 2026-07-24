@@ -19,6 +19,7 @@ import pkg from "../package.json"
 
 const singleFlag = process.argv.includes("--single")
 const baselineFlag = process.argv.includes("--baseline")
+const targetFlag = process.argv.find((arg) => arg.startsWith("--target="))?.slice("--target=".length)
 const skipInstall = process.argv.includes("--skip-install")
 const sourcemapsFlag = process.argv.includes("--sourcemaps")
 const plugin = createSolidTransformPlugin()
@@ -113,9 +114,20 @@ const allTargets: {
   },
 ]
 
+const requestedTarget = (() => {
+  if (!targetFlag) return undefined
+  const [os, arch] = targetFlag.split("-")
+  return {
+    os: os === "windows" ? "win32" : os,
+    arch: arch === "amd64" ? "x64" : arch,
+  }
+})()
+
 const targets = singleFlag
   ? allTargets.filter((item) => {
-      if (item.os !== process.platform || item.arch !== process.arch) {
+      const targetOS = requestedTarget?.os ?? process.platform
+      const targetArch = requestedTarget?.arch ?? process.arch
+      if (item.os !== targetOS || item.arch !== targetArch) {
         return false
       }
 

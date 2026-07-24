@@ -20,7 +20,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	"github.com/wailsapp/wails/v2/pkg/options/linux"
 
-	"github.com/sPROFFEs/PrAImate/internal/installer"
+	"git.jtsec.local/lab/PrAImate/internal/installer"
 )
 
 //go:embed all:frontend/dist

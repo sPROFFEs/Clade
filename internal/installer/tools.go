@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sPROFFEs/PrAImate/internal/gitutil"
-	"github.com/sPROFFEs/PrAImate/internal/version"
+	"git.jtsec.local/lab/PrAImate/internal/gitutil"
+	"git.jtsec.local/lab/PrAImate/internal/version"
 )
 
 // ToolID names a non-agent capability PrAImate can install — a CLI the

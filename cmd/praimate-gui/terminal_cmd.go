@@ -12,14 +12,14 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/sPROFFEs/PrAImate/internal/core"
+	"git.jtsec.local/lab/PrAImate/internal/core"
 )
 
 // terminalCommand maps a PrAImate CLI id to the binary + interactive
 // args to launch. We deliberately launch the CLI in its normal
 // interactive mode — the whole point is the user gets the real tool.
 // model, when non-empty, is passed with the CLI's own model flag
-// (deepseek has none; its config picks the model).
+// when non-empty, is passed with the CLI's own model flag.
 func terminalCommand(cli, model string) (name string, args []string, err error) {
 	switch cli {
 	case "claude", "openclaude":
@@ -37,13 +37,6 @@ func terminalCommand(cli, model string) (name string, args []string, err error) 
 			args = []string{"--model", model}
 		}
 		return cli, args, nil
-	case "gemini":
-		if model != "" {
-			args = []string{"-m", model}
-		}
-		return "gemini", args, nil
-	case "deepseek":
-		return "deepseek-tui", nil, nil
 	case "":
 		return "", nil, fmt.Errorf("no CLI selected for the terminal")
 	default:
@@ -82,7 +75,7 @@ func terminalResumeCommand(cli, model string) (name string, args []string, suppo
 //	openclaude             → CLAUDE_CODE_USE_OPENAI + OPENAI_* (OpenAI-compat proxy)
 //	opencode/praimate-code → OPENAI_BASE_URL + key (its openai provider)
 //
-// codex/gemini need config-file rewrites the terminal path doesn't do —
+// codex needs config-file rewrites the terminal path doesn't do —
 // callers should steer those to a Chat (which goes through the full
 // launcher machinery). Returns nil when cli isn't env-routable.
 func terminalLocalEnv(cli, endpoint, apiKey, model string) []string {

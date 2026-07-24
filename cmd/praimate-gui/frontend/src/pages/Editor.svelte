@@ -46,6 +46,7 @@
       const t = tabs.find((x) => x.path === rel)
       if (t) close(rel)
       await loadTree()
+      error = ''
     } catch (e) { error = String(e) }
   }
   function fileMenu(ev, f) {
@@ -65,7 +66,7 @@
   const langLabel = (p) => fileLang(p).toUpperCase()
   $: dirtyCount = tabs.filter((t) => t.dirty).length
   async function revealFolder() {
-    try { await api.openEditorFolder() } catch (e) { error = String(e) }
+    try { await api.openEditorFolder(); error = '' } catch (e) { error = String(e) }
   }
   async function renameFile(rel) {
     const next = window.prompt ? window.prompt('Rename to (slash-relative path):', rel) : ''
@@ -76,6 +77,7 @@
       const t = tabs.find((x) => x.path === rel)
       if (t) { t.path = dst; tabs = tabs }
       if (active === rel) active = dst
+      error = ''
     } catch (e) { error = String(e) }
   }
 
@@ -83,6 +85,7 @@
     treeLoading = true
     try {
       files = (await api.editorListFiles()) || []
+      error = ''
     } catch (e) {
       error = String(e)
     } finally {
@@ -97,6 +100,7 @@
       const content = await api.editorReadFile(path)
       tabs = [...tabs, { path, content, dirty: false, ref: null, flushTimer: null, externalPending: false }]
       active = path
+      error = ''
     } catch (e) {
       error = String(e)
     }
@@ -138,6 +142,7 @@
       await api.editorWriteFile(t.path, t.content)
       t.dirty = false
       tabs = tabs
+      error = ''
     } catch (e) {
       error = String(e)
     }
@@ -156,6 +161,7 @@
       newFileName = ''
       await loadTree()
       await open(rel)
+      error = ''
     } catch (e) {
       error = String(e)
     }
@@ -607,7 +613,7 @@
   {/if}
 
   <section class="editor-col">
-    {#if error}<div class="banner">{error}</div>{/if}
+    {#if error}<div class="banner error-banner"><span>{error}</span><button class="error-close" title="Dismiss error" aria-label="Dismiss error" on:click={() => (error = '')}>×</button></div>{/if}
     <div class="tabrow">
       <div class="tabbar grow">
         {#each tabs as t}
@@ -774,6 +780,8 @@
      buildAskDom() and the :global(.ask-menu) styles. -->
 
 <style>
+  .error-banner { display: flex; align-items: center; gap: 10px; justify-content: space-between; }
+  .error-close { background: transparent; border: 0; color: currentColor; cursor: pointer; font-size: 18px; line-height: 1; padding: 0 2px; }
   .studio {
     display: grid;
     /* columns set inline (collapsible side panes) */

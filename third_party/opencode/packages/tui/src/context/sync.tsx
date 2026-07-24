@@ -143,7 +143,7 @@ export const {
 
     const fullSyncedSessions = new Set<string>()
     const syncingSessions = new Map<string, Promise<void>>()
-    const hydratingSessions = new Map<string, { messages: Set<string>; parts: Set<string> }>()
+    const hydratingSessions = new Map<string, { messages: Set<string>; parts: Set<string>; todo: boolean }>()
     const touchMessage = (sessionID: string, messageID: string) => {
       hydratingSessions.get(sessionID)?.messages.add(messageID)
     }
@@ -257,6 +257,12 @@ export const {
         }
 
         case "todo.updated":
+          // A session hydration request may still be carrying an older todo
+          // snapshot. Remember that a live update won so the late response
+          // cannot put the sidebar back on its first in-progress item.
+          if (hydratingSessions.has(event.properties.sessionID)) {
+            hydratingSessions.get(event.properties.sessionID)!.todo = true
+          }
           setStore("todo", event.properties.sessionID, event.properties.todos)
           break
 
@@ -589,7 +595,7 @@ export const {
           if (fullSyncedSessions.has(sessionID)) return
           const syncing = syncingSessions.get(sessionID)
           if (syncing) return syncing
-          const tracker = { messages: new Set<string>(), parts: new Set<string>() }
+          const tracker = { messages: new Set<string>(), parts: new Set<string>(), todo: false }
           hydratingSessions.set(sessionID, tracker)
           const task = (async () => {
             const [session, messages, todo, diff] = await Promise.all([
@@ -603,7 +609,7 @@ export const {
                 const match = search(draft.session, sessionID, (s) => s.id)
                 if (match.found) draft.session[match.index] = session.data!
                 if (!match.found) draft.session.splice(match.index, 0, session.data!)
-                draft.todo[sessionID] = todo.data ?? []
+                if (!tracker.todo) draft.todo[sessionID] = todo.data ?? []
                 const currentMessages = draft.message[sessionID] ?? []
                 const infos = (messages.data ?? []).flatMap((message) => {
                   if (!tracker.messages.has(message.info.id)) return [message.info]

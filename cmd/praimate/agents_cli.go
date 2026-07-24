@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sPROFFEs/PrAImate/internal/core"
-	"github.com/sPROFFEs/PrAImate/internal/store"
+	"git.jtsec.local/lab/PrAImate/internal/core"
+	"git.jtsec.local/lab/PrAImate/internal/store"
 )
 
 // openCore opens the default PrAImate DB, builds a Core, seeds the

@@ -11,7 +11,7 @@ import (
 // public CA-signed cert, so there's nothing to bypass. Downstream forks
 // that host on a self-signed internal Gitea/GitLab can set this to their
 // forge host (or export PRAIMATE_INTERNAL_GIT_HOST) and rebuild.
-var internalGitHost = envOrDefault("PRAIMATE_INTERNAL_GIT_HOST", "")
+var internalGitHost = envOrDefault("PRAIMATE_INTERNAL_GIT_HOST", "git.jtsec.local")
 
 func envOrDefault(key, fallback string) string {
 	if v := strings.TrimSpace(os.Getenv(key)); v != "" {

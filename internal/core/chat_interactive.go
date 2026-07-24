@@ -20,7 +20,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sPROFFEs/PrAImate/internal/ollama"
+	"git.jtsec.local/lab/PrAImate/internal/ollama"
 )
 
 // ChatTurn is one completed interactive exchange.

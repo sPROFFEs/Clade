@@ -15,9 +15,9 @@ import (
 	"context"
 	"sync"
 
-	"github.com/sPROFFEs/PrAImate/internal/backup"
-	"github.com/sPROFFEs/PrAImate/internal/core"
-	"github.com/sPROFFEs/PrAImate/internal/store"
+	"git.jtsec.local/lab/PrAImate/internal/backup"
+	"git.jtsec.local/lab/PrAImate/internal/core"
+	"git.jtsec.local/lab/PrAImate/internal/store"
 )
 
 var (

@@ -27,11 +27,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sPROFFEs/PrAImate/internal/gitutil"
-	"github.com/sPROFFEs/PrAImate/internal/installer"
+	"git.jtsec.local/lab/PrAImate/internal/gitutil"
+	"git.jtsec.local/lab/PrAImate/internal/installer"
 )
 
-const praimateRepoURL = "https://github.com/sPROFFEs/PrAImate.git"
+const praimateRepoURL = "https://github.com/sPROFFEs/praimate.git"
 
 // BuildRequirement is one external tool a from-source build needs.
 type BuildRequirement struct {

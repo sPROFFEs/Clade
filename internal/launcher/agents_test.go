@@ -9,6 +9,14 @@ import (
 	"testing"
 )
 
+func TestKnownAgents_ExcludesRemovedCLIs(t *testing.T) {
+	for _, agent := range KnownAgents() {
+		if agent.ID == "gemini" || agent.ID == "deepseek" {
+			t.Errorf("removed CLI %q is still in the agent catalog", agent.ID)
+		}
+	}
+}
+
 // TestDetectAgents_BrokenBinaryNotMarkedAvailable: when an agent's
 // binary is on PATH but `--version` fails (e.g. the opencode-ai npm
 // package shipped for an incompatible Windows arch), DetectAgents must

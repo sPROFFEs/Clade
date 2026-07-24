@@ -68,9 +68,7 @@ function normalizedPath(path) {
   return String(path || '').replace(/[\\/]+$/, '').toLocaleLowerCase()
 }
 
-function terminalNameForCLI(cli) {
-  return cli === 'deepseek' ? 'deepseek-tui' : String(cli || '')
-}
+function terminalNameForCLI(cli) { return String(cli || '') }
 
 // Old GUI builds could create the chat row just after navigation had already
 // detached the Code page, leaving a live terminal without chatId. Recover

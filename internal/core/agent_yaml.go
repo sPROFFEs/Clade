@@ -18,19 +18,20 @@ const AgentSchema = "praimate.agent/v1"
 // keys and a leading schema field so future format versions can be
 // detected before unmarshalling.
 type agentYAML struct {
-	Schema          string         `yaml:"schema"`
-	ID              string         `yaml:"id"`
-	Name            string         `yaml:"name"`
-	Description     string         `yaml:"description,omitempty"`
-	Icon            string         `yaml:"icon,omitempty"`
-	Instructions    string         `yaml:"instructions"`
-	Supports        []string       `yaml:"supports"`
-	Tools           []string       `yaml:"tools,omitempty"`
-	MCPServers      []string       `yaml:"mcp_servers,omitempty"`
-	Workflows       []workflowYAML `yaml:"workflows,omitempty"`
-	DefaultWorkflow string         `yaml:"default_workflow,omitempty"`
-	Surfaces        []string       `yaml:"surfaces,omitempty"`
-	Knowledge       string         `yaml:"knowledge,omitempty"`
+	Schema          string             `yaml:"schema"`
+	ID              string             `yaml:"id"`
+	Name            string             `yaml:"name"`
+	Description     string             `yaml:"description,omitempty"`
+	Icon            string             `yaml:"icon,omitempty"`
+	Instructions    string             `yaml:"instructions"`
+	Supports        []string           `yaml:"supports"`
+	Tools           []string           `yaml:"tools,omitempty"`
+	MCPServers      []string           `yaml:"mcp_servers,omitempty"`
+	Workflows       []workflowYAML     `yaml:"workflows,omitempty"`
+	DefaultWorkflow string             `yaml:"default_workflow,omitempty"`
+	Surfaces        []string           `yaml:"surfaces,omitempty"`
+	Knowledge       string             `yaml:"knowledge,omitempty"`
+	Requirements    *AgentRequirements `yaml:"requirements,omitempty"`
 }
 
 type workflowYAML struct {
@@ -106,6 +107,7 @@ func MarshalAgentYAML(a *Agent) ([]byte, error) {
 		DefaultWorkflow: a.DefaultWorkflow,
 		Surfaces:        a.Surfaces,
 		Knowledge:       a.Knowledge,
+		Requirements:    a.Requirements,
 	}
 	for _, w := range a.Workflows {
 		wy := workflowYAML{Name: w.Name, Description: w.Description}
@@ -144,6 +146,7 @@ func (raw *agentYAML) toAgent() (*Agent, error) {
 		DefaultWorkflow: raw.DefaultWorkflow,
 		Surfaces:        raw.Surfaces,
 		Knowledge:       raw.Knowledge,
+		Requirements:    raw.Requirements,
 	}
 	for _, wy := range raw.Workflows {
 		w := Workflow{Name: wy.Name, Description: wy.Description}
@@ -222,6 +225,16 @@ func (a *Agent) Validate() error {
 	default:
 		return fmt.Errorf("agent %q: unknown knowledge mode %q (want raw or rag)", a.ID, a.Knowledge)
 	}
+	if r := a.Requirements; r != nil {
+		switch r.OS {
+		case "linux", "darwin", "windows":
+		default:
+			return fmt.Errorf("agent %q: requirements os must be linux, darwin or windows", a.ID)
+		}
+		if r.Script == "" || strings.ContainsAny(r.Script, `/\\`) {
+			return fmt.Errorf("agent %q: requirements script must be a filename", a.ID)
+		}
+	}
 	return nil
 }
 
@@ -258,7 +271,7 @@ func (w *Workflow) validate(agentID string) error {
 
 func isKnownCLI(name string) bool {
 	switch name {
-	case "claude", "codex", "opencode", "openclaude", "gemini", "deepseek", "praimate-code":
+	case "claude", "codex", "opencode", "openclaude", "praimate-code":
 		return true
 	}
 	return false

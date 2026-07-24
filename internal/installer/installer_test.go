@@ -80,7 +80,7 @@ func TestCatalog_PnpmMethodsCarryNodePrereq(t *testing.T) {
 // makes the registry choice non-configurable from outside PrAImate.
 func TestCatalog_PnpmMethodsPinRegistry(t *testing.T) {
 	wantFlag := "--registry=https://registry.npmjs.org/"
-	for _, a := range []AgentID{AgentClaude, AgentOpenClaude, AgentCodex, AgentOpenCode, AgentGemini, AgentDeepSeek} {
+	for _, a := range []AgentID{AgentClaude, AgentOpenClaude, AgentCodex, AgentOpenCode} {
 		for _, o := range []OS{OSMacOS, OSLinux, OSWSL, OSWindows} {
 			for _, act := range []Action{ActionInstall, ActionUpdate} {
 				for _, m := range allMethods(a, act, o) {
@@ -250,7 +250,7 @@ func TestMethods_KeepsPnpmMethodsWhenPnpmMissing(t *testing.T) {
 	// We don't actually run anything — Methods() just looks them up.
 	t.Setenv("PATH", t.TempDir())
 
-	for _, agent := range []AgentID{AgentCodex, AgentGemini} {
+	for _, agent := range []AgentID{AgentCodex} {
 		got := Methods(agent, ActionInstall, OSWindows)
 		if len(got) == 0 {
 			t.Errorf("%s/windows with empty PATH: got 0 methods, want pnpm method to survive (auto-fixable)", agent)

@@ -19,12 +19,13 @@
 param(
     [string[]] $Targets = @(
         "windows-amd64",
+        "windows-arm64",
         "linux-amd64",
         "linux-arm64",
         "darwin-amd64",
         "darwin-arm64"
     ),
-    [string] $Version = "1.0.9",
+    [string] $Version = "1.0.10",
     [string] $LdFlags = "-s -w",
     [switch] $NoArchive
 )
@@ -33,7 +34,7 @@ $ErrorActionPreference = "Stop"
 
 # Combine strip flags + version injection into one -ldflags string. The
 # Go linker accepts multiple -X entries inside it.
-$FullLdFlags = "$LdFlags -X github.com/sPROFFEs/PrAImate/internal/version.Current=$Version"
+$FullLdFlags = "$LdFlags -X git.jtsec.local/lab/PrAImate/internal/version.Current=$Version"
 Write-Host "Building version $Version"
 
 # Repo root is the parent of the scripts dir.

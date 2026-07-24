@@ -162,3 +162,27 @@ def test_detect_backend_custom_provider_after_builtins(monkeypatch):
 
     result = llm.detect_backend()
     assert result == "myprovider"
+
+
+def test_openai_backend_honours_compatible_base_url(tmp_path, monkeypatch):
+    """The OpenAI backend must route through the configured local gateway."""
+    from graphify import llm
+    from unittest.mock import patch
+
+    source = tmp_path / "notes.md"
+    source.write_text("local knowledge", encoding="utf-8")
+    monkeypatch.setitem(llm.BACKENDS["openai"], "base_url", "http://127.0.0.1:11434/v1")
+    result = {
+        "nodes": [],
+        "edges": [],
+        "hyperedges": [],
+        "input_tokens": 0,
+        "output_tokens": 0,
+    }
+
+    with patch("graphify.llm._call_openai_compat", return_value=result) as call:
+        llm.extract_files_direct(
+            [source], backend="openai", api_key="local", model="qwen", root=tmp_path
+        )
+
+    assert call.call_args.args[0] == "http://127.0.0.1:11434/v1"

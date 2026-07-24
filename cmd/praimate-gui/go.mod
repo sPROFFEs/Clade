@@ -1,13 +1,12 @@
-module github.com/sPROFFEs/PrAImate/gui
+module git.jtsec.local/lab/PrAImate/gui
 
 go 1.26.1
 
 require (
-	github.com/sPROFFEs/PrAImate v0.0.0
+	git.jtsec.local/lab/PrAImate v0.0.0
 	github.com/aymanbagabas/go-pty v0.2.3
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/wailsapp/wails/v2 v2.10.2
-	golang.org/x/sys v0.44.0
 )
 
 require (
@@ -42,6 +41,7 @@ require (
 	github.com/wailsapp/mimetype v1.4.1 // indirect
 	golang.org/x/crypto v0.51.0 // indirect
 	golang.org/x/net v0.53.0 // indirect
+	golang.org/x/sys v0.44.0 // indirect
 	golang.org/x/text v0.37.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	modernc.org/libc v1.72.3 // indirect
@@ -50,4 +50,4 @@ require (
 	modernc.org/sqlite v1.52.0 // indirect
 )
 
-replace github.com/sPROFFEs/PrAImate => ../..
+replace git.jtsec.local/lab/PrAImate => ../..

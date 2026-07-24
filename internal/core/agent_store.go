@@ -117,6 +117,7 @@ func (c *Core) upsertAgent(ctx context.Context, a *Agent) (*Agent, error) {
 	mcps, _ := json.Marshal(orEmpty(a.MCPServers))
 	supports, _ := json.Marshal(orEmpty(a.Supports))
 	surfaces, _ := json.Marshal(orEmpty(a.Surfaces))
+	requirements, _ := json.Marshal(a.Requirements)
 	wfs, err := json.Marshal(orEmptyWorkflows(a.Workflows))
 	if err != nil {
 		return nil, fmt.Errorf("marshal workflows: %w", err)
@@ -126,7 +127,7 @@ func (c *Core) upsertAgent(ctx context.Context, a *Agent) (*Agent, error) {
 	_, err = c.store.DB().ExecContext(ctx, agentUpsert,
 		a.ID, a.Name, a.Description, nullableText(a.Icon),
 		a.Instructions, string(tools), string(mcps), string(wfs), string(supports),
-		string(surfaces), a.Knowledge, a.DefaultWorkflow, nullableText(a.SourcePath), now, now,
+		string(surfaces), a.Knowledge, string(requirements), a.DefaultWorkflow, nullableText(a.SourcePath), now, now,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("upsert agent %s: %w", a.ID, err)
@@ -136,17 +137,17 @@ func (c *Core) upsertAgent(ctx context.Context, a *Agent) (*Agent, error) {
 
 func scanAgent(scan func(...any) error) (*Agent, error) {
 	var (
-		a                                                        Agent
-		toolsJSON, mcpsJSON, wfsJSON, supportsJSON, surfacesJSON string
-		icon, sourcePath                                         sql.NullString
-		createdAt, updatedAt                                     string
+		a                                                                          Agent
+		toolsJSON, mcpsJSON, wfsJSON, supportsJSON, surfacesJSON, requirementsJSON string
+		icon, sourcePath                                                           sql.NullString
+		createdAt, updatedAt                                                       string
 	)
 	_ = createdAt
 	_ = updatedAt
 	err := scan(
 		&a.ID, &a.Name, &a.Description, &icon,
 		&a.Instructions, &toolsJSON, &mcpsJSON, &wfsJSON, &supportsJSON,
-		&surfacesJSON, &a.Knowledge, &a.DefaultWorkflow, &sourcePath, &createdAt, &updatedAt,
+		&surfacesJSON, &a.Knowledge, &requirementsJSON, &a.DefaultWorkflow, &sourcePath, &createdAt, &updatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -171,6 +172,11 @@ func scanAgent(scan func(...any) error) (*Agent, error) {
 	}
 	if err := json.Unmarshal([]byte(surfacesJSON), &a.Surfaces); err != nil {
 		return nil, fmt.Errorf("decode surfaces_json: %w", err)
+	}
+	if requirementsJSON != "" && requirementsJSON != "null" && requirementsJSON != "{}" {
+		if err := json.Unmarshal([]byte(requirementsJSON), &a.Requirements); err != nil {
+			return nil, fmt.Errorf("decode requirements_json: %w", err)
+		}
 	}
 	return &a, nil
 }
@@ -199,7 +205,7 @@ func nullableText(s string) any {
 const (
 	agentColumns = `id, name, description, icon, instructions,
 		tools_json, mcp_servers_json, workflows_json, supports_json,
-		surfaces_json, knowledge, default_workflow, source_path, created_at, updated_at`
+		surfaces_json, knowledge, requirements_json, default_workflow, source_path, created_at, updated_at`
 
 	agentSelectAll  = `SELECT ` + agentColumns + ` FROM agents ORDER BY name`
 	agentSelectByID = `SELECT ` + agentColumns + ` FROM agents WHERE id = ?`
@@ -207,8 +213,8 @@ const (
 	agentUpsert = `INSERT INTO agents (
 		id, name, description, icon, instructions,
 		tools_json, mcp_servers_json, workflows_json, supports_json,
-		surfaces_json, knowledge, default_workflow, source_path, created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		surfaces_json, knowledge, requirements_json, default_workflow, source_path, created_at, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(id) DO UPDATE SET
 		name             = excluded.name,
 		description      = excluded.description,
@@ -220,6 +226,7 @@ const (
 		supports_json    = excluded.supports_json,
 		surfaces_json    = excluded.surfaces_json,
 		knowledge        = excluded.knowledge,
+		requirements_json = excluded.requirements_json,
 		default_workflow = excluded.default_workflow,
 		source_path      = excluded.source_path,
 		updated_at       = excluded.updated_at`

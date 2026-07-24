@@ -103,6 +103,7 @@ func TestPlan_AppendsModelArgForClaudeWhenOllamaConfigured(t *testing.T) {
 // user sees a working Gemini and clear breadcrumbs from the Ollama
 // screen on how to wire it up by hand.
 func TestPlan_GeminiIgnoresOllamaSettings(t *testing.T) {
+	t.Skip("Gemini CLI support has been removed")
 	chat := chatFromSeededReversing(t)
 	chat.Settings = WorkspaceSettings{
 		Ollama: OllamaSettings{Endpoint: "http://10.0.0.1:11434", Model: "qwen3"},
@@ -335,7 +336,6 @@ func TestPlan_NoExtraArgsWhenOllamaNotConfigured(t *testing.T) {
 	for _, agent := range []Agent{
 		{ID: AgentClaude, Binary: "claude", WpcTarget: "claude", Available: true},
 		{ID: AgentCodex, Binary: "codex", WpcTarget: "codex", Available: true},
-		{ID: AgentGemini, Binary: "gemini", WpcTarget: "gemini", Available: true},
 	} {
 		plan, err := Plan(ws, agent)
 		if err != nil {
@@ -368,12 +368,12 @@ func TestDetectAgents_PopulatesEntries(t *testing.T) {
 	// host; just check the catalog comes back with the expected IDs and
 	// that Available is a deterministic bool (not panicking, etc.).
 	agents := DetectAgents(t.Context())
-	if len(agents) != 7 {
-		t.Fatalf("expected 7 agents, got %d", len(agents))
+	if len(agents) != 5 {
+		t.Fatalf("expected 5 agents, got %d", len(agents))
 	}
 	wantIDs := map[AgentID]bool{
 		AgentClaude: true, AgentOpenClaude: true, AgentCodex: true,
-		AgentOpenCode: true, AgentPraimateCode: true, AgentGemini: true, AgentDeepSeek: true,
+		AgentOpenCode: true, AgentPraimateCode: true,
 	}
 	for _, a := range agents {
 		if !wantIDs[a.ID] {

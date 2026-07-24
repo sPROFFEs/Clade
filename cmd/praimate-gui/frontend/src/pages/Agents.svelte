@@ -4,8 +4,8 @@
   // Editor (document studio). Editing happens on the YAML wire format
   // in the embedded CodeMirror editor; saving re-validates through the
   // same parser `praimate agent import` uses.
-  import { onMount } from 'svelte'
-  import { api } from '../lib/api.js'
+  import { onDestroy, onMount, tick } from 'svelte'
+  import { api, onRequirementsProgress } from '../lib/api.js'
   import { activePage, pageRevision, openChatId, pendingTerm, agentStudio } from '../lib/stores.js'
   import CodeEditor from '../lib/CodeEditor.svelte'
   import WorkflowRunner from '../lib/WorkflowRunner.svelte'
@@ -13,6 +13,45 @@
   let agents = []
   let error = ''
   let notice = ''
+  let requirementsRunning = ''
+  let requirementsResult = null
+  let requirementsProgress = null
+  let requirementsNow = Date.now()
+  let requirementsLogEl = null
+  let requirementsTimer = null
+  let unsubscribeRequirements = () => {}
+
+  function duration(ms) {
+    const total = Math.max(0, Math.floor(ms / 1000))
+    const minutes = Math.floor(total / 60)
+    const seconds = total % 60
+    return minutes ? `${minutes}m ${String(seconds).padStart(2, '0')}s` : `${seconds}s`
+  }
+
+  function requirementsActivity(p) {
+    if (p?.phase === 'canceling') return 'Stopping process…'
+    const idle = requirementsNow - (p?.lastOutputAt || p?.startedAt || requirementsNow)
+    if (idle >= 60000) return `No output for ${duration(idle)} — the script may be waiting or stalled`
+    if (idle >= 15000) return `Waiting for output (${duration(idle)})`
+    return 'Receiving output'
+  }
+
+  async function updateRequirementsProgress(ev) {
+    if (!ev?.agentID) return
+    const previous = requirementsProgress?.agentID === ev.agentID
+      ? requirementsProgress
+      : { agentID: ev.agentID, output: '', phase: 'running', startedAt: ev.at, lastOutputAt: ev.at }
+    requirementsProgress = {
+      ...previous,
+      phase: ev.state === 'output' ? previous.phase : ev.state,
+      startedAt: ev.state === 'started' ? ev.at : previous.startedAt,
+      lastOutputAt: ev.state === 'output' ? ev.at : previous.lastOutputAt,
+      output: ev.text ? (previous.output + ev.text).slice(-65536) : previous.output
+    }
+    requirementsNow = Date.now()
+    await tick()
+    if (requirementsLogEl) requirementsLogEl.scrollTop = requirementsLogEl.scrollHeight
+  }
 
   // view: 'list' | 'edit' | 'run'
   let view = 'list'
@@ -340,6 +379,25 @@
     } catch (e) { error = String(e) }
   }
 
+  async function runRequirements(a) {
+    if (requirementsRunning || !confirm(`Run ${a.requirements.script} for "${a.name}"? This script can install software and change this computer.`)) return
+    requirementsRunning = a.id
+    requirementsResult = null
+    const now = Date.now()
+    requirementsProgress = { agentID: a.id, phase: 'starting', output: '', startedAt: now, lastOutputAt: now }
+    error = ''
+    try { requirementsResult = { agentID: a.id, ...(await api.runAgentRequirements(a.id)) } }
+    catch (e) { error = String(e) }
+    finally { requirementsRunning = '' }
+  }
+
+  async function cancelRequirements(a) {
+    if (requirementsRunning !== a.id) return
+    requirementsProgress = { ...requirementsProgress, phase: 'canceling' }
+    try { await api.cancelAgentRequirements(a.id) }
+    catch (e) { error = String(e) }
+  }
+
   // --- workflow run (ported from the old Run page) ---------------------------
 
   let runAgent = null
@@ -356,7 +414,16 @@
     know = null
   }
 
-  onMount(load)
+  onMount(() => {
+    load()
+    unsubscribeRequirements = onRequirementsProgress(updateRequirementsProgress)
+    requirementsTimer = setInterval(() => (requirementsNow = Date.now()), 1000)
+  })
+
+  onDestroy(() => {
+    unsubscribeRequirements()
+    if (requirementsTimer) clearInterval(requirementsTimer)
+  })
 </script>
 
 {#if view === 'edit'}
@@ -404,23 +471,30 @@
       {#if know.mode === 'rag' && know.graphifyInstalled}
         <label class="lbl" style="margin-top:8px">Indexing backend</label>
         <div class="row">
-          <select class="field" style="max-width:280px" bind:value={ragBackend}>
+          <select class="field" style="max-width:320px" bind:value={ragBackend}>
             <option value="claude-cli">Claude CLI (uses your install · no key)</option>
             <option value="code">Code only (no key · skips documents)</option>
-            {#if know.localEndpoint}<option value="local">Local LLM (your saved endpoint)</option>{/if}
+            {#if know.localEndpoint}
+              <option value="local">Local LLM — OpenAI compatible</option>
+              <option value="local-ollama">Ollama — optimized local backend</option>
+            {/if}
             <option value="claude">Anthropic API</option>
             <option value="openai">OpenAI</option>
-            <option value="gemini">Google Gemini</option>
-            <option value="deepseek">DeepSeek</option>
             <option value="kimi">Kimi (Moonshot)</option>
           </select>
-          {#if ragBackend !== 'code' && ragBackend !== 'claude-cli' && ragBackend !== 'local'}
+          {#if !['code', 'claude-cli', 'local', 'local-ollama'].includes(ragBackend)}
             <input class="field grow mono" type="password" placeholder="API key for the backend" bind:value={ragKey} />
           {/if}
         </div>
-        {#if ragBackend === 'local'}
+        {#if ragBackend === 'local' || ragBackend === 'local-ollama'}
           <div class="row" style="margin-top:6px">
-            <input class="field grow mono" placeholder="model name at the endpoint (e.g. qwen2.5-coder)" bind:value={ragModel} />
+            <input
+              class="field grow mono"
+              placeholder={ragBackend === 'local-ollama'
+                ? 'Ollama model, e.g. qwen2.5-coder:7b'
+                : 'model name at the endpoint'}
+              bind:value={ragModel}
+            />
           </div>
         {:else if ragBackend !== 'code' && ragBackend !== 'claude-cli'}
           <div class="row" style="margin-top:6px">
@@ -433,7 +507,10 @@
           {:else if ragBackend === 'code'}
             Builds a code knowledge-graph (functions, calls, imports) only. Documents/PDFs are skipped — pick an LLM backend to index those.
           {:else if ragBackend === 'local'}
-            Routes through your saved Local LLM endpoint (<span class="mono">{know.localEndpoint}</span>) — no cloud key. Configure it in the Local LLM tab.
+            Routes through the saved OpenAI-compatible endpoint (<span class="mono">{know.localEndpoint}</span>) — no cloud key.
+          {:else if ragBackend === 'local-ollama'}
+            Uses graphify's Ollama backend with single-request concurrency and Ollama-specific context handling
+            (<span class="mono">{know.localEndpoint}</span>).
           {:else}
             Documents are summarized by the chosen LLM (uses your key, costs tokens). Code is still AST-extracted for free.
           {/if}
@@ -545,15 +622,45 @@
         {#if (a.workflows || []).length > 0}
           <button class="btn" on:click={() => openRun(a)}>Run workflow</button>
         {/if}
+        {#if a.requirements}
+          <button class="btn" on:click={() => runRequirements(a)} disabled={requirementsRunning === a.id}>{requirementsRunning === a.id ? 'Running requirements…' : 'Run requirements script'}</button>
+        {/if}
         <button class="btn" on:click={() => agentStudio.set({ id: a.id })}>Edit</button>
         <button class="btn" on:click={() => exportYAML(a)}>Export</button>
         <button class="btn danger" on:click={() => remove(a)}>Delete</button>
       </div>
+      {#if requirementsRunning === a.id && requirementsProgress?.agentID === a.id}
+        <div class="requirements-progress">
+          <div class="row">
+            <strong>{requirementsProgress.phase === 'starting' ? 'Starting requirements…' : 'Requirements running'}</strong>
+            <span class="pill warn">{duration(requirementsNow - requirementsProgress.startedAt)}</span>
+            <span class="card-sub grow">{requirementsActivity(requirementsProgress)}</span>
+            <button class="btn danger sm" on:click={() => cancelRequirements(a)} disabled={requirementsProgress.phase === 'canceling'}>
+              {requirementsProgress.phase === 'canceling' ? 'Stopping…' : 'Stop'}
+            </button>
+          </div>
+          <div class="card-sub">Remaining time is unavailable unless the script reports its own progress; live output below shows its current phase.</div>
+          {#if requirementsProgress.output}<pre bind:this={requirementsLogEl}>{requirementsProgress.output}</pre>{/if}
+        </div>
+      {/if}
+      {#if requirementsResult?.agentID === a.id}
+        <div class="requirements-result" class:failed={!requirementsResult.success}>
+          <strong>{requirementsResult.success ? 'Requirements script completed' : 'Requirements script failed'}</strong>
+          {#if requirementsResult.error}<div class="mono">{requirementsResult.error}</div>{/if}
+          {#if requirementsResult.output}<pre>{requirementsResult.output}</pre>{/if}
+          {#if requirementsResult.instructions}<div class="card-sub"><strong>Additional instructions:</strong> {requirementsResult.instructions}</div>{/if}
+        </div>
+      {/if}
     </div>
   {/each}
 {/if}
 
 <style>
+  .requirements-result { margin-top: 10px; border: 1px solid var(--ok); border-radius: var(--radius-sm); padding: 8px 10px; color: var(--text-dim); }
+  .requirements-result.failed { border-color: var(--err); }
+  .requirements-result pre { max-height: 180px; overflow: auto; white-space: pre-wrap; margin: 7px 0; font: 11px/1.4 var(--mono); }
+  .requirements-progress { margin-top: 10px; border: 1px solid var(--warn); border-radius: var(--radius-sm); padding: 8px 10px; color: var(--text-dim); }
+  .requirements-progress pre { max-height: 260px; overflow: auto; white-space: pre-wrap; margin: 7px 0 0; font: 11px/1.4 var(--mono); background: var(--bg); padding: 8px; border-radius: 6px; }
   .agent-editor { flex: 1; min-height: 240px; }
   .edit-stack { display: flex; flex-direction: column; gap: 12px; height: calc(100vh - 120px); }
   .edit-stack .card { flex: none; max-height: 42vh; overflow-y: auto; margin-top: 0; }
