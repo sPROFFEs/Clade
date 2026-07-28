@@ -64,7 +64,6 @@ func TestSchemaTables_Present(t *testing.T) {
 
 	want := []string{
 		"chats", "messages", "agents",
-		"memory_identity", "memory_pinned", "memory_episodes",
 		"mcp_servers", "schedules", "watchers",
 		"settings_cli", "settings_gui",
 		"schema_version",
@@ -76,6 +75,27 @@ func TestSchemaTables_Present(t *testing.T) {
 			Scan(&name)
 		if err != nil {
 			t.Errorf("table %s missing: %v", table, err)
+		}
+	}
+}
+
+func TestSchemaTables_CrossChatMemoryAbsent(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "db.sqlite"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+
+	for _, table := range []string{"memory_identity", "memory_pinned", "memory_episodes"} {
+		var count int
+		err := s.DB().QueryRowContext(context.Background(),
+			`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = ?`, table).
+			Scan(&count)
+		if err != nil {
+			t.Fatalf("inspect table %s: %v", table, err)
+		}
+		if count != 0 {
+			t.Errorf("removed cross-chat memory table %s still exists", table)
 		}
 	}
 }

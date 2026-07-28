@@ -1,12 +1,10 @@
 package main
 
-// `praimate --gui` dispatcher — the AIO entry point. The GUI stays a
-// separate binary (praimate-gui) because a true single binary can't
-// work everywhere: on Linux, linking webkit into the TUI would make
-// it fail to start on headless boxes; on Windows, console-vs-GUI
-// subsystem flags force a choice that breaks one of the two modes.
-// Instead the TUI binary locates its sibling and launches it, so
-// users get one command for both surfaces.
+// Desktop dispatcher for the all-in-one entry point. The GUI stays a
+// separate binary (praimate-gui) because the maintenance CLI remains
+// console-friendly while Windows GUI subsystem flags suppress a console
+// window for the desktop process. This bootstrap locates its sibling
+// and launches it by default.
 //
 // Resolution order:
 //
@@ -14,18 +12,15 @@ package main
 //     (the release archives ship them side by side)
 //  2. praimate-gui on PATH
 //
-// When neither exists (linux-arm64 / macOS archives, or a
-// build-from-source TUI), we print the build-from-source pointer
-// instead of failing cryptically.
+// When neither exists, we print the build-from-source pointer instead
+// of failing cryptically.
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"time"
 )
 
@@ -49,10 +44,9 @@ func resolveGUIBinary(exePath string) string {
 }
 
 // launchGUI starts praimate-gui detached and returns the process exit
-// code for main() to pass through. The TUI process exits immediately
+// code for main() to pass through. The bootstrap process exits immediately
 // after a successful spawn — the GUI owns its own lifetime; holding a
-// parent terminal process open would just confuse `praimate --gui &`
-// users.
+// parent terminal process open would just confuse background launches.
 func launchGUI() int {
 	exePath, _ := os.Executable()
 	exePath, _ = filepath.EvalSymlinks(exePath)
@@ -61,35 +55,28 @@ func launchGUI() int {
 	if bin == "" {
 		fmt.Fprintln(os.Stderr, "praimate: praimate-gui not found next to this binary or on PATH.")
 		fmt.Fprintln(os.Stderr)
-		fmt.Fprintln(os.Stderr, "The desktop GUI ships prebuilt for linux-amd64 and windows-amd64.")
-		fmt.Fprintln(os.Stderr, "On other platforms build it from source (needs node+npm; on Linux")
-		fmt.Fprintln(os.Stderr, "also libwebkit2gtk-4.1-dev libgtk-3-dev):")
+		fmt.Fprintln(os.Stderr, "The desktop GUI supports Linux and Windows.")
+		fmt.Fprintln(os.Stderr, "To build it from source you need node+npm; on Linux also")
+		fmt.Fprintln(os.Stderr, "libwebkit2gtk-4.1-dev and libgtk-3-dev:")
 		fmt.Fprintln(os.Stderr)
 		fmt.Fprintln(os.Stderr, "  git clone https://github.com/sPROFFEs/praimate.git && cd praimate")
 		fmt.Fprintln(os.Stderr, "  cd cmd/praimate-gui && ./build.sh")
 		return 1
 	}
 
-	// Send the child's output to a log FILE, not a pipe: we exit right
-	// after the grace period, and a pipe dies with us — the GUI would
-	// then hit write errors the next time it logs. A file handle stays
-	// valid after we're gone, and doubles as the diagnostic source when
-	// the GUI exits immediately.
-	logPath := filepath.Join(os.TempDir(), "praimate-gui-launch.log")
-	logFile, err := os.Create(logPath)
-	if err != nil {
-		logFile = nil // degrade: discard output rather than fail launch
-	}
+	// Remove the diagnostic file written by pre-log-free releases.
+	_ = os.Remove(filepath.Join(os.TempDir(), "praimate-gui-launch.log"))
+
 	cmd := exec.Command(bin)
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
+	// The desktop launcher deliberately discards child output. Persistent
+	// diagnostic logs can contain paths, prompts, or provider errors and are
+	// not part of PrAImate's data model.
+	cmd.Stdout = nil
+	cmd.Stderr = nil
 	cmd.Stdin = nil
 	if err := cmd.Start(); err != nil {
 		fmt.Fprintf(os.Stderr, "praimate: failed to start %s: %v\n", bin, err)
 		return 1
-	}
-	if logFile != nil {
-		logFile.Close() // child holds its own handle now
 	}
 	pid := cmd.Process.Pid
 
@@ -101,20 +88,8 @@ func launchGUI() int {
 	select {
 	case err := <-exited:
 		fmt.Fprintln(os.Stderr, "praimate: praimate-gui exited immediately without opening a window.")
-		if b, rerr := os.ReadFile(logPath); rerr == nil {
-			if msg := strings.TrimSpace(string(b)); msg != "" {
-				fmt.Fprintln(os.Stderr)
-				fmt.Fprintln(os.Stderr, msg)
-				if strings.Contains(msg, "build tags") {
-					fmt.Fprintln(os.Stderr)
-					fmt.Fprintln(os.Stderr, "This looks like an older praimate-gui build. Reinstall the latest")
-					fmt.Fprintln(os.Stderr, "release (praimate -update) or rebuild: cd cmd/praimate-gui && ./build.sh")
-				}
-			}
-		}
 		if err != nil {
-			var ee *exec.ExitError
-			if errors.As(err, &ee) {
+			if ee, ok := err.(*exec.ExitError); ok {
 				return ee.ExitCode()
 			}
 		}

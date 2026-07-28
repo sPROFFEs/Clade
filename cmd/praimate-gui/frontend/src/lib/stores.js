@@ -46,6 +46,6 @@ export async function prefetchCLIs(force = false) {
 
 // pendingTerm, when set, tells the Code page to attach to an
 // already-started PTY instead of launching one — used when the Chats
-// page reopens a TUI workspace chat in the terminal.
+// page reopens a legacy workspace chat in the terminal.
 // Shape: { termId, chatId, cli, cwd, label, model, local*, note }
 export const pendingTerm = writable(null)

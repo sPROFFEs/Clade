@@ -13,8 +13,8 @@ import (
 //
 // Layout:
 //
-//	Linux / macOS: ~/.praimate/db.sqlite
-//	Windows:       %APPDATA%/PrAImate/db.sqlite
+//	Linux:   ~/.praimate/db.sqlite
+//	Windows: %APPDATA%/PrAImate/db.sqlite
 func DefaultDBPath() (string, error) {
 	if env := os.Getenv("PRAIMATE_DB"); env != "" {
 		return env, nil

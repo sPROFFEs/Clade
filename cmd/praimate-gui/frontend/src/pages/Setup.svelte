@@ -1,6 +1,6 @@
 <script>
   // First-run setup — shown instead of the app when no launcher config
-  // exists. Same three options as the TUI: empty workspaces root,
+  // exists. Three options: empty workspaces root,
   // root + bundled samples, or clone an existing backup remote.
   import { createEventDispatcher } from 'svelte'
   import { api } from '../lib/api.js'

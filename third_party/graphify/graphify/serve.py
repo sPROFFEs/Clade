@@ -686,14 +686,11 @@ def _build_server(graph_path: str):
         ]
 
     def _tool_query_graph(arguments: dict) -> str:
-        import time as _time
-        from graphify import querylog
         question = arguments["question"]
         mode = arguments.get("mode", "bfs")
         depth = min(int(arguments.get("depth", 3)), 6)
         budget = int(arguments.get("token_budget", 2000))
         context_filter = arguments.get("context_filter")
-        _t0 = _time.perf_counter()
         result = _query_graph_text(
             G,
             question,
@@ -701,16 +698,6 @@ def _build_server(graph_path: str):
             depth=depth,
             token_budget=budget,
             context_filters=context_filter,
-        )
-        querylog.log_query(
-            kind="mcp_query",
-            question=question,
-            corpus=str(graph_path),
-            result=result,
-            mode=mode,
-            depth=depth,
-            token_budget=budget,
-            duration_ms=(_time.perf_counter() - _t0) * 1000,
         )
         return result
 
@@ -1249,6 +1236,9 @@ def serve_http(
 def _main(argv: list[str] | None = None) -> None:
     import argparse
     import os
+    from graphify.privacy_cleanup import remove_legacy_logs
+
+    remove_legacy_logs()
 
     parser = argparse.ArgumentParser(
         prog="python -m graphify.serve",

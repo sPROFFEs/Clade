@@ -102,6 +102,26 @@ workflows:
 	}
 }
 
+func TestParseAgentYAML_RejectsMacOSRequirements(t *testing.T) {
+	_, err := ParseAgentYAML(strings.NewReader(`schema: praimate.agent/v1
+id: mac-only
+name: Mac only
+instructions: x
+supports: [claude]
+requirements:
+  os: darwin
+  script: setup.sh
+workflows:
+  - name: run
+    steps:
+      - kind: user_message
+        template: hello
+`))
+	if err == nil || !strings.Contains(err.Error(), "linux or windows") {
+		t.Fatalf("expected unsupported requirements OS error, got %v", err)
+	}
+}
+
 func TestRoundTripYAML_PreservesFields(t *testing.T) {
 	in := &Agent{
 		ID:           "rt",

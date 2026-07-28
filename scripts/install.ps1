@@ -298,12 +298,13 @@ function Install-Binary {
         Copy-Item -Path (Join-Path $extracted "praimate.exe") -Destination $Dest -Force
         Copy-Item -Path (Join-Path $extracted "wpc.exe")   -Destination $Dest -Force
         # Desktop GUI ships prebuilt in both Windows architecture archives.
-        # Install it next to praimate.exe so `praimate --gui` finds it.
+        # Install it next to praimate.exe so the default launcher finds it.
         $guiSrc = Join-Path $extracted "praimate-gui.exe"
-        if (Test-Path $guiSrc) {
-            Copy-Item -Path $guiSrc -Destination $Dest -Force
-            Write-Host "  v praimate-gui.exe installed (launch with: praimate --gui)" -ForegroundColor Green
+        if (-not (Test-Path $guiSrc)) {
+            Fail "release bundle is missing mandatory praimate-gui.exe"
         }
+        Copy-Item -Path $guiSrc -Destination $Dest -Force
+        Write-Host "  v praimate-gui.exe installed (launch with: praimate)" -ForegroundColor Green
         $codeSrc = Join-Path $extracted "praimate-code.exe"
         if (Test-Path $codeSrc) {
             Copy-Item -Path $codeSrc -Destination $Dest -Force
@@ -368,6 +369,9 @@ function Install-Source {
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
         Fail "git is required for --source builds. Install from https://git-scm.com/ first."
     }
+    if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
+        Fail "Node.js/npm is required for the GUI source build. Install Node.js and re-run."
+    }
 
     Step "Cloning repo"
     $tmp = New-Item -ItemType Directory -Force -Path (Join-Path $env:TEMP ("praimate-src-" + [Guid]::NewGuid().ToString("N")))
@@ -383,11 +387,25 @@ function Install-Source {
             if ($LASTEXITCODE -ne 0) { Fail "go build (praimate) failed" }
             & go build -trimpath -ldflags '-s -w' -o wpc.exe   ./cmd/wpc
             if ($LASTEXITCODE -ne 0) { Fail "go build (wpc) failed" }
+            Push-Location "cmd\praimate-gui\frontend"
+            try {
+                & npm install
+                if ($LASTEXITCODE -ne 0) { Fail "npm install failed" }
+                & npm run build
+                if ($LASTEXITCODE -ne 0) { Fail "frontend build failed" }
+            } finally { Pop-Location }
+            Push-Location "cmd\praimate-gui"
+            try {
+                & go build -trimpath -tags "desktop,production" `
+                    -ldflags "-s -w -H windowsgui" -o praimate-gui.exe .
+                if ($LASTEXITCODE -ne 0) { Fail "go build (praimate-gui) failed" }
+            } finally { Pop-Location }
 
             Step "Installing to $Dest"
             Copy-Item -Path ".\praimate.exe" -Destination $Dest -Force
             Copy-Item -Path ".\wpc.exe"   -Destination $Dest -Force
-            Write-Host "  v praimate.exe + wpc.exe installed" -ForegroundColor Green
+            Copy-Item -Path ".\cmd\praimate-gui\praimate-gui.exe" -Destination $Dest -Force
+            Write-Host "  v PrAImate GUI + maintenance CLI + wpc installed" -ForegroundColor Green
         } finally {
             Pop-Location
         }
@@ -399,9 +417,12 @@ function Install-Source {
 # ---------- local path: bins already next to us ----------
 function Install-Local {
     Step "Installing to $Dest"
+    $gui = Join-Path $LocalBins "praimate-gui.exe"
+    if (-not (Test-Path $gui)) { Fail "local bundle is missing mandatory praimate-gui.exe" }
     Copy-Item -Path (Join-Path $LocalBins "praimate.exe") -Destination $Dest -Force
     Copy-Item -Path (Join-Path $LocalBins "wpc.exe")   -Destination $Dest -Force
-    Write-Host "  v praimate.exe + wpc.exe installed" -ForegroundColor Green
+    Copy-Item -Path $gui -Destination $Dest -Force
+    Write-Host "  v PrAImate GUI + maintenance CLI + wpc installed" -ForegroundColor Green
 }
 
 # ---------- dispatch ----------
@@ -440,9 +461,12 @@ try {
     $ws = New-Object -ComObject WScript.Shell
     $desk = [Environment]::GetFolderPath("Desktop")
     $startMenu = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
+    foreach ($dir in @($desk, $startMenu)) {
+        $legacy = Join-Path $dir "PrAImate GUI.lnk"
+        if (Test-Path $legacy) { Remove-Item -Force $legacy }
+    }
     $targets = @(
-        @{ Name = "PrAImate";     Exe = (Join-Path $Dest "praimate.exe") },
-        @{ Name = "PrAImate GUI"; Exe = (Join-Path $Dest "praimate-gui.exe") }
+        @{ Name = "PrAImate"; Exe = (Join-Path $Dest "praimate-gui.exe") }
     )
     foreach ($t in $targets) {
         if (Test-Path $t.Exe) {
@@ -463,4 +487,4 @@ try {
 }
 
 Step "Done"
-Write-Host "Open a new terminal, then try:    praimate -version"
+Write-Host "Open a new terminal, then run:    praimate"

@@ -11,47 +11,40 @@ Gemini and DeepSeek references below document compatibility with legacy
 persisted chats only. They are no longer offered in the selectable CLI catalog;
 new chats use Claude Code, OpenClaude, Codex, OpenCode, or PrAImate Code.
 
-- [Surfaces](#surfaces)
+- [Surface](#surface)
 - [Updating](#updating)
 - [First run](#first-run)
 - [Concepts](#concepts)
 - [Session-start workflow](#session-start-workflow)
 - [Personality](#personality)
 - [Memory](#memory)
-- [Keys](#keys)
 - [Local endpoint — Ollama / GPUStack / vLLM / LiteLLM](#local-endpoint--ollama--gpustack--vllm--litellm)
 - [Files on disk](#files-on-disk)
 - [Session resume](#session-resume)
 - [Workpath source format](#workpath-source-format)
 - [Imports, managed tools, hooks](#imports-managed-tools-hooks)
-- [Screens](#screens)
+- [Pages](#pages)
 - [Online skills](#online-skills)
 - [Knowledge base](#knowledge-base)
-- [Settings menu](#settings-menu)
+- [Settings](#settings)
 - [Backup (optional cloud sync over git)](#backup-optional-cloud-sync-over-git)
 - [Roadmap](#roadmap)
 
-## Surfaces
+## Surface
 
-Two surfaces over one shared SQLite database (`~/.praimate/db.sqlite`):
+PrAImate is a Wails/Svelte desktop application backed by an
+AES-256-XTS encrypted SQLite database at `~/.praimate/db.sqlite`.
+Its random 512-bit XTS key lives separately at
+`~/.praimate/db.sqlite.key` with user-only filesystem permissions.
+Run `praimate` to launch it;
+the lightweight bootstrap finds the mandatory sibling `praimate-gui`
+binary and exits after the window starts. `praimate --gui` remains as a
+compatibility alias.
 
-- **`praimate`** — the TUI. Single static Go binary, no runtime deps.
-- **`praimate-gui`** — the desktop app (Wails + Svelte; UI/UX inspired
-  by [OpenGUI](https://github.com/akemmanuel/OpenGUI)). Same chats,
-  same agents, same memory, same automation as the TUI — a run
-  launched in one surface shows up in the other. Light/dark/system
-  theme with accent presets.
-
-Launch the GUI with `praimate --gui` — the TUI binary finds the
-`praimate-gui` binary shipped next to it (or on PATH) and starts it.
-
-Release archives include the prebuilt GUI for **linux-amd64** and
-**Windows amd64/arm64** (Windows needs no extra runtime — WebView2 is
-system-provided on Windows 10+; Linux needs the `webkit2gtk-4.1`
-runtime package). linux-arm64 and macOS archives ship the TUI only
-because the GUI is cgo + webkit there and can't be cross-compiled;
-build it from source with one script (needs node+npm; on Linux also
-`libwebkit2gtk-4.1-dev libgtk-3-dev`):
+Supported systems are **Linux** and **Windows**. macOS is unsupported
+and receives no release archive. Windows uses the system WebView2
+runtime. Linux uses WebKitGTK 4.1. Native source builds require
+node+npm plus `libwebkit2gtk-4.1-dev` and `libgtk-3-dev`:
 
 ```sh
 cd cmd/praimate-gui && ./build.sh   # produces ./praimate-gui
@@ -75,11 +68,14 @@ binary is preserved as `praimate.exe.old` (a running `.exe` can be
 renamed but not deleted); the next update cleans it up.
 
 The updater and installers use normal TLS verification when connecting
-to GitHub.
+to GitHub. Updates refresh both the bootstrap and desktop binary.
 
 ## First run
 
-First run asks where your data lives and what to seed:
+The first GUI execution opens a mandatory privacy notice explaining
+local storage, model-provider data flow, agent file permissions,
+database encryption limits, and optional backup exposure. After you
+acknowledge it, first run asks where your data lives and what to seed:
 
 1. **Workspaces root** — where templates + chats live. Default
    `~/praimate-workspaces`.
@@ -95,30 +91,19 @@ First run asks where your data lives and what to seed:
    have, so it never clobbers your edits. You can re-import or share
    them any time from the Agents tab.
 
-Then: home screen → `n` (new chat) → pick a template → name the chat
-→ pick an agent. The chat is created, the workpath is compiled into
-its sandbox, the agent launches with `cwd` set to that sandbox.
-
-PrAImate **does not quit** when the agent runs. The TUI stays alive
-across the child's lifetime — when you exit the agent (`/exit`,
-`Ctrl-D`, etc.), control returns to the chat list with the
-just-ended session's diagnostics already visible. Launch another
-chat without leaving PrAImate.
+Then use **Chats** for conversations, **Code** for live project
+terminals, and **Agents** to launch a reusable workflow. Terminal
+sessions run inside the desktop application.
 
 Next time you re-open a chat: the launcher inspects the agent's own
-session store, finds your previous session(s) for that chat's
-sandbox, and resumes natively — `claude --continue` or `claude
---resume <UUID>` for Claude, `codex resume --last` / `codex resume
-<UUID>` for Codex. When two or more matching sessions exist, the
-agent's own picker opens scoped to this chat. Press `F` on the chat
-list (instead of Enter) for a deliberate fresh launch that skips
-resume but leaves the captured sessions on disk.
+session store, finds your previous session(s) for that chat's sandbox,
+and resumes natively where the selected CLI supports it.
 
 ## Concepts
 
 - **Template** — a reusable workpath pattern (mission + playbook +
   rules + tools + subagents + persona). Templates don't run; they're
-  cloned. Edit with `t` on the home screen.
+  cloned. Edit their files directly or with the document Studio.
 - **Chat** — a cloned-and-running instance of a template. Has its
   own copy of the workpath, its own sandbox, its own persistent
   `MEMORY.md`, and is bound to one agent CLI at creation.
@@ -184,10 +169,7 @@ it at the top of the compiled instructions**, before mission /
 playbook / rules — so it strongly shapes behaviour throughout the
 session.
 
-Edit it from inside the launcher:
-
-- On the home screen, highlight a chat → `f` → pick `personality.md`.
-- For templates: `t` → highlight a template → `f` → `personality.md`.
+Edit `personality.md` directly or through the document Studio.
 
 What goes in it? Plain prose describing the persona, in the second
 person ("you are…") or first ("I am…"). Example openings:
@@ -228,76 +210,20 @@ across launches:
   session's marker as `### Title` subsections. Existing entries are
   never overwritten.
 
-Toggle memory per template (template wizard) or per chat (`e` on the
-home screen). Disabling it stops the launcher from staging /
-syncing the file; existing notes stay on disk.
-
-There is also **cross-chat memory** (identity facts, salience-scored
-pinned facts, per-session episode summaries distilled by a local
-Ollama or CLI-billed model) — opt-in, ≤800 tokens injected, decays
-and self-prunes. Off by default; toggle it in the GUI's Memory page
-or the TUI settings.
-
-## Keys
-<img width="2506" height="1190" alt="{5D687895-AE30-461F-AC76-004FA789BFE6}" src="https://github.com/user-attachments/assets/a966d13b-4a62-4ca6-8579-19ec7d2cf909" />
-### Home (chat list)
-
-| Key       | Effect                                                      |
-|-----------|-------------------------------------------------------------|
-| `↑/↓ k/j` | Move selection                                              |
-| `enter`   | Open chat (auto-resume if a native session exists)          |
-| `F`       | Fresh launch — skip resume, leave captured sessions on disk |
-| `n`       | New chat                                                    |
-| `d`       | Delete highlighted chat (confirms)                          |
-| `e`       | Settings (agent / language / memory / mirror / local endpoint / online skills) |
-| `f`       | Edit chat files (mission, persona…)                         |
-| `/`       | Cross-chat search                                           |
-| `t`       | Template manager                                            |
-| `r`       | Refresh                                                     |
-| `ctrl-c`  | Quit                                                        |
-
-The per-chat **agent picker** and **local endpoint config** live in
-the settings menu (`e`). The left-nav Agents tab (`Ctrl-3`) is
-install-management only.
-
-### Template list (`t` from home)
-
-| Key     | Effect                                            |
-|---------|---------------------------------------------------|
-| `enter` | Edit settings of highlighted template             |
-| `n`     | New template (full wizard)                        |
-| `d`     | Delete (existing chats from it are unaffected)    |
-| `f`     | Edit template files                               |
-| `esc`   | Back to chats                                     |
-
-### Agents tab (left nav, install-only)
-
-The left-nav Agents tab is for install management — installing,
-updating, or repairing the agent CLIs. Per-chat agent swap lives in
-the chat settings menu (`e` on the chat list → Agent row).
-
-| Key     | Effect                                                  |
-|---------|---------------------------------------------------------|
-| `↑/↓`   | Move selection                                          |
-| `enter` | Open the installer for the highlighted agent (install or upgrade) |
-| `i`     | Same as Enter — explicit install                        |
-| `esc`   | Back                                                    |
-
-On Windows the install screen has an opt-in `n` keybinding to also
-install Node.js LTS via `winget` when the selected method needs
-Node — useful for fresh boxes that don't have a Node runtime yet.
-Off by default.
+Existing workpath chats retain their `memoryEnabled` value. Reopening
+one from the GUI's Workspace chats list still stages and syncs its
+`MEMORY.md`; the file and merge driver were not removed.
 
 ## Local endpoint — Ollama / GPUStack / vLLM / LiteLLM
 
-The Local-endpoint wizard (settings menu → "Local endpoint" row)
+The **Local LLM** page
 routes a chat through any **OpenAI-compatible local endpoint**, not
 just vanilla Ollama. Supported: Ollama, GPUStack, vLLM, LiteLLM,
 llama.cpp's server, LocalAI, anything that speaks
 `/v1/chat/completions`. With Bearer auth: GPUStack, gated vLLM /
 LiteLLM, anything else that requires a key.
 
-Five wizard steps:
+The setup covers:
 
 1. **Endpoint** — `http://host[:port]`. The launcher normalises
    missing schemes and trailing slashes.
@@ -381,7 +307,6 @@ just uses its native Google auth, which is the default.
 | Path                                                | Holds                                                   |
 |-----------------------------------------------------|---------------------------------------------------------|
 | `~/.config/praimate/config.json` (Linux/XDG)           | `workspacesRoot`, `lastAgent`                           |
-| `~/Library/Application Support/praimate/…` (macOS)     | same                                                    |
 | `%AppData%\praimate\config.json` (Windows)             | same                                                    |
 | `<root>/templates/<name>/workpath/`                 | wpc source: `mission.md`, `playbook.md`, `rules.md`, `personality.md`, `tools/`, `agents/`, `knowledge/` |
 | `<root>/templates/<name>/template.json`             | defaults inherited by new chats (memory, language, skills) |
@@ -393,7 +318,7 @@ just uses its native Google auth, which is the default.
 
 ## Session resume
 
-When you re-open a chat from the chat list, PrAImate inspects the
+When you reopen an existing workspace chat from the GUI, PrAImate inspects the
 agent's own session store, picks the right resume flag, and stays
 out of the way:
 
@@ -403,11 +328,6 @@ out of the way:
 | Exactly 1 | `claude --continue` / `codex resume <UUID>` — direct resume, no picker |
 | 0, but a captured transcript exists (e.g. chat dir copied from another machine) | Restore the captured rollout into the agent's store with the correct UUID-named file, then `--continue` / `resume` it |
 | 0 and nothing captured | Fresh launch |
-
-**`F` instead of Enter** on the chat list bypasses resume on purpose:
-useful when you want to start a clean conversation on the same chat
-without deleting the captured sessions. The slice on disk is left
-intact so a subsequent plain Enter resumes normally.
 
 Per-session artifacts the launcher captures on every exit:
 
@@ -421,14 +341,13 @@ Per-session artifacts the launcher captures on every exit:
                               # cwd, opencode info+messages, gemini tmp...
 ```
 
-The `native/` snapshot runs in a background goroutine — the TUI
-redraws immediately on exit. The slice makes the chat dir fully
+The `native/` snapshot runs in a background goroutine. The slice makes the chat dir fully
 self-contained: copy it to another machine and the next launch
 restores the conversation state into the agent's home dir on the
 new machine.
 
-The slice **restore** at launch is opt-in per chat (`e` → Mirror
-agent state). SIGKILL-safe: if PrAImate was force-killed mid-session,
+The slice **restore** at launch honors the existing chat's
+`mirrorAgentState` setting. It is SIGKILL-safe: if PrAImate was force-killed mid-session,
 mirror-in compares per-file mtimes and preserves the agent's
 home-dir copy when it's newer than the slice. You don't lose
 turns to a partial snapshot.
@@ -497,9 +416,8 @@ Full schema + per-target reference: [SCHEMA.md](SCHEMA.md),
 ## Imports, managed tools, hooks
 
 Three features that extend the wpc compile-once-for-N-agents model.
-This section is the practical "what to type" tour. The **Tools** tab
-in the launcher TUI (Ctrl-4) hosts the install / update UX for
-graphify and any future managed tools.
+The GUI's **CLI & Tools** page hosts the install/update UX for graphify
+and other managed tools.
 
 ### Shared capability bundles via `imports:`
 
@@ -551,8 +469,7 @@ The shipped tool today is **graphify** (a tree-sitter-AST + LLM
 knowledge-graph builder for code). Two ways to install:
 
 ```
-# In the TUI: Ctrl-4 → Tools tab → enter on graphify
-praimate
+# In the GUI: CLI & Tools → Managed tools → graphify
 
 # Or from the CLI:
 praimate -install-tool graphify
@@ -570,9 +487,8 @@ binary policy — you opt into the uv install yourself) and prints the
 official one-liner:
 
 ```
-curl -LsSf https://astral.sh/uv/install.sh | sh    # Linux/macOS
+curl -LsSf https://astral.sh/uv/install.sh | sh    # Linux
 irm https://astral.sh/uv/install.ps1 | iex         # Windows
-brew install uv                                    # macOS (Homebrew)
 winget install --id=astral-sh.uv -e                # Windows (winget)
 ```
 
@@ -622,8 +538,8 @@ the hooks into its native format.
     {
       "event": "pre_tool",
       "matcher": "Bash",
-      "command": "echo \"[$(date -Iseconds)] bash invoked\" >> .praimate-audit.log",
-      "description": "Audit every bash call"
+      "command": "scripts/check-bash-policy.sh",
+      "description": "Validate bash calls against the project policy"
     },
     {
       "event": "session_start",
@@ -675,24 +591,18 @@ ls /tmp/cr-test/.claude/settings.json   # exists when the template has hooks
 graphify --version
 ```
 
-## Screens
+## Pages
 
-The launcher renders with [Bubble Tea](https://github.com/charmbracelet/bubbletea)
-+ [Lip Gloss](https://github.com/charmbracelet/lipgloss) — rounded
-outer frame, title bar with the active screen name, help bar at the
-bottom.
-
-### Home — chat list
-
-<img width="2509" height="1194" alt="{240DA2B1-66EB-4EE1-8F0F-90F156B49E58}" src="https://github.com/user-attachments/assets/24985863-d756-46f2-8ed1-e355b3f1992a" />
-
-### Agent picker
-
-<img width="2507" height="1193" alt="{8304EDD7-FA23-416D-B692-20BDCE394075}" src="https://github.com/user-attachments/assets/b5bce049-cd23-4480-9ab2-f536acdba722" />
-
-### Local-endpoint wizard
-
-<img width="2505" height="1195" alt="{F7066226-6E62-4790-A960-ABFC5B14B4EB}" src="https://github.com/user-attachments/assets/e277fbad-fcde-4230-a114-43718dad083e" />
+- **Code** — live CLI terminals in a selected project folder.
+- **Chats** — clean conversations and existing workspace-chat resume.
+- **Agents** — import, edit, and run reusable agents and workflows.
+- **Skills** — manage reusable prompt skills.
+- **CLI & Tools** — detect, install, and repair supported CLIs and tools.
+- **Local LLM** — configure an OpenAI-compatible local endpoint.
+- **MCP** — connect and manage MCP servers.
+- **Settings** — privacy, automation, backup, appearance, and updates.
+- **About** — version/platform details, encryption status and paths,
+  privacy boundaries, backup disclosure, and supported systems.
 
 ## Online skills
 
@@ -709,9 +619,8 @@ the URL:
   the skill files land at the root of the target directory. Path-
   escaping entries (e.g. `../foo`) are rejected.
 
-Both transports cache by directory name — re-launching the same chat
-doesn't re-download. Configure the URL list per template in the
-template wizard, or per chat with `e` on the home screen.
+Both transports cache by directory name, so reopening the same
+workspace chat does not re-download them.
 
 Once cloned, the launcher injects a required-reading directive into
 the compiled instructions: the agent is told the skills exist
@@ -784,24 +693,31 @@ the result against the schema before reporting done.
 It ships with the canonical docs in
 [`samples/workpaths/workpath-author/knowledge/`](../samples/workpaths/workpath-author/knowledge)
 (schema, targets, activation, quickstart, decoration pipeline)
-plus a `new-workpath.{sh,ps1}` scaffolding tool. Pick it from
-the template list (`t` on home) on first run, or any time you
-need to author a new template.
+plus a `new-workpath.{sh,ps1}` scaffolding tool for authoring a new
+template from the shell.
 
-## Settings menu
+## Settings
 
-Each chat has a settings menu reached with `e` on the chat list.
-Six items, all editable in place — Esc on the list saves and
-returns:
+The GUI Settings page contains privacy rules, folder watchers, schedules,
+git backup, appearance, and update controls. Chat-specific CLI, model,
+tool level, skills, and MCP selections are edited from the Chats page.
+Local endpoint defaults live on the Local LLM page.
 
-| Row | What it does |
-|---|---|
-| **Language** | Prepends a `respond in <lang>` directive to the agent's first turn. |
-| **Persistent MEMORY.md** | Toggle the staging/sync-back of `MEMORY.md` between sandbox and chat-root. |
-| **Mirror agent state** | Opt-in: restore the chat's captured slice into the agent's home dir before launch (cross-machine restore). Snapshot-on-exit always runs regardless of this flag. SIGKILL-safe via mtime comparison. |
-| **Agent** | Per-chat agent picker. Pick a different installed agent to swap; pick a missing one to open the install screen. Writes through to `chat.json` immediately so the swap survives a restart. |
-| **Local endpoint** | Opens the Local-endpoint wizard for this chat. Returns to settings when applied. |
-| **Online skills** | Multi-add list editor for git/zip URLs the launcher pulls into the sandbox on every launch. |
+The first-run privacy notice is versioned and appears once. A future
+material change to telemetry, storage, or encryption can increment the
+notice version and require a fresh acknowledgement. PrAImate itself
+does not send product analytics or write application diagnostics,
+Graphify queries, or Code-terminal output to log files. Live terminal
+scrollback exists only in memory and disappears when the terminal
+process closes. External agent CLIs can still maintain their own native
+session data for resume. The About page keeps the same disclosure
+available after first run.
+
+The local database is encrypted with AES-256-XTS. This protects a
+database copied without its separate key file. It does not protect
+against an attacker controlling the same OS account, and XTS provides
+confidentiality rather than tamper authentication. Losing the key file
+means losing access to the local database.
 
 ## Backup (optional cloud sync over git)
 
@@ -827,7 +743,7 @@ prompt:
 
 ### Master switch
 
-The Backup tab opens with the feature OFF. Flipping the master switch
+The Backup settings open with the feature OFF. Flipping the master switch
 is the single explicit action that turns backup on. It initialises
 the workspaces root as a git repository, writes a managed
 `.gitignore` + `.gitattributes`, and unlocks the rest of the tab.
@@ -846,7 +762,7 @@ root (scratch notes, environment overrides, etc.) never propagate.
 
 `.praimate-state/` is how the **database travels too**: before every
 backup commit, PrAImate snapshots its SQLite DB (DB chats, messages,
-agents, MCP servers, settings, memory) plus the shareable slice of
+agents, MCP servers, and settings) plus the shareable slice of
 your config (local-LLM endpoint defaults) into that directory. After
 every pull / merge / reset / first clone, the remote machine's
 snapshot is **row-merged** into the live local DB — newer edits win on
@@ -855,6 +771,12 @@ lost. That's what lets multiple hosts share the same chats: git moves
 the snapshot, PrAImate merges it. (Deletions don't propagate yet — a
 chat deleted on one host can reappear after syncing with a host that
 still has it.)
+
+The `.praimate-state/db.sqlite` backup snapshot is deliberately normal,
+plaintext SQLite so another machine can row-merge it without copying a
+device-local encryption key. Treat repository access as access to the
+database: use a private remote, protect its credentials, and do not
+enable backup for data that must never leave the device.
 
 If you hand-edit `.gitignore`, the absence of the PrAImate-managed
 marker line tells the launcher to leave it alone on the next sync.
@@ -924,6 +846,6 @@ Not yet implemented; PRs welcome:
   body (some Ollama versions) sneaks through.
 - **Auto-spawn LiteLLM as a sidecar** for codex+GPUStack-style
   setups.
-- **Per-chat conversation tagging / saved searches.** Cross-chat
-  search exists (`/` on the chat list); structured tagging on top
-  would help.
+- **Per-chat conversation tagging / saved searches.** The Chats page
+  searches titles and messages; structured tagging would add a durable
+  organization layer.

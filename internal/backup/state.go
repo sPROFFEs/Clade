@@ -3,7 +3,7 @@ package backup
 // State syncer hook — bridges the git-level backup to the SQLite DB +
 // user config that live OUTSIDE the workspaces root (~/.praimate /
 // %APPDATA%). The backup package stays free of database imports: the
-// binaries (TUI + GUI) register a syncer at startup, and the git
+// desktop app registers a syncer at startup, and the git
 // operations call back into it at the two integration points:
 //
 //   Export — before every stage+commit, so the snapshot the repo

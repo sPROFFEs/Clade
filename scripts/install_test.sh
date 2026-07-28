@@ -38,22 +38,29 @@ test -x "$DEST/praimate-code"
 test -x "$CONFIG_TEST/praimate/bin/praimate-graphify"
 test -f "$TMPDIR_TEST/share/praimate/samples/obsolete.txt"
 test -L "$DEST/praimate-gui-launch"
-test -f "$HOME_TEST/.local/share/applications/praimate-gui.desktop"
+test -f "$HOME_TEST/.local/share/applications/praimate.desktop"
+test ! -e "$HOME_TEST/.local/share/applications/praimate-gui.desktop"
 
-rm "$BUNDLE/praimate-gui" "$BUNDLE/praimate-code" "$BUNDLE/praimate-graphify"
+rm "$BUNDLE/praimate-code" "$BUNDLE/praimate-graphify"
 rm "$BUNDLE/PRAIMATE-CODE-LICENSE" "$BUNDLE/PRAIMATE-CODE-NOTICE"
 rm "$BUNDLE/samples/obsolete.txt"
 printf 'new sample\n' > "$BUNDLE/samples/current.txt"
 
 install_bundle
-test ! -e "$DEST/praimate-gui"
-test ! -e "$DEST/praimate-gui-launch"
+test -x "$DEST/praimate-gui"
+test -L "$DEST/praimate-gui-launch"
 test ! -e "$DEST/praimate-code"
 test ! -e "$DEST/PRAIMATE-CODE-LICENSE"
 test ! -e "$DEST/PRAIMATE-CODE-NOTICE"
 test ! -e "$CONFIG_TEST/praimate/bin/praimate-graphify"
 test ! -e "$TMPDIR_TEST/share/praimate/samples/obsolete.txt"
 test -f "$TMPDIR_TEST/share/praimate/samples/current.txt"
-test ! -e "$HOME_TEST/.local/share/applications/praimate-gui.desktop"
+test -f "$HOME_TEST/.local/share/applications/praimate.desktop"
+
+rm "$BUNDLE/praimate-gui"
+if install_bundle; then
+  echo "installer accepted a GUI-less bundle" >&2
+  exit 1
+fi
 
 echo "install update cleanup: ok"

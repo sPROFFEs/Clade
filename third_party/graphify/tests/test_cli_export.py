@@ -163,6 +163,27 @@ def test_query_returns_output(tmp_path):
     assert len(r.stdout) > 0
 
 
+def test_query_creates_no_log_file(tmp_path):
+    out = tmp_path / "graphify-out"
+    out.mkdir()
+    (out / "graph.json").write_text(json.dumps({
+        "directed": True,
+        "multigraph": True,
+        "graph": {},
+        "nodes": [{"id": "alpha", "label": "Alpha", "source_file": "alpha.py"}],
+        "links": [],
+    }))
+    home = tmp_path / "home"
+    home.mkdir()
+    env = os.environ.copy()
+    env["HOME"] = str(home)
+
+    r = _run(["query", "Alpha"], tmp_path, env=env)
+
+    assert r.returncode == 0, r.stderr
+    assert not list(home.rglob("*.log"))
+
+
 def test_query_dfs_flag(tmp_path):
     _make_graph(tmp_path)
     r = _run(["query", "test", "--dfs"], tmp_path)

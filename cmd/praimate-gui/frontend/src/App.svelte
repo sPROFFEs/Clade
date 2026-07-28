@@ -10,14 +10,15 @@
   import Agents from './pages/Agents.svelte'
   import CLIs from './pages/CLIs.svelte'
   import LocalLLM from './pages/LocalLLM.svelte'
-  import Memory from './pages/Memory.svelte'
   import MCP from './pages/MCP.svelte'
   import Settings from './pages/Settings.svelte'
+  import About from './pages/About.svelte'
   import Editor from './pages/Editor.svelte'
   import AgentStudio from './pages/AgentStudio.svelte'
   import Setup from './pages/Setup.svelte'
   import Skills from './pages/Skills.svelte'
   import SessionPanel from './lib/SessionPanel.svelte'
+  import PrivacyNotice from './lib/PrivacyNotice.svelte'
 
   // Lucide-style outline icon paths (24x24 viewBox, stroke-based).
   const icons = {
@@ -26,12 +27,12 @@
     run: 'M12 8V4m0 0h4m-4 0H8m-4 9a8 8 0 0 1 16 0v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM9 14h.01M15 14h.01',
     agents: 'M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7',
     mcp: 'M12 22v-5M9 8V2M15 8V2M6 8h12v5a6 6 0 0 1-12 0z',
-    memory: 'M12 5a3 3 0 1 0-5.9.8A3 3 0 0 0 4 9a3 3 0 0 0 1 5.9 3 3 0 0 0 5 2.6V5zM12 5a3 3 0 1 1 5.9.8A3 3 0 0 1 20 9a3 3 0 0 1-1 5.9 3 3 0 0 1-5 2.6V5z',
     settings:
       'M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
     sun: 'M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10zM12 1v2M12 21v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4',
     moon: 'M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z',
     monitor: 'M2 4a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2zM8 21h8M12 17v4',
+    info: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 10v7M12 7h.01',
     chevronLeft: 'M15 18l-6-6 6-6',
     chevronRight: 'M9 18l6-6-6-6',
   }
@@ -59,16 +60,17 @@
     { id: 'clis', label: 'CLI & Tools', icon: icons.agents, component: CLIs },
     { id: 'localllm', label: 'Local LLM', icon: icons.monitor, component: LocalLLM },
     { id: 'mcp', label: 'MCP', icon: icons.mcp, component: MCP },
-    { id: 'memory', label: 'Memory', icon: icons.memory, component: Memory },
     { id: 'settings', label: 'Settings', icon: icons.settings, component: Settings },
+    { id: 'about', label: 'About', icon: icons.info, component: About },
   ]
 
   let health = null
   // Studio mode: this process was spawned as a document-editor window —
   // render the Editor shell instead of the main app.
   let editorMode = null
-  // First-run setup (no launcher config yet) — same flow as the TUI.
+  // First-run setup when no launcher config exists yet.
   let firstRun = null
+  let privacyNotice = null
 
   onMount(async () => {
     initTheme()
@@ -76,6 +78,11 @@
       editorMode = await api.editorMode()
     } catch {
       editorMode = { active: false }
+    }
+    try {
+      privacyNotice = await api.privacyNotice()
+    } catch {
+      privacyNotice = { required: true }
     }
     try {
       firstRun = await api.firstRun()
@@ -97,6 +104,10 @@
 
   function setupDone() {
     firstRun = { ...firstRun, needed: false }
+  }
+
+  function privacyAccepted() {
+    privacyNotice = { ...privacyNotice, required: false }
   }
 
   // Quick theme cycle in the sidebar footer: dark → light → system.
@@ -179,4 +190,8 @@
     {/key}
   </main>
 </div>
+{/if}
+
+{#if privacyNotice?.required && !editorMode?.active}
+  <PrivacyNotice on:accepted={privacyAccepted} />
 {/if}

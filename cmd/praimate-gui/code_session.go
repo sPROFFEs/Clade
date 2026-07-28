@@ -58,9 +58,8 @@ func (a *App) BindChatToTerminal(termID, chatID string) error {
 	return a.terms.bindChat(termID, chatID)
 }
 
-// GetCodeSessionSnapshot returns the persisted transcript for a Code chat.
-// If termID is live, EndOffset also identifies which queued events are
-// already present in the transcript.
+// GetCodeSessionSnapshot returns the bounded, in-memory output tail for a
+// live Code terminal. No terminal output is persisted to disk.
 func (a *App) GetCodeSessionSnapshot(chatID, termID string) (TerminalSnapshot, error) {
 	if a.terms == nil {
 		return TerminalSnapshot{}, fmt.Errorf("terminal manager is not available")

@@ -32,7 +32,7 @@
   let error = ''
   let agents = []
 
-  // Backup (git sync of the workspaces root — shared with the TUI)
+  // Backup (git sync of the workspaces root)
   let bk = null            // BackupState
   let bkBusy = ''          // label of the in-flight op, '' = idle
   let bkMsg = ''           // last op result line
@@ -174,7 +174,7 @@
 </script>
 
 <h1>Settings</h1>
-<p class="subtitle">Automation and privacy. These rows are shared with the TUI; GUI-only preferences stay separate.</p>
+<p class="subtitle">Automation, privacy, backup, appearance, and updates.</p>
 
 {#if error}<div class="banner">{error}</div>{/if}
 
@@ -286,12 +286,12 @@
 </div>
 
 <h1 style="font-size:16px; margin-top:24px">Backup — git sync</h1>
-<p class="subtitle">Mirrors your chats + templates (the same workspaces root the TUI uses) to a git remote. Settings are shared with the TUI's Backup tab.</p>
+<p class="subtitle">Mirrors your workspace chats and templates to a git remote.</p>
 
 {#if !bk}
   <div class="card card-sub">Loading backup status…</div>
 {:else if !bk.supported}
-  <div class="card card-sub">No workspaces root configured yet — run the <span class="mono">praimate</span> TUI once to set it up.</div>
+  <div class="card card-sub">No workspaces root configured yet — complete first-run setup.</div>
 {:else}
   <div class="card">
     <div class="row" style="justify-content: space-between">
@@ -388,18 +388,17 @@
       
       {#if prereqModal.name === 'git'}
         <div class="code-block">
-          <strong>macOS:</strong> <span class="mono">brew install git</span><br/>
           <strong>Linux (Debian/Ubuntu):</strong> <span class="mono">sudo apt install git</span><br/>
           <strong>Windows:</strong> <span class="mono">winget install --id Git.Git -e --source winget</span>
         </div>
       {:else if prereqModal.name === 'bun'}
         <div class="code-block">
-          <strong>macOS / Linux:</strong> <span class="mono">curl -fsSL https://bun.sh/install | bash</span><br/>
+          <strong>Linux:</strong> <span class="mono">curl -fsSL https://bun.sh/install | bash</span><br/>
           <strong>Windows:</strong> <span class="mono">powershell -c "irm bun.sh/install.ps1 | iex"</span>
         </div>
       {:else if prereqModal.name === 'uv'}
         <div class="code-block">
-          <strong>macOS / Linux:</strong> <span class="mono">curl -LsSf https://astral.sh/uv/install.sh | sh</span><br/>
+          <strong>Linux:</strong> <span class="mono">curl -LsSf https://astral.sh/uv/install.sh | sh</span><br/>
           <strong>Windows:</strong> <span class="mono">powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"</span>
         </div>
       {:else if prereqModal.name === 'bash'}

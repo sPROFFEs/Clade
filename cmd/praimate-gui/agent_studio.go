@@ -27,7 +27,7 @@ const helperAgentID = "agent-builder"
 // is non-empty, the current DB-state YAML is mirrored to `agent.yaml` in
 // the explicitly requested working directory. When no directory is supplied,
 // the helper uses the target agent's data directory; it never falls back to
-// the process directory from which `praimate --gui` happened to be launched.
+// the process directory from which PrAImate happened to be launched.
 func (a *App) StartAgentHelperChat(cli, model, cwd, targetAgentID string) (*core.Chat, error) {
 	c, err := a.requireCore()
 	if err != nil {

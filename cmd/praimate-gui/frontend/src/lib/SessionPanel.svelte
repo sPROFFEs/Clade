@@ -62,7 +62,7 @@
   }
 
   function surfaceLabel(s) {
-    return s === 'studio' ? 'Studio' : s === 'code' ? 'Code · TUI' : s === 'helper' ? 'Agent helper' : 'Chat'
+    return s === 'studio' ? 'Studio' : s === 'code' ? 'Code' : s === 'helper' ? 'Agent helper' : 'Chat'
   }
 
   function supportsNativeTerminalResume(cli) {
@@ -113,7 +113,7 @@
       return
     }
     if (s === 'code') {
-      // Code TUI chats live on the Code page. If we have a live PTY
+      // Code sessions live on the Code page. If we have a live PTY
       // for this chat, reattach to its existing stream — no second
       // process. If not (GUI was restarted or the process died), use
       // that CLI's native resume command in the same folder. The presence of a

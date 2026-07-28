@@ -68,7 +68,7 @@ func KnownAgents() []Agent {
 			Label:       "Claude Code",
 			Binary:      "claude",
 			WpcTarget:   "claude",
-			InstallHint: "curl -fsSL https://claude.ai/install.sh | bash   (macOS/Linux)  |  winget install Anthropic.ClaudeCode  (Windows)",
+			InstallHint: "curl -fsSL https://claude.ai/install.sh | bash   (Linux)  |  winget install Anthropic.ClaudeCode  (Windows)",
 		},
 		{
 			// OpenClaude is a Claude Code fork that routes through any

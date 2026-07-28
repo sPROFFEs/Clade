@@ -1,5 +1,5 @@
-// Package core is the single API surface that both the TUI
-// (cmd/praimate) and the GUI (cmd/praimate-gui, future) call into. No
+// Package core is the single API surface used by the GUI and the
+// maintenance CLI. No
 // other package may import internal/launcher, internal/ollama, etc.
 // directly; everything flows through Core.
 //
@@ -9,8 +9,7 @@
 // through Core.
 //
 // Core owns no concurrency primitives of its own. Callers are expected
-// to be either bubbletea Cmd callbacks (TUI) or Wails-binding goroutines
-// (GUI), both of which are already single-threaded per call.
+// to be Wails-binding goroutines or synchronous maintenance CLI calls.
 package core
 
 import (
@@ -21,8 +20,8 @@ import (
 	"git.jtsec.local/lab/PrAImate/internal/store"
 )
 
-// Core is the facade. Constructed once at process start; passed by
-// pointer to every screen / page that needs to read or mutate state.
+// Core is the facade. Constructed once at process start and passed to
+// every page or command that needs to read or mutate state.
 type Core struct {
 	store *store.Store
 
@@ -63,7 +62,7 @@ func (c *Core) SetApprovalProvider(fn func(chatID string) *ApprovalConfig) {
 // behaves the same as today's TUI.
 type Options struct {
 	// Store, if non-nil, becomes the DB-backed source of truth for
-	// agents, memory, MCP, schedules, and watchers.
+	// agents, MCP, schedules, and watchers.
 	Store *store.Store
 	// WorkspacesRoot is the legacy on-disk workspace directory. Phase 1
 	// continues to honour it so chats keep launching.

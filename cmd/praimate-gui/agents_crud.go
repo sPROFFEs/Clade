@@ -81,7 +81,7 @@ workflows: []
 # saving; it travels inside .praimate-agent packs and recipients must click
 # "Run requirements script" explicitly after import.
 # requirements:
-#   os: linux # linux, darwin, or windows
+#   os: linux # linux or windows
 #   script: setup.sh
 #   instructions: Install Docker before continuing.
 `, "\n")

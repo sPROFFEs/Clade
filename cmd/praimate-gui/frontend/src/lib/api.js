@@ -20,6 +20,9 @@ function call(method, ...args) {
 
 export const api = {
   health: () => call('Health'),
+  about: () => call('About'),
+  privacyNotice: () => call('PrivacyNotice'),
+  acceptPrivacyNotice: () => call('AcceptPrivacyNotice'),
   firstRun: () => call('FirstRun'),
   completeFirstRun: (root, samples, agents, cloneURL) =>
     call('CompleteFirstRun', root, samples, agents, cloneURL || ''),
@@ -139,14 +142,6 @@ export const api = {
   runAllWorkflows: (agentID, cli, model, cwd, inputsByWorkflow, localEndpoint, localApiKey, localModel) =>
     call('RunAllWorkflows', agentID, cli, model || '', cwd, inputsByWorkflow || {}, localEndpoint || '', localApiKey || '', localModel || ''),
   privacyPreview: (text) => call('PrivacyPreview', text),
-
-  getMemory: () => call('GetMemory'),
-  setMemoryEnabled: (on) => call('SetMemoryEnabled', on),
-  setIdentity: (k, v) => call('SetIdentity', k, v),
-  deleteIdentity: (k) => call('DeleteIdentity', k),
-  pinFact: (text) => call('PinFact', text),
-  deletePinned: (id) => call('DeletePinned', id),
-  deleteEpisode: (id) => call('DeleteEpisode', id),
 
   mcpCatalogue: () => call('MCPCatalogue'),
   mcpServers: () => call('MCPServers'),

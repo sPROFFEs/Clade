@@ -1,6 +1,6 @@
 <script>
   // CLIs — detection + installation of the wrapped CLI agents,
-  // mirroring the TUI's install screen. Pick an install method per CLI
+  // Pick an install method per CLI
   // and watch its output stream live.
   import { onMount, onDestroy } from 'svelte'
   import { get } from 'svelte/store'
@@ -157,7 +157,7 @@
   <button class="btn" title="Re-scan PATH for tools installed in another terminal" on:click={async () => { await api.refreshPATH(); await load() }} disabled={loading}>Re-scan PATH</button>
   <button class="btn" on:click={load} disabled={loading}>{loading ? 'Probing…' : 'Re-detect'}</button>
 </div>
-<p class="subtitle">The third-party CLI agents PrAImate wraps. Install or repair them here — same detection and install methods as the TUI.</p>
+<p class="subtitle">The third-party CLI agents PrAImate wraps. Install or repair them here.</p>
 
 {#if error}
   {#if error.includes('install pnpm directly')}
@@ -172,7 +172,7 @@
         </p>
         
         <div class="code-block">
-          <strong>macOS / Linux:</strong><br/>
+          <strong>Linux:</strong><br/>
           <span class="mono">curl -fsSL https://get.pnpm.io/install.sh | sh -</span><br/>
           <span class="mono">exec $SHELL</span><br/>
           <br/>
@@ -286,7 +286,7 @@
 
 {#if tools.length > 0}
   <h1 style="font-size:16px; margin-top:24px">Managed tools</h1>
-  <p class="subtitle">Helper tools installed into PrAImate-managed prefixes, available to every agent (same catalog as the TUI's Tools tab).</p>
+  <p class="subtitle">Helper tools installed into PrAImate-managed prefixes, available to every agent.</p>
   {#each tools as t}
     <div class="card">
       <div class="row">

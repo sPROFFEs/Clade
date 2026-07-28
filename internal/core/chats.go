@@ -5,8 +5,8 @@ package core
 // still surfaced via ListLegacyChats.
 //
 // One Chat row owns N Message rows (FK ON DELETE CASCADE) and
-// optionally references an Agent. settings_json carries the per-chat
-// memory / distill-endpoint preferences set in Phase 3c.
+// optionally references an Agent. settings_json carries per-chat
+// preferences without requiring a schema migration for every field.
 //
 // Persistence is opt-in per workflow run — RunOptions.Persist toggles
 // it. The runner creates a row, appends messages turn-by-turn, and
@@ -41,20 +41,10 @@ type Chat struct {
 	Settings      ChatSettings
 }
 
-// ChatSettings persists into chats.settings_json. Per-chat overrides
-// for the global memory toggle and the distillation endpoint go here.
+// ChatSettings persists into chats.settings_json. Run settings live here.
 // Add fields with `omitempty` so older rows round-trip without
 // schema migration.
 type ChatSettings struct {
-	// DistillEndpoint, if set, overrides the global default for this
-	// chat. Nil means "use global default."
-	DistillEndpoint *DistillEndpoint `json:"distill_endpoint,omitempty"`
-
-	// MemoryOverride lets a chat opt in to memory even when the
-	// global toggle is off (positive) or opt out when global is on
-	// (negative). Nil means "follow global."
-	MemoryOverride *bool `json:"memory_override,omitempty"`
-
 	// Model, if set, pins the CLI's model for every turn of this chat
 	// (claude/openclaude --model, codex -m, opencode/praimate-code
 	// --model provider/model, gemini -m). Empty means the CLI's own

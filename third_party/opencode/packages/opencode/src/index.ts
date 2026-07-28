@@ -28,7 +28,6 @@ import { SessionCommand } from "./cli/cmd/session"
 import { DbCommand } from "./cli/cmd/db"
 import { errorMessage } from "./util/error"
 import { PluginCommand } from "./cli/cmd/plug"
-import { Heap } from "./cli/heap"
 
 const args = hideBin(process.argv)
 
@@ -50,27 +49,14 @@ const cli = yargs(args)
   .alias("help", "h")
   .version("version", "show version number", InstallationVersion)
   .alias("version", "v")
-  .option("print-logs", {
-    describe: "print logs to stderr",
-    type: "boolean",
-  })
-  .option("log-level", {
-    describe: "log level",
-    type: "string",
-    choices: ["DEBUG", "INFO", "WARN", "ERROR"],
-  })
   .option("pure", {
     describe: "run without external plugins",
     type: "boolean",
   })
   .middleware(async (opts) => {
-    if (opts.printLogs) process.env.OPENCODE_PRINT_LOGS = "1"
-    if (opts.logLevel) process.env.OPENCODE_LOG_LEVEL = opts.logLevel
     if (opts.pure) {
       process.env.OPENCODE_PURE = "1"
     }
-
-    Heap.start()
 
     process.env.AGENT = "1"
     process.env.OPENCODE = "1"

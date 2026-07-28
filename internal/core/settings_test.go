@@ -59,31 +59,3 @@ func TestSettings_InvalidScopeRejected(t *testing.T) {
 		t.Fatal("expected invalid-scope error")
 	}
 }
-
-func TestMemoryToggle_DefaultsToFalse(t *testing.T) {
-	c := newMemCore(t)
-	on, err := c.IsMemoryEnabled(context.Background())
-	if err != nil {
-		t.Fatalf("IsMemoryEnabled: %v", err)
-	}
-	if on {
-		t.Fatal("memory should default to off in 1.0")
-	}
-}
-
-func TestMemoryToggle_RoundTrips(t *testing.T) {
-	c := newMemCore(t)
-	ctx := context.Background()
-	if err := c.SetMemoryEnabled(ctx, true); err != nil {
-		t.Fatalf("SetMemoryEnabled: %v", err)
-	}
-	on, _ := c.IsMemoryEnabled(ctx)
-	if !on {
-		t.Fatal("toggle did not stick")
-	}
-	_ = c.SetMemoryEnabled(ctx, false)
-	on, _ = c.IsMemoryEnabled(ctx)
-	if on {
-		t.Fatal("toggle should be off after reset")
-	}
-}

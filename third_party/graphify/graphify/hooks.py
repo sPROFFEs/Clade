@@ -158,13 +158,7 @@ import os, subprocess, sys
 _src = '''
 __REBUILD_BODY__
 '''
-_log = os.environ.get('GRAPHIFY_REBUILD_LOG') or os.path.join(os.path.expanduser('~'), '.cache', 'graphify-rebuild.log')
-try:
-    os.makedirs(os.path.dirname(_log), exist_ok=True)
-    _out = open(_log, 'a', buffering=1, encoding='utf-8', errors='replace')
-except OSError:
-    _out = subprocess.DEVNULL
-_kw = dict(stdout=_out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, cwd=os.getcwd(), close_fds=True)
+_kw = dict(stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, cwd=os.getcwd(), close_fds=True)
 _cmd = [sys.executable, '-c', _src]
 if os.name == 'nt':
     _flags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
@@ -183,8 +177,8 @@ def _detached_launch(rebuild_body: str) -> str:
 
     Replaces the old ``nohup ... &`` form, which failed on Git for Windows'
     shell (no nohup/setsid) and let the rebuild silently never run (#1161).
-    The launcher writes the child's output to ``$GRAPHIFY_REBUILD_LOG`` and
-    returns the instant the child is spawned, so the git hook never blocks.
+    The launcher discards the child's output and returns the instant the child
+    is spawned, so the git hook never blocks or creates a diagnostic log.
     """
     launcher = _LAUNCHER_TEMPLATE.replace("__REBUILD_BODY__", rebuild_body)
     return '"$GRAPHIFY_PYTHON" -c "' + launcher + '"\n'
@@ -227,10 +221,7 @@ export GRAPHIFY_CHANGED="$CHANGED"
 # can take hours; blocking the post-commit hook stalls the shell. The Python
 # launcher below detaches the child cross-platform, so it works on Git for
 # Windows' shell too (which lacks the coreutils backgrounding tools) (#1161).
-_GRAPHIFY_LOG="${HOME}/.cache/graphify-rebuild.log"
-mkdir -p "$(dirname "$_GRAPHIFY_LOG")"
-export GRAPHIFY_REBUILD_LOG="$_GRAPHIFY_LOG"
-echo "[graphify hook] launching background rebuild (log: $_GRAPHIFY_LOG)"
+echo "[graphify hook] launching background rebuild"
 """ + _detached_launch(_REBUILD_BODY_COMMIT) + """# graphify-hook-end
 """
 
@@ -267,10 +258,7 @@ GIT_DIR=$(git rev-parse --git-dir 2>/dev/null)
 [ -f "$GIT_DIR/CHERRY_PICK_HEAD" ] && exit 0
 
 """ + _PYTHON_DETECT + """
-_GRAPHIFY_LOG="${HOME}/.cache/graphify-rebuild.log"
-mkdir -p "$(dirname "$_GRAPHIFY_LOG")"
-export GRAPHIFY_REBUILD_LOG="$_GRAPHIFY_LOG"
-echo "[graphify] Branch switched - launching background rebuild (log: $_GRAPHIFY_LOG)"
+echo "[graphify] Branch switched - launching background rebuild"
 """ + _detached_launch(_REBUILD_BODY_CHECKOUT) + """# graphify-checkout-hook-end
 """
 

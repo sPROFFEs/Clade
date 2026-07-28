@@ -3,7 +3,7 @@ package main
 // Terminal sessions — host a real third-party CLI (claude / codex /
 // opencode / …) live inside the GUI via a PTY. This is what makes the
 // chat "fully functional for coding": you get the actual CLI's
-// interactive TUI — streaming tokens, tool calls, file edits,
+// interactive terminal interface — streaming tokens, tool calls, file edits,
 // approvals — running in a project folder, not a reimplemented loop.
 //
 // Lifecycle (all driven from the frontend over Wails bindings):
@@ -69,35 +69,23 @@ type TermInfo struct {
 }
 
 type termManager struct {
-	mu         sync.Mutex
-	sessions   map[string]*termSession
-	seq        int
-	historyDir string
+	mu       sync.Mutex
+	sessions map[string]*termSession
+	seq      int
 }
 
 func newTermManager() *termManager {
+	// Versions before log-free storage retained terminal output as plaintext
+	// .log files. Remove that legacy cache once; live scrollback now stays in
+	// memory and disappears with the process.
 	cacheDir, err := os.UserCacheDir()
 	if err != nil || strings.TrimSpace(cacheDir) == "" {
 		cacheDir = os.TempDir()
 	}
+	_ = os.RemoveAll(filepath.Join(cacheDir, "praimate", "code-history"))
 	return &termManager{
-		sessions:   map[string]*termSession{},
-		historyDir: filepath.Join(cacheDir, "praimate", "code-history"),
+		sessions: map[string]*termSession{},
 	}
-}
-
-func (tm *termManager) removeHistory(chatID string) error {
-	tm.mu.Lock()
-	defer tm.mu.Unlock()
-	path, err := tm.historyPath(chatID)
-	if err != nil {
-		return err
-	}
-	err = os.Remove(path)
-	if os.IsNotExist(err) {
-		return nil
-	}
-	return err
 }
 
 // list returns a snapshot of every live PTY session so the Sessions
@@ -132,11 +120,6 @@ func (tm *termManager) bindChat(id, chatID string) error {
 	if strings.TrimSpace(chatID) == "" {
 		return fmt.Errorf("chat id is required")
 	}
-	// Output may arrive before RecordCodeSession finishes. Persist that
-	// retained prefix first, then recordOutput appends every later chunk.
-	if err := tm.appendHistoryLocked(chatID, s.history); err != nil {
-		return err
-	}
 	s.chatID = chatID
 	return nil
 }
@@ -156,12 +139,6 @@ func (tm *termManager) recordOutput(id string, data []byte) (TerminalData, bool)
 		s.history = append([]byte(nil), s.history[drop:]...)
 		s.historyStart += int64(drop)
 	}
-	if s.chatID != "" {
-		// Keep the file write under the same lock as outputEnd. This makes a
-		// codeSnapshot atomic with respect to both the persistent transcript
-		// and the offset used to de-duplicate queued frontend events.
-		_ = tm.appendHistoryLocked(s.chatID, data)
-	}
 	return TerminalData{
 		Data:        base64.StdEncoding.EncodeToString(data),
 		StartOffset: start,
@@ -169,100 +146,32 @@ func (tm *termManager) recordOutput(id string, data []byte) (TerminalData, bool)
 	}, true
 }
 
-// codeSnapshot returns the persisted transcript for a Code chat together
-// with the current live process offset. The frontend subscribes before this
-// call, writes Data once, then drops queued chunks ending at EndOffset.
+// codeSnapshot returns the in-memory tail of a live Code terminal together
+// with its current offset. Terminal output is intentionally never written to
+// disk. The frontend subscribes before this call, writes Data once, then
+// drops queued chunks ending at EndOffset.
 func (tm *termManager) codeSnapshot(chatID, termID string) (TerminalSnapshot, error) {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
 
-	var end int64
-	if termID != "" {
-		s := tm.sessions[termID]
-		if s == nil {
-			return TerminalSnapshot{}, fmt.Errorf("no terminal %q", termID)
-		}
-		if s.chatID != chatID {
-			return TerminalSnapshot{}, fmt.Errorf("terminal %q is not bound to chat %q", termID, chatID)
-		}
-		end = s.outputEnd
+	if strings.TrimSpace(chatID) == "" {
+		return TerminalSnapshot{}, fmt.Errorf("chat id is required")
 	}
-	raw, err := tm.readHistoryLocked(chatID)
-	if err != nil {
-		return TerminalSnapshot{}, err
+	if termID == "" {
+		return TerminalSnapshot{}, nil
+	}
+	s := tm.sessions[termID]
+	if s == nil {
+		return TerminalSnapshot{}, fmt.Errorf("no terminal %q", termID)
+	}
+	if s.chatID != chatID {
+		return TerminalSnapshot{}, fmt.Errorf("terminal %q is not bound to chat %q", termID, chatID)
 	}
 	return TerminalSnapshot{
-		Data:      base64.StdEncoding.EncodeToString(raw),
-		EndOffset: end,
+		Data:        base64.StdEncoding.EncodeToString(s.history),
+		StartOffset: s.historyStart,
+		EndOffset:   s.outputEnd,
 	}, nil
-}
-
-func (tm *termManager) historyPath(chatID string) (string, error) {
-	chatID = strings.TrimSpace(chatID)
-	if chatID == "" {
-		return "", fmt.Errorf("chat id is required")
-	}
-	name := base64.RawURLEncoding.EncodeToString([]byte(chatID)) + ".log"
-	return filepath.Join(tm.historyDir, name), nil
-}
-
-func (tm *termManager) appendHistoryLocked(chatID string, data []byte) error {
-	if len(data) == 0 {
-		return nil
-	}
-	path, err := tm.historyPath(chatID)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(tm.historyDir, 0o755); err != nil {
-		return fmt.Errorf("create terminal history directory: %w", err)
-	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-	if err != nil {
-		return fmt.Errorf("open terminal history: %w", err)
-	}
-	_, writeErr := f.Write(data)
-	closeErr := f.Close()
-	if writeErr != nil {
-		return fmt.Errorf("write terminal history: %w", writeErr)
-	}
-	if closeErr != nil {
-		return fmt.Errorf("close terminal history: %w", closeErr)
-	}
-
-	// Avoid rewriting on every small PTY chunk once the limit is reached.
-	// Let the file grow to 5 MiB, then compact it back to the latest 4 MiB.
-	if info, statErr := os.Stat(path); statErr == nil && info.Size() > terminalHistoryLimit+(1<<20) {
-		raw, readErr := os.ReadFile(path)
-		if readErr != nil {
-			return fmt.Errorf("compact terminal history: %w", readErr)
-		}
-		if len(raw) > terminalHistoryLimit {
-			raw = raw[len(raw)-terminalHistoryLimit:]
-		}
-		if err := os.WriteFile(path, raw, 0o600); err != nil {
-			return fmt.Errorf("compact terminal history: %w", err)
-		}
-	}
-	return nil
-}
-
-func (tm *termManager) readHistoryLocked(chatID string) ([]byte, error) {
-	path, err := tm.historyPath(chatID)
-	if err != nil {
-		return nil, err
-	}
-	raw, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("read terminal history: %w", err)
-	}
-	if len(raw) > terminalHistoryLimit {
-		raw = raw[len(raw)-terminalHistoryLimit:]
-	}
-	return raw, nil
 }
 
 func (tm *termManager) snapshot(id string) (TerminalSnapshot, error) {

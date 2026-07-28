@@ -87,14 +87,13 @@ func NewApp() *App {
 	}
 }
 
-// startup opens the shared DB and seeds builtins. Mirrors the TUI's
-// initAppCore: failures are recorded, not fatal — the frontend shows
-// a setup-error banner via Health().
+// startup opens the shared DB and seeds builtins. Failures are
+// recorded, not fatal — the frontend shows a setup-error banner via
+// Health().
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 
-	// Same PATH augmentation the TUI does at startup: managed tool
-	// prefixes (graphify, gstack, scrapegraph) and the praimate bin dir
+	// Add managed tool prefixes (graphify, gstack, scrapegraph) and the praimate bin dir
 	// (praimate-code). Without it the GUI — and every CLI child it
 	// spawns — can't resolve tools installed into the managed dirs:
 	// "graphify installs but isn't detected".
@@ -139,12 +138,13 @@ func (a *App) startup(ctx context.Context) {
 		a.initErr = err.Error()
 		return
 	}
-	// Share the TUI's workspaces root (best-effort): with it, the GUI
-	// can list the TUI's on-disk chats and reopen them in the Code
-	// terminal. Without a config the GUI still works — the workspace
-	// chats section just stays empty.
+	// Load the legacy workspaces root (best-effort) so existing on-disk
+	// chats remain available in the Code terminal. Without a config the
+	// workspace chats section stays empty.
 	workspacesRoot := ""
+	var launcherCfg *launcher.Config
 	if cfg, cfgErr := launcher.LoadConfig(); cfgErr == nil && cfg != nil {
+		launcherCfg = cfg
 		workspacesRoot = cfg.WorkspacesRoot
 	}
 	c, err := core.New(core.Options{Store: st, WorkspacesRoot: workspacesRoot})
@@ -167,10 +167,10 @@ func (a *App) startup(ctx context.Context) {
 	// the GUI's Allow/Deny card (claude/openclaude only; see
 	// approval_broker.go).
 	c.SetApprovalProvider(a.approvalProvider)
+	runGUIAutoSync(ctx, launcherCfg)
 
 	if editorFolder == "" {
-		// Same automation daemons the TUI runs — watchers and schedules
-		// fire regardless of which surface is open. NOT in studio-window
+		// Watchers and schedules run in the main desktop process. NOT in studio-window
 		// processes: the main window already runs them, and two daemons
 		// on one DB would double-fire every schedule.
 		watchers, _ := c.StartWatcherDaemon(context.Background(), core.WatcherDaemonOptions{
@@ -209,6 +209,9 @@ func (a *App) shutdown(ctx context.Context) {
 	a.daemonMu.Unlock()
 	if a.terms != nil {
 		a.terms.closeAll()
+	}
+	if cfg, err := launcher.LoadConfig(); err == nil {
+		runGUIAutoSync(context.Background(), cfg)
 	}
 	if a.st != nil {
 		_ = a.st.Close()
@@ -462,9 +465,6 @@ func (a *App) DeleteChat(chatID string) error {
 	if err := c.DeleteChat(a.ctx, chatID); err != nil {
 		return err
 	}
-	if a.terms != nil {
-		_ = a.terms.removeHistory(chatID)
-	}
 	return nil
 }
 
@@ -626,11 +626,10 @@ func (a *App) StartCleanChat(cli, model, cwd string) (*core.Chat, error) {
 	return chat, nil
 }
 
-// --- Workspace (TUI) chats -------------------------------------------------
+// --- Legacy workspace chats ------------------------------------------------
 
-// WorkspaceChatInfo is one TUI on-disk chat, listed so the GUI can
-// reopen it in the Code terminal. Read-only from the GUI side — the
-// chat's workpath/sandbox stay owned by the TUI flow.
+// WorkspaceChatInfo is one legacy on-disk chat that the GUI can reopen
+// in the Code terminal. Its workpath and sandbox remain on disk.
 type WorkspaceChatInfo struct {
 	ID       string    `json:"id"`
 	Label    string    `json:"label"`
@@ -640,9 +639,8 @@ type WorkspaceChatInfo struct {
 	Sandbox  string    `json:"sandbox"`
 }
 
-// ListWorkspaceChats lists the TUI's on-disk chats (newest first).
-// Returns an empty list when no workspaces root is configured (TUI
-// never ran on this machine).
+// ListWorkspaceChats lists legacy on-disk chats (newest first).
+// It returns an empty list when no workspaces root is configured.
 func (a *App) ListWorkspaceChats() ([]WorkspaceChatInfo, error) {
 	c, err := a.requireCore()
 	if err != nil {
@@ -672,11 +670,9 @@ type OpenWorkspaceChatResult struct {
 	Note   string `json:"note"`
 }
 
-// OpenWorkspaceChat relaunches a TUI chat's CLI inside the GUI's Code
+// OpenWorkspaceChat relaunches a legacy chat's CLI inside the GUI's Code
 // terminal: same sandbox, same agent CLI, native session resume where
-// the CLI supports it (claude/openclaude/codex). This is the
-// TUI→GUI half of chat sharing; DB chats are the shared half both
-// surfaces already read.
+// the CLI supports it (claude/openclaude/codex).
 func (a *App) OpenWorkspaceChat(chatID string) (*OpenWorkspaceChatResult, error) {
 	c, err := a.requireCore()
 	if err != nil {
@@ -684,7 +680,7 @@ func (a *App) OpenWorkspaceChat(chatID string) (*OpenWorkspaceChatResult, error)
 	}
 	root := c.WorkspacesRoot()
 	if root == "" {
-		return nil, fmt.Errorf("no workspaces root configured (run the TUI once first)")
+		return nil, fmt.Errorf("no workspaces root configured; complete first-run setup")
 	}
 	chat, err := launcher.LoadChat(root, chatID)
 	if err != nil || chat == nil {
@@ -859,8 +855,7 @@ type RunResult struct {
 
 // RunWorkflow executes one agent workflow synchronously (the JS
 // promise resolves when the run completes); per-turn progress streams
-// via the "praimate:turn" event. Memory injection and persistence
-// mirror the TUI Recipes flow.
+// via the "praimate:turn" event.
 func (a *App) RunWorkflow(agentID, workflowName, cli, model, cwd string, inputs map[string]string, localEndpoint, localAPIKey, localModel string) (*RunResult, error) {
 	c, err := a.requireCore()
 	if err != nil {
@@ -877,24 +872,17 @@ func (a *App) RunWorkflow(agentID, workflowName, cli, model, cwd string, inputs 
 	model, env := workflowModelAndEnv(cli, model, localEndpoint, localAPIKey, localModel)
 	settings := workflowChatSettings(model, localEndpoint, localAPIKey, localModel)
 
-	query := ""
-	for _, v := range inputs {
-		query += v + " "
-	}
-	injection, _ := c.BuildMemoryInjection(a.ctx, core.InjectionOptions{Query: query})
-
 	res := c.RunWorkflow(a.ctx, core.RunOptions{
-		Agent:           agent,
-		WorkflowName:    workflowName,
-		Inputs:          inputs,
-		CLI:             cli,
-		Cwd:             cwd,
-		Model:           model,
-		Env:             env,
-		Persist:         true,
-		ChatTitle:       agent.Name + " · " + workflowName,
-		MemoryInjection: injection,
-		ChatSettings:    settings,
+		Agent:        agent,
+		WorkflowName: workflowName,
+		Inputs:       inputs,
+		CLI:          cli,
+		Cwd:          cwd,
+		Model:        model,
+		Env:          env,
+		Persist:      true,
+		ChatTitle:    agent.Name + " · " + workflowName,
+		ChatSettings: settings,
 		OnTurn: func(t core.TurnResult) {
 			wruntime.EventsEmit(a.ctx, "praimate:turn", TurnEvent{
 				Index:        t.Index,
@@ -940,14 +928,6 @@ func (a *App) RunAllWorkflows(agentID, cli, model, cwd string, inputsByWorkflow 
 	model, env := workflowModelAndEnv(cli, model, localEndpoint, localAPIKey, localModel)
 	settings := workflowChatSettings(model, localEndpoint, localAPIKey, localModel)
 
-	var query string
-	for _, inputs := range inputsByWorkflow {
-		for _, v := range inputs {
-			query += v + " "
-		}
-	}
-	injection, _ := c.BuildMemoryInjection(a.ctx, core.InjectionOptions{Query: query})
-
 	res := c.RunAllWorkflows(a.ctx, core.RunAllOptions{
 		Agent:            agent,
 		InputsByWorkflow: inputsByWorkflow,
@@ -957,7 +937,6 @@ func (a *App) RunAllWorkflows(agentID, cli, model, cwd string, inputsByWorkflow 
 		Env:              env,
 		Persist:          true,
 		ChatTitle:        agent.Name + " · all workflows",
-		MemoryInjection:  injection,
 		ChatSettings:     settings,
 		OnTurn: func(t core.TurnResult) {
 			wruntime.EventsEmit(a.ctx, "praimate:turn", TurnEvent{
@@ -1050,78 +1029,6 @@ func (a *App) PrivacyPreview(text string) (map[string]int, error) {
 		counts[string(m.Category)]++
 	}
 	return counts, nil
-}
-
-// --- Memory ----------------------------------------------------------------
-
-// MemorySnapshot bundles everything the Memory page renders in one call.
-type MemorySnapshot struct {
-	Enabled  bool              `json:"enabled"`
-	Identity []core.Identity   `json:"identity"`
-	Pinned   []core.PinnedFact `json:"pinned"`
-	Episodes []core.Episode    `json:"episodes"`
-}
-
-func (a *App) GetMemory() (*MemorySnapshot, error) {
-	c, err := a.requireCore()
-	if err != nil {
-		return nil, err
-	}
-	snap := &MemorySnapshot{}
-	snap.Enabled, _ = c.IsMemoryEnabled(a.ctx)
-	snap.Identity, _ = c.ListIdentity(a.ctx)
-	snap.Pinned, _ = c.ListPinned(a.ctx, 0)
-	snap.Episodes, _ = c.ListEpisodes(a.ctx, 100)
-	return snap, nil
-}
-
-func (a *App) SetMemoryEnabled(enabled bool) error {
-	c, err := a.requireCore()
-	if err != nil {
-		return err
-	}
-	return c.SetMemoryEnabled(a.ctx, enabled)
-}
-
-func (a *App) SetIdentity(key, value string) error {
-	c, err := a.requireCore()
-	if err != nil {
-		return err
-	}
-	return c.SetIdentity(a.ctx, key, value, "manual")
-}
-
-func (a *App) DeleteIdentity(key string) error {
-	c, err := a.requireCore()
-	if err != nil {
-		return err
-	}
-	return c.DeleteIdentity(a.ctx, key)
-}
-
-func (a *App) PinFact(text string) error {
-	c, err := a.requireCore()
-	if err != nil {
-		return err
-	}
-	_, err = c.PinFact(a.ctx, text, 1.0)
-	return err
-}
-
-func (a *App) DeletePinned(id int64) error {
-	c, err := a.requireCore()
-	if err != nil {
-		return err
-	}
-	return c.DeletePinned(a.ctx, id)
-}
-
-func (a *App) DeleteEpisode(id int64) error {
-	c, err := a.requireCore()
-	if err != nil {
-		return err
-	}
-	return c.DeleteEpisode(a.ctx, id)
 }
 
 // --- MCP ---------------------------------------------------------------------
@@ -1310,7 +1217,7 @@ func (a *App) DeletePrivacyPattern(index int) error {
 	return c.DeletePrivacyPattern(a.ctx, index)
 }
 
-// --- GUI settings (ScopeGUI — never shared with the TUI, decision 8) --------
+// --- GUI settings -----------------------------------------------------------
 
 func (a *App) GetGUISetting(key string) (string, error) {
 	c, err := a.requireCore()

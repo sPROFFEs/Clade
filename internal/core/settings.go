@@ -1,21 +1,18 @@
 package core
 
-// Settings live in two parallel tables — settings_cli and settings_gui —
-// because the TUI and the GUI surface different controls (decision 8 in
-// the 1.0 plan). Shared values (chats, agents, memory, MCP) are NOT
-// stored here; they have their own dedicated tables.
+// Settings retain two schema-compatible tables from the 1.0 data model.
+// settings_cli holds launcher-wide preferences also consumed by
+// maintenance commands; settings_gui holds desktop presentation state.
+// Shared values (chats, agents, MCP) have dedicated tables.
 //
 // Values are persisted as JSON strings so the same column can hold
 // booleans, ints, strings, and small structs without schema churn.
-// Typed accessors at the bottom of this file (IsMemoryEnabled,
-// SetMemoryEnabled, etc.) are the recommended way to read/write —
-// raw GetSetting/SetSetting exist for forward-compat with not-yet-
-// modeled keys.
+// Raw GetSetting/SetSetting provide forward compatibility for controls
+// that do not yet have typed accessors.
 
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -63,9 +60,7 @@ func (c *Core) GetSetting(ctx context.Context, scope SettingsScope, key string) 
 }
 
 // SetSetting upserts a raw JSON value. Caller is responsible for
-// producing valid JSON; we don't validate here because typed callers
-// (SetMemoryEnabled etc.) marshal through encoding/json which is
-// already correct.
+// producing valid JSON.
 func (c *Core) SetSetting(ctx context.Context, scope SettingsScope, key string, valueJSON []byte) error {
 	if c.store == nil {
 		return errors.New("SetSetting: no store configured")
@@ -98,38 +93,4 @@ func (c *Core) DeleteSetting(ctx context.Context, scope SettingsScope, key strin
 	}
 	_, err = c.store.DB().ExecContext(ctx, "DELETE FROM "+tbl+" WHERE key = ?", key)
 	return err
-}
-
-// --- Typed helpers -----------------------------------------------------
-//
-// Each public setting has a constant key + a Get/Set pair returning a
-// typed value. Add new ones as features land; never write raw keys
-// inline at call sites.
-
-const (
-	// keyMemoryEnabled — bool. Master switch for memory distillation
-	// and injection. Defaults to false (opt-in per plan §3 Phase 3 gate).
-	keyMemoryEnabled = "memory.enabled"
-)
-
-// IsMemoryEnabled reports the user's memory toggle. Stored under the
-// CLI scope; the GUI reads/writes the same scope so the toggle is
-// shared across surfaces (the toggle is a user preference, not a
-// surface-specific UI control). Default when unset: false.
-func (c *Core) IsMemoryEnabled(ctx context.Context) (bool, error) {
-	raw, err := c.GetSetting(ctx, ScopeCLI, keyMemoryEnabled)
-	if err != nil || raw == nil {
-		return false, err
-	}
-	var b bool
-	if err := json.Unmarshal(raw, &b); err != nil {
-		return false, fmt.Errorf("decode %s: %w", keyMemoryEnabled, err)
-	}
-	return b, nil
-}
-
-// SetMemoryEnabled writes the master memory toggle.
-func (c *Core) SetMemoryEnabled(ctx context.Context, enabled bool) error {
-	val, _ := json.Marshal(enabled)
-	return c.SetSetting(ctx, ScopeCLI, keyMemoryEnabled, val)
 }

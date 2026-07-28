@@ -1,7 +1,7 @@
 package main
 
 // Build-from-source — for platforms where we don't ship a prebuilt
-// bundled binary (praimate-code on Windows/macOS, graphify off
+// bundled binary (praimate-code on Windows, graphify off
 // linux/amd64), the user can build it locally from our repo. The flow,
 // streamed live over "praimate:install":
 //
@@ -63,7 +63,7 @@ func lookReq(name, detail string) BuildRequirement {
 // this OS.
 func buildRequirementsFor(tool string) ([]BuildRequirement, string, string, error) {
 	git := lookReq("git", "https://git-scm.com/downloads")
-	// bash is the system shell on Linux/macOS; on Windows it comes with
+	// bash is the system shell on Linux; on Windows it comes with
 	// Git for Windows (git-bash) and must be on PATH.
 	reqs := []BuildRequirement{git}
 	if runtime.GOOS == "windows" {
@@ -260,7 +260,6 @@ func copyFileSimple(src, dst string) error {
 // big, persistent across reboots, never tmpfs:
 //
 //	Linux:   $XDG_CACHE_HOME/praimate/build  (else ~/.cache/praimate/build)
-//	macOS:   ~/Library/Caches/praimate/build
 //	Windows: %LOCALAPPDATA%\praimate\build
 //
 // Users with non-standard layouts (encrypted home, slow disk, etc.)
@@ -277,10 +276,6 @@ func resolveBuildParent() (string, string) {
 	case "windows":
 		if local := os.Getenv("LOCALAPPDATA"); local != "" {
 			return filepath.Join(local, "praimate", "build"), "%LOCALAPPDATA%\\praimate\\build"
-		}
-	case "darwin":
-		if home, _ := os.UserHomeDir(); home != "" {
-			return filepath.Join(home, "Library", "Caches", "praimate", "build"), "~/Library/Caches/praimate/build"
 		}
 	default:
 		if xdg := strings.TrimSpace(os.Getenv("XDG_CACHE_HOME")); xdg != "" {

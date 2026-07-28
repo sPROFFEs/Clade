@@ -75,8 +75,7 @@ func (a *App) SetChatMCPServers(chatID string, ids []string) error {
 }
 
 // UpdateChatConfig reconfigures an existing chat (CLI / model / tools /
-// per-chat local endpoint) — the GUI counterpart of the TUI's per-chat
-// settings. Switching CLI starts a fresh session on the next turn
+// per-chat local endpoint). Switching CLI starts a fresh session on the next turn
 // (history stays). Empty localEndpoint clears the local route.
 func (a *App) UpdateChatConfig(chatID, cli, model, tools, localEndpoint, localAPIKey, localModel string) error {
 	switch tools {

@@ -10,7 +10,6 @@ import { withNetworkOptions, resolveNetworkOptionsNoConfig, hasArg } from "@/cli
 import { Filesystem } from "@/util/filesystem"
 import type { GlobalEvent } from "@opencode-ai/sdk/v2"
 import type { EventSource } from "@opencode-ai/tui/context/sdk"
-import { writeHeapSnapshot } from "v8"
 import { ServerAuth } from "@/server/auth"
 import { validateSession } from "../tui/validate-session"
 import { win32InstallCtrlCGuard } from "@opencode-ai/tui/terminal-win32"
@@ -273,11 +272,6 @@ export const TuiThreadCommand = cmd({
         await Effect.runPromise(
           run({
             url: transport.url,
-            async onSnapshot() {
-              const tui = writeHeapSnapshot("tui.heapsnapshot")
-              const server = await client.call("snapshot", undefined)
-              return [tui, server]
-            },
             config,
             pluginHost: createLegacyTuiPluginHost(),
             directory: cwd,

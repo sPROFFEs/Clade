@@ -1,9 +1,9 @@
-# Cross-compile wpc + praimate for every supported OS/arch and stage them
+# Build the Windows GUI-only bundles and stage them
 # under dist\<os>-<arch>\ ready for distribution.
 #
 # Usage:
 #   .\scripts\build.ps1                            # all targets, default version
-#   .\scripts\build.ps1 -Targets linux-amd64       # one target
+#   .\scripts\build.ps1 -Targets windows-amd64     # one target
 #   .\scripts\build.ps1 -NoArchive                 # skip zip step
 #   .\scripts\build.ps1 -Version 0.2.0             # inject a specific version
 #
@@ -12,18 +12,14 @@
 # the self-updater both report it. Default lives in
 # internal\version\version.go.
 #
-# Requires: Go 1.21+. Uses Compress-Archive (built into PowerShell 5+) for
-# zips; tar.gz on non-Windows targets needs `tar` (built into Windows 10+).
+# Requires: Go, Node.js, and npm. Linux bundles are built natively with
+# scripts/build.sh because Wails needs Linux WebKit/GTK libraries.
 
 [CmdletBinding()]
 param(
     [string[]] $Targets = @(
         "windows-amd64",
-        "windows-arm64",
-        "linux-amd64",
-        "linux-arm64",
-        "darwin-amd64",
-        "darwin-arm64"
+        "windows-arm64"
     ),
     [string] $Version = "1.0.10",
     [string] $LdFlags = "-s -w",
@@ -45,6 +41,9 @@ if (-not (Test-Path "dist")) { New-Item -ItemType Directory -Path "dist" | Out-N
 
 function Build-One($triplet) {
     $goos, $goarch = $triplet -split "-", 2
+    if ($goos -ne "windows" -or $goarch -notin @("amd64", "arm64")) {
+        throw "unsupported GUI release target: $triplet (build.ps1 supports windows-amd64/windows-arm64)"
+    }
     $ext = ""
     if ($goos -eq "windows") { $ext = ".exe" }
 
@@ -61,7 +60,23 @@ function Build-One($triplet) {
     if ($LASTEXITCODE -ne 0) { throw "wpc build failed for $triplet" }
     & go build -trimpath -ldflags $FullLdFlags -o (Join-Path $out "praimate$ext") "./cmd/praimate"
     if ($LASTEXITCODE -ne 0) { throw "praimate build failed for $triplet" }
-    # Transitional shim through 1.0.x; removed in 1.1.
+
+    if (-not (Test-Path "cmd/praimate-gui/frontend/dist/index.html")) {
+        Push-Location "cmd/praimate-gui/frontend"
+        try {
+            & npm install
+            if ($LASTEXITCODE -ne 0) { throw "frontend install failed" }
+            & npm run build
+            if ($LASTEXITCODE -ne 0) { throw "frontend build failed" }
+        } finally { Pop-Location }
+    }
+    Push-Location "cmd/praimate-gui"
+    try {
+        & go build -trimpath -tags "desktop,production" `
+            -ldflags "-s -w -H windowsgui" -o "praimate-gui.exe" "."
+        if ($LASTEXITCODE -ne 0) { throw "praimate-gui build failed for $triplet" }
+    } finally { Pop-Location }
+    Copy-Item -Force "cmd/praimate-gui/praimate-gui.exe" (Join-Path $out "praimate-gui.exe")
 
     # Bundle samples + docs so the binary is self-sufficient at first run.
     Copy-Item -Recurse -Force "samples" (Join-Path $out "samples")

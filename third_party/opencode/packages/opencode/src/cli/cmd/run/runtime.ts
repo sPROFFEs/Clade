@@ -18,7 +18,6 @@ import { MessageID } from "@/session/schema"
 import { createRunDemo } from "./demo"
 import { resolveModelInfo, resolveRunTuiConfig, resolveSessionInfo } from "./runtime.boot"
 import { createRuntimeLifecycle } from "./runtime.lifecycle"
-import { trace } from "./trace"
 import { cycleVariant, formatModelLabel, resolveSavedVariant, resolveVariant, saveVariant } from "./variant.shared"
 import type { LocalReplayAnchor, LocalReplayRow, RunInput, RunPrompt, RunProvider, StreamCommit } from "./types"
 
@@ -180,7 +179,6 @@ async function resolveExitTitle(
 // flips to false so subsequent turns don't re-send attachments.
 async function runInteractiveRuntime(input: RunRuntimeInput, deps: RunRuntimeDeps = {}): Promise<void> {
   const start = performance.now()
-  const log = trace()
   const tuiConfigTask = resolveRunTuiConfig()
   const ctx = await input.boot()
   const modelTask = resolveModelInfo(ctx.sdk, ctx.directory, ctx.model)
@@ -249,7 +247,6 @@ async function runInteractiveRuntime(input: RunRuntimeInput, deps: RunRuntimeDep
         return
       }
 
-      log?.write("send.permission.reply", next)
       await ctx.sdk.permission.reply(next)
     },
     onQuestionReply: async (next) => {
@@ -358,9 +355,6 @@ async function runInteractiveRuntime(input: RunRuntimeInput, deps: RunRuntimeDep
     },
     onSubagentSelect: (sessionID) => {
       state.selectSubagent?.(sessionID)
-      log?.write("subagent.select", {
-        sessionID,
-      })
     },
   })
   const footer = shell.footer
@@ -482,7 +476,6 @@ async function runInteractiveRuntime(input: RunRuntimeInput, deps: RunRuntimeDep
         limits: () => state.limits,
         providers: () => state.providers,
         footer,
-        trace: log,
       })
       if (footer.isClosed) {
         await handle.close()
@@ -545,7 +538,6 @@ async function runInteractiveRuntime(input: RunRuntimeInput, deps: RunRuntimeDep
     await mod.runPromptQueue({
       footer,
       initialInput: input.initialInput,
-      trace: log,
       onSend: (prompt) => {
         state.shown = true
         state.history.push(prompt)
@@ -588,9 +580,6 @@ async function runInteractiveRuntime(input: RunRuntimeInput, deps: RunRuntimeDep
                     limits: () => state.limits,
                   })
                 : undefined
-              log?.write("session.new", {
-                sessionID: state.sessionID,
-              })
               footer.event({
                 type: "stream.subagent",
                 state: {

@@ -1,6 +1,6 @@
 // Package store owns the single PrAImate SQLite database. It is the
 // only package in the tree that opens the DB file. Everything else —
-// internal/core, the TUI, the GUI — talks to a *Store via typed query
+// internal/core and the GUI — talks to a *Store via typed query
 // methods.
 //
 // Migrations live under migrations/ and are embedded into the binary.
@@ -15,24 +15,25 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 
-	_ "modernc.org/sqlite"
+	_ "github.com/ncruces/go-sqlite3/driver"
+	_ "github.com/ncruces/go-sqlite3/vfs/xts"
 )
 
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
 
-// Store wraps the SQLite connection pool. It is safe for concurrent
-// use; modernc.org/sqlite handles the single-writer constraint via a
-// connection-level mutex.
+// Store wraps the encrypted SQLite connection pool.
 type Store struct {
-	db   *sql.DB
-	path string
+	db      *sql.DB
+	path    string
+	keyPath string
 }
 
 // Open opens (or creates) the database at path, applies any pending
@@ -48,18 +49,31 @@ func Open(path string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("store.Open: mkdir parent: %w", err)
 	}
+	keyPath := KeyPath(path)
+	key, err := loadOrCreateKey(keyPath)
+	if err != nil {
+		return nil, fmt.Errorf("store.Open: encryption key: %w", err)
+	}
+	if err := migratePlainDatabase(path, key); err != nil {
+		return nil, fmt.Errorf("store.Open: encrypt existing database: %w", err)
+	}
 
-	// _pragma values are URL-encoded by the driver; '=' becomes %3D.
-	dsn := "file:" + path + "?_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)&_pragma=busy_timeout(5000)"
-	db, err := sql.Open("sqlite", dsn)
+	db, err := sql.Open("sqlite3", encryptedDSN(path, key, false))
 	if err != nil {
 		return nil, fmt.Errorf("store.Open: %w", err)
 	}
-	// modernc's sqlite serialises writes; a small pool is plenty.
 	db.SetMaxOpenConns(4)
 	db.SetMaxIdleConns(2)
+	if err := db.Ping(); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("store.Open: unlock encrypted database: %w", err)
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("store.Open: protect database permissions: %w", err)
+	}
 
-	s := &Store{db: db, path: path}
+	s := &Store{db: db, path: path, keyPath: keyPath}
 	if err := s.migrate(context.Background()); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("store.Open: migrate: %w", err)
@@ -84,6 +98,17 @@ func (s *Store) DB() *sql.DB { return s.db }
 // Path returns the on-disk path the store was opened against.
 func (s *Store) Path() string { return s.path }
 
+// KeyPath returns the separate user-protected key file for path.
+func KeyPath(path string) string { return path + ".key" }
+
+// EncryptionKeyPath reports where this Store's random AES-XTS key lives.
+func (s *Store) EncryptionKeyPath() string {
+	if s == nil {
+		return ""
+	}
+	return s.keyPath
+}
+
 // Snapshot writes a consistent copy of the database to dest using
 // SQLite's VACUUM INTO. Unlike copying the file, this is safe while the
 // DB is open with WAL mode — it produces a single, fully-checkpointed
@@ -98,12 +123,34 @@ func (s *Store) Snapshot(ctx context.Context, dest string) error {
 	}
 	// Remove a prior snapshot — VACUUM INTO refuses to overwrite.
 	_ = os.Remove(dest)
+	// Backups remain portable across machines, so the snapshot is a
+	// normal SQLite file. The first-run privacy notice calls this out:
+	// access to the configured git remote must be treated as DB access.
 	// dest is a trusted, app-controlled path; quote single quotes defensively.
-	q := "VACUUM INTO '" + strings.ReplaceAll(dest, "'", "''") + "'"
+	plainDest := "file:" + filepath.ToSlash(dest) + "?vfs=os"
+	q := "VACUUM INTO '" + strings.ReplaceAll(plainDest, "'", "''") + "'"
 	if _, err := s.db.ExecContext(ctx, q); err != nil {
 		return fmt.Errorf("store.Snapshot: vacuum into %s: %w", dest, err)
 	}
 	return nil
+}
+
+func encryptedDSN(path string, key []byte, readOnly bool) string {
+	u := &url.URL{Scheme: "file", Path: filepath.ToSlash(path)}
+	q := u.Query()
+	q.Set("vfs", "xts")
+	if readOnly {
+		q.Set("mode", "ro")
+	}
+	q.Add("_pragma", "hexkey('"+fmt.Sprintf("%x", key)+"')")
+	q.Add("_pragma", "busy_timeout(5000)")
+	q.Add("_pragma", "foreign_keys(ON)")
+	q.Add("_pragma", "temp_store(memory)")
+	if !readOnly {
+		q.Add("_pragma", "journal_mode(WAL)")
+	}
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 // SchemaVersion returns the highest applied migration number, or 0 if

@@ -1,9 +1,7 @@
 <script>
   // Local LLM — the global default self-hosted endpoint (Ollama,
-  // GPUStack, vLLM, LiteLLM…), mirroring the TUI's local-LLM screen.
-  // Saved into the shared launcher config, so the TUI's new-chat
-  // wizard offers it as "use the saved endpoint", and the backup
-  // syncs it across machines.
+  // GPUStack, vLLM, LiteLLM…). Saved into the launcher config, and the
+  // backup syncs it across machines.
   import { onMount } from 'svelte'
   import { api } from '../lib/api.js'
 
@@ -42,7 +40,7 @@
       d.contextTokens = Number(d.contextTokens) || 0
       d.outputTokens = Number(d.outputTokens) || 0
       await api.setLocalLLM(d)
-      notice = 'Saved — the TUI wizard and other machines (via backup) will see it.'
+      notice = 'Saved — chats and other machines (via backup) will see it.'
     } catch (e) {
       error = String(e)
     } finally {
@@ -100,7 +98,7 @@
 </script>
 
 <h1>Local LLM</h1>
-<p class="subtitle">Default self-hosted OpenAI-compatible endpoint (Ollama, GPUStack, vLLM, LiteLLM…). Chats and the TUI's per-chat wizard reuse it so you never retype the URL.</p>
+<p class="subtitle">Default self-hosted OpenAI-compatible endpoint (Ollama, GPUStack, vLLM, LiteLLM…). Chats reuse it so you never retype the URL.</p>
 
 {#if error}<div class="banner">{error}</div>{/if}
 {#if notice}<div class="card card-sub">{notice}</div>{/if}

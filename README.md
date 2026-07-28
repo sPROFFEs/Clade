@@ -15,12 +15,12 @@
  (/ /^\ \)   ██║     ██║  ██║██║  ██║██║██║ ╚═╝ ██║██║  ██║   ██║   ███████╗
   ""' '""    ╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝     ╚═╝╚═╝  ╚═╝   ╚═╝   ╚══════╝
 
-                  one harness, every agent - shared memory & MCP
+                  one harness, every agent - workflows & MCP
 ```
 
 PrAImate is a local harness for Claude Code, OpenClaude, Codex CLI,
 OpenCode, and the bundled **PrAImate Code** build. It provides the layer
-around those tools: agents, workflows, memory, MCP configuration,
+around those tools: agents, workflows, per-chat `MEMORY.md`, MCP configuration,
 automation, local tool management, and optional git-backed backup.
 
 The current project version is **1.0.10**.
@@ -31,13 +31,18 @@ Release archives and source builds revolve around four executables:
 
 | Binary | Purpose |
 |---|---|
-| `praimate` | Main TUI, chat/workspace launcher, updater, managed-tool installer, and `praimate code` dispatcher. |
-| `praimate-gui` | Wails/Svelte desktop app launched through `praimate --gui`. Shares the same DB, chats, agents, memory, MCP, and automation as the TUI. |
+| `praimate` | GUI bootstrap, updater, managed-tool installer, automation CLI, and `praimate code` dispatcher. Running it without flags opens the desktop app. |
+| `praimate-gui` | Wails/Svelte desktop application. It is mandatory in every supported release archive. |
 | `praimate-code` | Bundled, version-pinned, rebranded OpenCode build. Launched directly or through `praimate code`. |
 | `wpc` | Workpath compiler. Validates and compiles portable workpaths into Claude/Codex/OpenCode/Cursor/mika/generic target files. |
 
-Both app surfaces use the same local SQLite database at
-`~/.praimate/db.sqlite`.
+The desktop app uses an AES-256-XTS encrypted SQLite database at
+`~/.praimate/db.sqlite`. Its random key is stored separately at
+`~/.praimate/db.sqlite.key` with user-only permissions.
+PrAImate does not create application, Graphify-query, or terminal
+log files. Live Code-terminal scrollback is memory-only and disappears
+when its process closes. Agent CLIs may still maintain their own native
+session data.
 
 ## What It Does
 
@@ -59,23 +64,26 @@ Both app surfaces use the same local SQLite database at
   `$VAR` / `${VAR}` expansion, and `~/` expansion before launch.
 - **PrAImate Code MCP support**: `praimate code` and clean GUI terminal
   sessions receive enabled MCP servers even when no agent is selected.
-- **Cross-chat memory**: opt-in identity facts, pinned facts, and
-  episode summaries with bounded prompt injection.
 - **Automation**: folder watchers and cron schedules can trigger agent
   workflows.
 - **Local model routing**: supported CLIs can be routed through
   Ollama/vLLM/GPUStack/LiteLLM style endpoints.
 - **Managed tools**: graphify, gstack, scrapegraph, and bundled
   PrAImate Code can be installed into PrAImate-managed paths and picked
-  up by both the TUI and GUI.
+  up by the GUI and maintenance CLI.
 - **Privacy redaction**: outbound prompts can be scanned for secrets,
   tokens, PII, and user-defined regexes before a CLI receives them.
+- **First-run privacy disclosure**: explains provider data flow, agent
+  file permissions, local encryption limits, and backup exposure before
+  the app can be used.
+- **About page**: shows the exact PrAImate version, platform, database
+  encryption status, storage paths, and the privacy disclosure.
 - **Git backup**: chats, templates, and shareable state can be synced
   across machines with plain git.
 
 ## Install
 
-Linux / macOS:
+Linux:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/sPROFFEs/praimate/main/scripts/install.sh | bash
@@ -88,9 +96,11 @@ iwr -useb https://raw.githubusercontent.com/sPROFFEs/praimate/main/scripts/insta
 ```
 
 The installer resolves the latest GitHub release unless `RELEASE_TAG`
-is set. Prebuilt archives always install `praimate` and `wpc`; they also
-install `praimate-gui`, `praimate-code`, `praimate-graphify`, samples,
-and desktop shortcuts when those assets are present in the archive.
+is set. Every supported archive contains `praimate`, `praimate-gui`, and
+`wpc`. Optional managed binaries are installed when present.
+
+Supported systems are **Linux** and **Windows**. macOS is not supported
+and no macOS release archives are published.
 
 Useful installer modes:
 
@@ -117,9 +127,9 @@ Uninstalling without `--purge` / `-Purge` keeps your config, managed
 tools and chat database, so a later reinstall picks up where you left
 off.
 
-Source installs now detect an existing checkout, build `praimate` and
-`wpc`, build the GUI when dependencies are available, and install the
-resulting binaries together. On Debian/Kali-style Linux systems the GUI
+Source installs detect an existing checkout and build `praimate`,
+`praimate-gui`, and `wpc` together. A missing GUI dependency is a hard
+failure rather than producing a partial installation. On Debian/Kali-style Linux systems the GUI
 build needs:
 
 ```sh
@@ -132,8 +142,8 @@ resolve from the public GitHub repository using normal OS TLS verification.
 ## Quick Start
 
 ```sh
-praimate                # TUI
-praimate --gui          # desktop GUI
+praimate                # desktop GUI
+praimate --gui          # compatibility alias for the same action
 praimate code           # bundled PrAImate Code CLI
 praimate -check-update  # check GitHub for a newer release
 praimate -update        # self-update installed binaries
@@ -143,12 +153,11 @@ praimate -version       # banner + version
 First run asks for a workspaces root and can seed sample workpaths and
 starter agents. From there:
 
-1. Open the TUI with `praimate`, press `n`, choose a template, name the
-   chat, and pick an agent/CLI.
-2. Open the GUI with `praimate --gui`, use **Chats** for normal
+1. Open PrAImate with `praimate`, complete first-run setup, and use
+   **Chats** for normal
    conversations, **Code** for live project terminals, **Agents** for
    imported agents, and **MCP** for server connections.
-3. Use **CLI & Tools** to detect/install CLIs and PrAImate-managed
+2. Use **CLI & Tools** to detect/install CLIs and PrAImate-managed
    tools.
 
 Workpath authoring still goes through `wpc`:
@@ -165,15 +174,14 @@ Build release artifacts from the repo root:
 
 ```sh
 scripts/build.sh
-scripts/build.sh --with-gui
 scripts/build.sh --with-code
 scripts/build.sh --with-graphify
 scripts/build.sh --version=1.0.10
 ```
 
-`scripts/build.sh` stamps the version into `praimate`, builds supported
-OS/arch archives under `dist/`, copies samples/docs into each bundle,
-and optionally includes the GUI, PrAImate Code, and graphify assets.
+`scripts/build.sh` stamps the version into `praimate`, builds Linux and
+Windows archives under `dist/`, and refuses to create an archive without
+the GUI. PrAImate Code and graphify remain optional sidecars.
 
 PrAImate Code is built from the vendored `third_party/opencode` tree:
 
@@ -195,10 +203,10 @@ cd cmd/praimate-gui
 
 | Path | Contents |
 |---|---|
-| `cmd/praimate` | TUI, updater entrypoints, GUI launcher, `praimate code`, and chat/workspace screens. |
+| `cmd/praimate` | GUI bootstrap, updater/installer entrypoints, and `praimate code`. |
 | `cmd/praimate-gui` | Wails desktop backend and Svelte frontend. |
 | `cmd/wpc` | Workpath compiler CLI. |
-| `internal/core` | Shared business logic for agents, chats, MCP, memory, workflows, schedules, and watchers. |
+| `internal/core` | Shared business logic for agents, chats, MCP, workflows, schedules, and watchers. |
 | `internal/launcher` | Workpath/chat launcher, session resume, transcript capture, and config migration. |
 | `internal/installer` | CLI/tool detection and managed-tool installers. |
 | `internal/backup` | Git-backed backup and state sync. |
@@ -215,7 +223,6 @@ cd cmd/praimate-gui
 | [docs/SCHEMA.md](docs/SCHEMA.md) | Workpath source format reference. |
 | [docs/TARGETS.md](docs/TARGETS.md) | Per-CLI compile targets. |
 | [docs/ACTIVATION.md](docs/ACTIVATION.md) | How compiled instructions activate per CLI. |
-| [docs/LAUNCHER.md](docs/LAUNCHER.md) | Launcher behavior and UI notes. |
 
 <p align="center">
   <img src="docs/assets/monke-mascot.png" alt="PrAImate mascot" width="150" />

@@ -1,9 +1,7 @@
 package main
 
-// Local LLM tab bindings — the GUI counterpart of the TUI's local-LLM
-// screen. Reads/writes the GLOBAL default endpoint in launcher.Config
-// (the same fields the TUI's wizard offers as "use the saved
-// endpoint"), and probes the endpoint's model list for the Test button.
+// Local LLM tab bindings. Reads/writes the global default endpoint in
+// launcher.Config and probes the endpoint's model list for the Test button.
 
 import (
 	"context"
@@ -41,9 +39,8 @@ func (a *App) GetLocalLLM() (*LocalLLMDefaults, error) {
 	}, nil
 }
 
-// SetLocalLLM persists the global default endpoint. Shared with the
-// TUI (same config.json) and with other machines via the backup's
-// shareable-config sync.
+// SetLocalLLM persists the global default endpoint and shares it with
+// other machines via the backup's shareable-config sync.
 func (a *App) SetLocalLLM(d LocalLLMDefaults) error {
 	cfg, err := launcher.LoadConfig()
 	if err != nil {

@@ -10,22 +10,9 @@ const cli = yargs(hideBin(process.argv))
   .alias("help", "h")
   .version("version", "show version number", InstallationVersion)
   .alias("version", "v")
-  .option("print-logs", {
-    describe: "print logs to stderr",
-    type: "boolean",
-  })
-  .option("log-level", {
-    describe: "log level",
-    type: "string",
-    choices: ["DEBUG", "INFO", "WARN", "ERROR"],
-  })
   .option("pure", {
     describe: "run without external plugins",
     type: "boolean",
-  })
-  .middleware((opts) => {
-    if (opts.printLogs) process.env.OPENCODE_PRINT_LOGS = "1"
-    if (opts.logLevel) process.env.OPENCODE_LOG_LEVEL = opts.logLevel
   })
   .command(TuiThreadCommand)
   .parse()

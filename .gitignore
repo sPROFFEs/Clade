@@ -34,3 +34,6 @@ cmd/praimate-gui/praimate-gui.exe
 node_modules/
 .venv/
 *.egg-info/
+__pycache__/
+*.py[cod]
+.gstack/

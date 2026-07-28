@@ -3,7 +3,7 @@ package main
 // `praimate code [args...]` — run the bundled PrAImate Code CLI, our
 // version-pinned, rebranded build of OpenCode (MIT). Like `--gui`, the
 // heavy artifact ships as a sibling binary (praimate-code) rather than
-// inflating the lean TUI binary; this dispatcher locates it and execs
+// inflating the bootstrap binary; this dispatcher locates it and execs
 // it with the user's args, forwarding stdio so the interactive coding
 // session works normally.
 //

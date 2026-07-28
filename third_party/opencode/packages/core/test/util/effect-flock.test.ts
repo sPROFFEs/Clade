@@ -107,7 +107,6 @@ const testGlobal = Global.layerWith({
   config: os.tmpdir(),
   state: os.tmpdir(),
   bin: os.tmpdir(),
-  log: os.tmpdir(),
 })
 
 const testLayer = AppNodeBuilder.build(EffectFlock.node, [[Global.node, testGlobal]])

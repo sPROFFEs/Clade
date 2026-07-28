@@ -48,7 +48,7 @@ TARGET="${PRAIMATE_CODE_TARGET:-$NATIVE_GOOS-$NATIVE_GOARCH}"
 GOOS="${TARGET%-*}"
 GOARCH="${TARGET#*-}"
 case "$GOOS-$GOARCH" in
-  linux-amd64|linux-arm64|darwin-amd64|darwin-arm64|windows-amd64|windows-arm64) ;;
+  linux-amd64|linux-arm64|windows-amd64|windows-arm64) ;;
   *) echo "error: unsupported PRAIMATE_CODE_TARGET: $TARGET" >&2; exit 2 ;;
 esac
 OUT="${OUT:-$REPO_ROOT/dist/$GOOS-$GOARCH}"

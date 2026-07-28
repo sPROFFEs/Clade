@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Cross-compile wpc + praimate (TUI) for every supported OS/arch and
-# stage them under dist/<os>-<arch>/ ready for distribution. Run from
+# Build the GUI-only PrAImate bundle for every supported OS/arch and
+# stage it under dist/<os>-<arch>/ ready for distribution. Run from
 # the repo root or from anywhere — we cd to the script's parent
 # automatically.
 #
@@ -9,7 +9,6 @@
 #   scripts/build.sh linux-amd64           # one target
 #   scripts/build.sh --no-archive          # skip the zip/tar.gz step
 #   scripts/build.sh --version=1.0.1       # inject a specific version
-#   scripts/build.sh --with-gui            # also build praimate-gui (native target only)
 #   VERSION=1.0.2 scripts/build.sh         # same, via env var
 #
 # The version is stamped into the binary at link time via
@@ -17,20 +16,18 @@
 # the self-updater both report it. Default lives in
 # internal/version/version.go.
 #
-# GUI coverage with --with-gui:
-#   - native os/arch       — full cgo build (Linux needs webkit2gtk-4.1
-#                            dev headers; macOS needs Xcode CLT)
+# GUI coverage:
+#   - native Linux         — full cgo build (needs webkit2gtk-4.1
+#                            and GTK 3 development headers)
 #   - windows-amd64/arm64  — cross-compilable: Wails v2's Windows
 #                            backend is pure Go syscalls (WebView2 loads
 #                            at runtime), so CGO_ENABLED=0 works
-#   - everything else      — skipped; those platforms build from source
-#                            via cmd/praimate-gui/build.sh
 #
-# `praimate --gui` dispatches to the praimate-gui binary shipped next
-# to it, so bundles that include the GUI get AIO behaviour for free.
+# Every archive MUST contain praimate-gui. `praimate` is the lightweight
+# bootstrap/maintenance CLI and launches that sibling by default.
 #
 # Requires: Go 1.21+, tar + zip (only when archiving); node+npm and
-# webkit2gtk-4.1 dev headers when --with-gui is used on Linux.
+# webkit2gtk-4.1 dev headers for Linux GUI builds.
 
 set -euo pipefail
 
@@ -39,7 +36,6 @@ cd "$(dirname "$0")/.."
 VERSION="${VERSION:-1.0.10}"
 EXTRA_LDFLAGS="${LDFLAGS:--s -w}"  # strip symbols by default — tiny binaries
 ARCHIVE=1
-WITH_GUI=0
 WITH_CODE=0
 WITH_GRAPHIFY=0
 TARGETS=()
@@ -47,7 +43,7 @@ TARGETS=()
 for arg in "$@"; do
   case "$arg" in
     --no-archive) ARCHIVE=0 ;;
-    --with-gui) WITH_GUI=1 ;;
+    --with-gui) ;; # compatibility no-op: GUI is now mandatory
     --with-code) WITH_CODE=1 ;;
     --with-graphify) WITH_GRAPHIFY=1 ;;
     --version=*) VERSION="${arg#--version=}" ;;
@@ -66,14 +62,14 @@ LDFLAGS="$EXTRA_LDFLAGS -X git.jtsec.local/lab/PrAImate/internal/version.Current
 echo "Building version $VERSION"
 
 if [ ${#TARGETS[@]} -eq 0 ]; then
-  TARGETS=(
-    windows-amd64
-    windows-arm64
-    linux-amd64
-    linux-arm64
-    darwin-amd64
-    darwin-arm64
-  )
+  case "$(go env GOOS)" in
+    linux) TARGETS=(windows-amd64 windows-arm64 "linux-$(go env GOARCH)") ;;
+    windows) TARGETS=(windows-amd64 windows-arm64) ;;
+    *)
+      echo "PrAImate release builds support Linux and Windows hosts only." >&2
+      exit 2
+      ;;
+  esac
 fi
 
 NATIVE_TRIPLET="$(go env GOOS)-$(go env GOARCH)"
@@ -86,6 +82,13 @@ build_one() {
   local goarch="${triplet#*-}"
   local ext=""
   if [ "$goos" = "windows" ]; then ext=".exe"; fi
+  case "$triplet" in
+    linux-amd64|linux-arm64|windows-amd64|windows-arm64) ;;
+    *)
+      echo "unsupported GUI release target: $triplet" >&2
+      return 2
+      ;;
+  esac
 
   local out="dist/$triplet"
   mkdir -p "$out"
@@ -96,25 +99,24 @@ build_one() {
   GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 \
     go build -trimpath -ldflags "$LDFLAGS" -o "$out/praimate$ext" ./cmd/praimate
 
-  # GUI: native target (full cgo) + Windows targets (pure-Go cross).
-  if [ "$WITH_GUI" = "1" ]; then
-    if [ "$triplet" = "$NATIVE_TRIPLET" ]; then
-      echo "  + praimate-gui (native)"
-      bash cmd/praimate-gui/build.sh
-      cp "cmd/praimate-gui/praimate-gui$ext" "$out/praimate-gui$ext"
-    elif [ "$goos" = "windows" ]; then
-      echo "  + praimate-gui (windows cross)"
-      # Frontend must already be built (the native branch or a prior
-      # run does it); build it here if dist assets are missing.
-      if [ ! -f cmd/praimate-gui/frontend/dist/index.html ]; then
-        ( cd cmd/praimate-gui/frontend && npm install && npm run build )
-      fi
-      ( cd cmd/praimate-gui && \
-        GOOS=windows GOARCH="$goarch" CGO_ENABLED=0 \
-        go build -trimpath -tags desktop,production \
-          -ldflags "-s -w -H windowsgui" -o praimate-gui.exe . )
-      cp cmd/praimate-gui/praimate-gui.exe "$out/praimate-gui.exe"
+  # GUI: Linux must be built natively; Windows is pure-Go cross-buildable.
+  if [ "$triplet" = "$NATIVE_TRIPLET" ]; then
+    echo "  + praimate-gui (native)"
+    bash cmd/praimate-gui/build.sh
+    cp "cmd/praimate-gui/praimate-gui$ext" "$out/praimate-gui$ext"
+  elif [ "$goos" = "windows" ]; then
+    echo "  + praimate-gui (windows cross)"
+    if [ ! -f cmd/praimate-gui/frontend/dist/index.html ]; then
+      ( cd cmd/praimate-gui/frontend && npm install && npm run build )
     fi
+    ( cd cmd/praimate-gui && \
+      GOOS=windows GOARCH="$goarch" CGO_ENABLED=0 \
+      go build -trimpath -tags desktop,production \
+        -ldflags "-s -w -H windowsgui" -o praimate-gui.exe . )
+    cp cmd/praimate-gui/praimate-gui.exe "$out/praimate-gui.exe"
+  else
+    echo "$triplet requires a native GUI build host; refusing a GUI-less archive" >&2
+    return 2
   fi
 
   # PrAImate Code (rebranded OpenCode): native target only — it's a

@@ -738,7 +738,7 @@
       {:else}
         <div class="hint">This script is packed with the agent but never runs on import. The recipient must explicitly run it from the Agents page.</div>
         <select class="field sm" bind:value={requirementsOS} disabled={requirementsBusy}>
-          <option value="linux">Linux</option><option value="darwin">macOS</option><option value="windows">Windows</option>
+          <option value="linux">Linux</option><option value="windows">Windows</option>
         </select>
         <textarea class="field sm" rows="3" placeholder="Additional instructions shown after the script runs" bind:value={requirementsInstructions} disabled={requirementsBusy}></textarea>
         <button class="btn sm" on:click={pickRequirementsScript} disabled={requirementsBusy}>{requirementsBusy ? 'Attaching…' : requirementsScript ? `Replace ${requirementsScript}` : 'Attach requirements script…'}</button>

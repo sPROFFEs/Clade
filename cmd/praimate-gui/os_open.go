@@ -2,9 +2,7 @@ package main
 
 // "Reveal in file manager" bindings — used by the Studio editor and the
 // New-Agent / agent-knowledge studios for the "open workspace path in
-// the system file explorer" button. The TUI has the same helper in
-// cmd/praimate/screen_files.go; we keep it duplicated rather than
-// dragging a launcher dependency into the GUI just for this one call.
+// the system file explorer" button.
 
 import (
 	"errors"
@@ -23,8 +21,6 @@ func openPathInFileManager(dir string) error {
 	switch runtime.GOOS {
 	case "windows":
 		cmd = exec.Command("explorer", dir)
-	case "darwin":
-		cmd = exec.Command("open", dir)
 	default:
 		cmd = exec.Command("xdg-open", dir)
 	}

@@ -227,9 +227,9 @@ func (a *Agent) Validate() error {
 	}
 	if r := a.Requirements; r != nil {
 		switch r.OS {
-		case "linux", "darwin", "windows":
+		case "linux", "windows":
 		default:
-			return fmt.Errorf("agent %q: requirements os must be linux, darwin or windows", a.ID)
+			return fmt.Errorf("agent %q: requirements os must be linux or windows", a.ID)
 		}
 		if r.Script == "" || strings.ContainsAny(r.Script, `/\\`) {
 			return fmt.Errorf("agent %q: requirements script must be a filename", a.ID)

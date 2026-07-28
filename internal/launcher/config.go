@@ -24,6 +24,12 @@ type Config struct {
 	// WpcBinary, when set, overrides PATH lookup. Optional.
 	WpcBinary string `json:"wpcBinary,omitempty"`
 
+	// PrivacyNoticeAcceptedVersion records the disclosure revision the
+	// user acknowledged. A versioned value lets a future material change
+	// (telemetry, storage boundary, encryption model) show the notice once
+	// again without prompting on every launch.
+	PrivacyNoticeAcceptedVersion string `json:"privacyNoticeAcceptedVersion,omitempty"`
+
 	// --- backup / git sync ---
 	// BackupEnabled is the MASTER SWITCH for the cloud backup feature.
 	// Off by default. When false, NOTHING backup-related runs: no
@@ -98,8 +104,7 @@ func (c *Config) HasLocalDefault() bool {
 
 // ConfigPaths returns the directory and file used for persistent config.
 // On Linux this is $XDG_CONFIG_HOME/praimate/config.json (or ~/.config/...);
-// on macOS, ~/Library/Application Support/praimate/...; on Windows,
-// %AppData%/praimate/... — courtesy of os.UserConfigDir().
+// on Windows it is %AppData%/praimate/... — courtesy of os.UserConfigDir().
 func ConfigPaths() (dir, file string, err error) {
 	base, err := os.UserConfigDir()
 	if err != nil {
@@ -138,7 +143,10 @@ func SaveConfig(c *Config) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
 		return err
 	}
 	raw, err := json.MarshalIndent(c, "", "  ")
@@ -147,8 +155,11 @@ func SaveConfig(c *Config) error {
 	}
 	raw = append(raw, '\n')
 	tmp := file + ".tmp"
-	if err := os.WriteFile(tmp, raw, 0o644); err != nil {
+	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
 		return err
 	}
-	return os.Rename(tmp, file)
+	if err := os.Rename(tmp, file); err != nil {
+		return err
+	}
+	return os.Chmod(file, 0o600)
 }

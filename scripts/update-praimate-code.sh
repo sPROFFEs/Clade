@@ -208,7 +208,7 @@ if [ "$SKIP_BUILD" != 1 ]; then
       gh release upload "$PRAIMATE_VERSION" dist/SHA256SUMS --clobber
       note "SHA256SUMS regenerated + re-uploaded"
     fi
-    note "done — the GUI/TUI 'Install PrAImate Code' download now serves $TAG"
+    note "done — the GUI 'Install PrAImate Code' download now serves $TAG"
   else
     say "next step — publish the new binary (or re-run with --release):"
     note "(remember the baseline variant too: praimate-code-$GOOS-$GOARCH-baseline$EXT)"

@@ -1,10 +1,9 @@
 // Package version centralises the launcher's version string and ASCII
-// banner so main(), the -version flag, the boot splash, and the
-// updater all read from the same source.
+// banner so the bootstrap, GUI, and updater read from the same source.
 package version
 
-// Name is the human-facing product name. Used in TUI headers, the
-// updater's user-agent, and CLI help text.
+// Name is the human-facing product name. Used in the updater's
+// user-agent and CLI help text.
 const Name = "PrAImate"
 
 // Current is the build's semantic version. Bump on every release; the
@@ -43,4 +42,4 @@ const Banner = `   .-"-.     ██████╗ ██████╗  ██
  (/ /^\ \)   ██║     ██║  ██║██║  ██║██║██║ ╚═╝ ██║██║  ██║   ██║   ███████╗
   ""' '""    ╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝     ╚═╝╚═╝  ╚═╝   ╚═╝   ╚══════╝
 
-                  one harness, every agent — shared memory & MCP`
+                  one harness, every agent — workflows & MCP`

@@ -549,7 +549,7 @@
     <button class="btn" on:click={importTemplate} title="Convert a pre-1.1 workpath template folder into an agent with its knowledge base">Import template…</button>
     <button class="btn primary" on:click={() => agentStudio.set({ id: '' })}>+ New agent</button>
   </div>
-  <p class="subtitle">Portable YAML agents, shared with the TUI. Launch them in a Chat, a live Terminal, or the document Studio — each agent declares which surfaces it allows.</p>
+  <p class="subtitle">Portable YAML agents. Launch them in a Chat, a live Terminal, or the document Studio — each agent declares which surfaces it allows.</p>
 
   {#if error}<div class="banner">{error}</div>{/if}
   {#if notice}<div class="card card-sub">{notice}</div>{/if}

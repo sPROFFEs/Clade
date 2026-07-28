@@ -6,12 +6,14 @@
 //	(cd frontend && pnpm install && pnpm build)
 //	go build -tags webkit2_41 -o praimate-gui .
 //
-// On macOS/Windows the webkit2_41 tag is ignored; on Linux it selects
-// webkit2gtk-4.1 (modern distros no longer ship 4.0).
+// On Windows the webkit2_41 tag is ignored; on Linux it selects
+// webkit2gtk-4.1 (modern distros no longer ship 4.0). macOS is not a
+// supported PrAImate platform.
 package main
 
 import (
 	"embed"
+	"fmt"
 	"os"
 	"runtime"
 
@@ -35,6 +37,11 @@ var assets embed.FS
 var appIcon []byte
 
 func main() {
+	if !supportedDesktopOS(runtime.GOOS) {
+		fmt.Fprintln(os.Stderr, "PrAImate supports Linux and Windows only")
+		os.Exit(1)
+	}
+
 	// Hidden mode: when claude spawns this same binary as the MCP
 	// approval shim (`praimate-gui -mcp-approve <url> -mcp-token <tok>`),
 	// run the stdio server and exit WITHOUT touching Wails — no window,
@@ -49,12 +56,11 @@ func main() {
 		}
 		os.Exit(runApprovalShim(os.Stdin, os.Stdout, endpoint, token))
 	}
-
 	// WebKitGTK's accelerated compositing misorders layers on machines
 	// with broken GPU drivers (VMs especially): composited editor
 	// content paints OVER fixed overlays regardless of z-index. CPU
 	// rendering is plenty for this UI — disable compositing outright.
-	// No-op on Windows/macOS (different webviews).
+	// No-op on Windows (different webview).
 	if runtime.GOOS == "linux" && os.Getenv("WEBKIT_DISABLE_COMPOSITING_MODE") == "" {
 		_ = os.Setenv("WEBKIT_DISABLE_COMPOSITING_MODE", "1")
 	}
@@ -72,7 +78,7 @@ func main() {
 	// Studio mode: `praimate-gui -editor <folder> -editor-chat <id>`
 	// opens the document-studio window instead of the main app (Wails
 	// v2 has one window per process — see editor_window.go).
-	title := "PrAImate GUI"
+	title := "PrAImate"
 	if len(os.Args) >= 3 && os.Args[1] == "-editor" {
 		editorFolder = os.Args[2]
 		for i := 3; i+1 < len(os.Args); i++ {
@@ -106,4 +112,8 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+}
+
+func supportedDesktopOS(goos string) bool {
+	return goos == "linux" || goos == "windows"
 }

@@ -1,6 +1,4 @@
-// CLI handlers for the new agent-launch flow added in Phase 2b. These
-// flags are non-interactive utility paths exercised from the shell;
-// the interactive TUI screens that wrap them ship in Phase 2c.
+// Non-interactive agent utility handlers used by the maintenance CLI.
 package main
 
 import (
@@ -71,8 +69,8 @@ func runListAgents() int {
 //
 // Inputs use the same comma-separated key=value format as go test -run;
 // quoted values with commas are not supported (this is a developer-
-// facing utility, not a production UX). Use the GUI/TUI screens in
-// Phase 2c for richer input collection.
+// facing utility, not the primary UX). Use the GUI for richer input
+// collection.
 func runAgentWorkflow(agentID, cli, workflow, inputsRaw string) int {
 	c, cleanup, err := openCore()
 	if err != nil {

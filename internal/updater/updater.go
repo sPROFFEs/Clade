@@ -2,8 +2,8 @@
 // downloads the matching archive for the current OS/arch, extracts the
 // binary, and swaps it in place of the running executable.
 //
-// Designed to be called from main() before the TUI starts, gated behind
-// the -update / -check-update flags. Never runs implicitly.
+// Designed to be called from the maintenance CLI via the -update /
+// -check-update flags. Never runs implicitly.
 package updater
 
 import (
@@ -122,9 +122,16 @@ func parseSemver(s string) [3]int {
 // and architecture. Windows builds ship as .zip, everything else as
 // .tar.gz — matching scripts/build.sh's naming.
 func AssetForHost(rel *Release) (*Asset, error) {
-	triplet := runtime.GOOS + "-" + runtime.GOARCH
+	return assetForPlatform(rel, runtime.GOOS, runtime.GOARCH)
+}
+
+func assetForPlatform(rel *Release, goos, goarch string) (*Asset, error) {
+	if goos != "linux" && goos != "windows" {
+		return nil, fmt.Errorf("unsupported operating system %s; PrAImate supports Linux and Windows only", goos)
+	}
+	triplet := goos + "-" + goarch
 	wantExt := ".tar.gz"
-	if runtime.GOOS == "windows" {
+	if goos == "windows" {
 		wantExt = ".zip"
 	}
 	for i := range rel.Assets {

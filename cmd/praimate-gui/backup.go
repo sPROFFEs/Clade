@@ -1,11 +1,6 @@
 package main
 
-// Backup bindings — the GUI face of the TUI's Backup tab (git sync of
-// the workspaces root). Same internal/backup engine, same
-// launcher.Config fields, so flipping a toggle in one surface shows up
-// in the other. Since the TUI's workspace chats are also visible in
-// the GUI (Chats → Workspace chats), backup from either surface
-// protects the same data.
+// Backup bindings for git sync of the workspaces root.
 
 import (
 	"context"
@@ -51,7 +46,7 @@ type BackupSyncResult struct {
 }
 
 // backupConfig loads the shared launcher config and resolves the
-// workspaces root. A missing config (TUI never ran) is reported as
+// workspaces root. A missing first-run config is reported as
 // unsupported, not an error.
 func (a *App) backupConfig() (*launcher.Config, string, error) {
 	cfg, err := launcher.LoadConfig()
@@ -117,7 +112,7 @@ func (a *App) BackupStatus() (*BackupState, error) {
 // workspaces root as a git repo (idempotent) and points origin at the
 // saved remote URL when one exists; disabling unlinks the remote and
 // turns auto-sync off, leaving the local .git in place (re-enabling is
-// cheap). Mirrors the TUI's Backup tab semantics exactly.
+// cheap).
 func (a *App) SetBackupEnabled(on bool) (*BackupState, error) {
 	cfg, dir, err := a.backupConfig()
 	if err != nil || cfg == nil {
@@ -228,8 +223,8 @@ func (a *App) BackupSyncNow() (*BackupSyncResult, error) {
 	return res, nil
 }
 
-// ResolveBackupDivergence applies one of the four reconciliations the
-// TUI offers: "merge", "rebase", "forcepush", "reset". Conflicts come
+// ResolveBackupDivergence applies one of four reconciliations:
+// "merge", "rebase", "forcepush", "reset". Conflicts come
 // back as errors naming the strategy; the merge/rebase attempt is
 // aborted so the repo isn't left mid-operation.
 func (a *App) ResolveBackupDivergence(strategy string) (*BackupState, error) {
@@ -331,8 +326,7 @@ func (a *App) BackupDisconnect() (*BackupState, error) {
 	return a.backupState(ctx)
 }
 
-// SetBackupAutoSync toggles sync-on-startup/exit (the TUI runs those
-// hooks; the GUI exposes the same flag so both surfaces agree).
+// SetBackupAutoSync toggles the GUI's sync-on-startup/exit hooks.
 func (a *App) SetBackupAutoSync(on bool) (*BackupState, error) {
 	cfg, _, err := a.backupConfig()
 	if err != nil || cfg == nil {
@@ -374,7 +368,7 @@ func (a *App) SetBackupForceLocal(on bool) (*BackupState, error) {
 
 // --- helpers ---------------------------------------------------------------
 
-// guiNewMachineID mirrors the TUI's newMachineID (screen_backup.go).
+// guiNewMachineID creates a short stable identifier for force-push guards.
 func guiNewMachineID() string {
 	b := make([]byte, 6)
 	_, _ = rand.Read(b)
@@ -383,7 +377,7 @@ func guiNewMachineID() string {
 
 // setMachineIDEnv exports the machine id for the duration of an op so
 // backup.CommitLocalChanges stamps the Machine-ID trailer, matching
-// the TUI's behavior. Returns the restore func.
+// backup operations. Returns the restore func.
 func setMachineIDEnv(id string) func() {
 	if id == "" {
 		return func() {}

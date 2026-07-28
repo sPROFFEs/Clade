@@ -58,12 +58,6 @@ type RunOptions struct {
 	// to the agent + workflow name.
 	ChatTitle string
 
-	// MemoryInjection, if non-empty, is prepended to the first
-	// rendered user_message body. The retrieval planner builds this
-	// via Core.BuildMemoryInjection before calling RunWorkflow.
-	// Empty = no injection.
-	MemoryInjection string
-
 	// SystemContext, if non-empty, is appended to the workflow's system
 	// prompt. GUI callers use this to make per-run context explicit
 	// without changing agent YAML.
@@ -109,7 +103,6 @@ type RunAllOptions struct {
 	OnEvent          func(event WorkflowRunEvent)
 	Persist          bool
 	ChatTitle        string
-	MemoryInjection  string
 	SystemContext    string
 	ChatSettings     ChatSettings
 }
@@ -170,7 +163,7 @@ func (c *Core) RunWorkflow(ctx context.Context, opts RunOptions) *RunResult {
 	return c.runWorkflowSequence(ctx, workflowRunConfig{
 		Agent: opts.Agent, CLI: opts.CLI, Cwd: opts.Cwd, Env: opts.Env,
 		Model: opts.Model, Tools: opts.Tools, OnTurn: opts.OnTurn, OnEvent: opts.OnEvent,
-		Persist: opts.Persist, ChatTitle: opts.ChatTitle, MemoryInjection: opts.MemoryInjection, SystemContext: opts.SystemContext,
+		Persist: opts.Persist, ChatTitle: opts.ChatTitle, SystemContext: opts.SystemContext,
 		ChatSettings: opts.ChatSettings,
 	}, []workflowRunPlan{{Workflow: workflow, Inputs: opts.Inputs}})
 }
@@ -194,7 +187,7 @@ func (c *Core) RunAllWorkflows(ctx context.Context, opts RunAllOptions) *RunResu
 	return c.runWorkflowSequence(ctx, workflowRunConfig{
 		Agent: opts.Agent, CLI: opts.CLI, Cwd: opts.Cwd, Env: opts.Env,
 		Model: opts.Model, Tools: opts.Tools, OnTurn: opts.OnTurn, OnEvent: opts.OnEvent,
-		Persist: opts.Persist, ChatTitle: opts.ChatTitle, MemoryInjection: opts.MemoryInjection, SystemContext: opts.SystemContext,
+		Persist: opts.Persist, ChatTitle: opts.ChatTitle, SystemContext: opts.SystemContext,
 		ChatSettings: opts.ChatSettings, RequireResume: true,
 	}, plans)
 }
@@ -205,20 +198,19 @@ type workflowRunPlan struct {
 }
 
 type workflowRunConfig struct {
-	Agent           *Agent
-	CLI             string
-	Cwd             string
-	Env             map[string]string
-	Model           string
-	Tools           string
-	OnTurn          func(turn TurnResult)
-	OnEvent         func(event WorkflowRunEvent)
-	Persist         bool
-	ChatTitle       string
-	MemoryInjection string
-	SystemContext   string
-	ChatSettings    ChatSettings
-	RequireResume   bool
+	Agent         *Agent
+	CLI           string
+	Cwd           string
+	Env           map[string]string
+	Model         string
+	Tools         string
+	OnTurn        func(turn TurnResult)
+	OnEvent       func(event WorkflowRunEvent)
+	Persist       bool
+	ChatTitle     string
+	SystemContext string
+	ChatSettings  ChatSettings
+	RequireResume bool
 }
 
 func (c *Core) runWorkflowSequence(ctx context.Context, cfg workflowRunConfig, plans []workflowRunPlan) *RunResult {
@@ -318,12 +310,6 @@ func (c *Core) runWorkflowSequence(ctx context.Context, cfg workflowRunConfig, p
 			}
 
 			body := step.Body
-			// Memory injection rides on the FIRST rendered user_message.
-			// Subsequent turns already have model context, and prepending
-			// the same injection block per turn would burn tokens.
-			if turnIdx == 0 && cfg.MemoryInjection != "" {
-				body = cfg.MemoryInjection + "\n\n" + body
-			}
 
 			adapterBody, _ := privacy.Redact(body)
 			c.maybeAddMessage(ctx, chatID, "user", body)

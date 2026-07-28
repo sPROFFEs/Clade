@@ -32,14 +32,13 @@ The binaries use the vendored OpenCode v1.17.20 source plus the PrAImate
 rebrand. Build each supported target explicitly:
 
 ```bash
-for target in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64 \
-              windows-amd64 windows-arm64; do
+for target in linux-amd64 linux-arm64 windows-amd64 windows-arm64; do
   PRAIMATE_CODE_TARGET="$target" OUT="dist/$target" \
     bash scripts/build-praimate-code.sh
 done
 
 # Baseline/no-AVX2 builds are required for amd64 targets.
-for target in linux-amd64 darwin-amd64 windows-amd64; do
+for target in linux-amd64 windows-amd64; do
   PRAIMATE_CODE_TARGET="$target" BASELINE=1 OUT="dist/$target" \
     bash scripts/build-praimate-code.sh
 done
@@ -50,7 +49,7 @@ archive bundles it as a sidecar. Then stage the standalone release assets
 using the `praimate-code-<os>-<arch>` naming documented below.
 
 ```bash
-for target in linux-amd64 linux-arm64 darwin-amd64 darwin-arm64; do
+for target in linux-amd64 linux-arm64; do
   cp "dist/$target/praimate-code" "dist/praimate-code-$target"
 done
 for target in windows-amd64 windows-arm64; do
@@ -58,8 +57,6 @@ for target in windows-amd64 windows-arm64; do
 done
 cp dist/linux-amd64/praimate-code-baseline \
    dist/praimate-code-linux-amd64-baseline
-cp dist/darwin-amd64/praimate-code-baseline \
-   dist/praimate-code-darwin-amd64-baseline
 cp dist/windows-amd64/praimate-code-baseline.exe \
    dist/praimate-code-windows-amd64-baseline.exe
 ```
@@ -77,13 +74,13 @@ cp dist/linux-amd64/praimate-graphify dist/praimate-graphify-linux-amd64
 ## 4. Build the platform archives
 
 ```bash
-scripts/build.sh --version=1.0.10 --with-gui
+scripts/build.sh --version=1.0.10
 ```
 
-This cross-compiles `praimate` + `wpc` for windows/linux/darwin and writes
-`dist\praimate-<os>-<arch>.zip|.tar.gz`. The `-Version` value is stamped into
-the binaries and **must equal the GitHub tag name** or the self-updater will
-loop.
+This builds mandatory GUI bundles for Windows and the native Linux
+architecture. Linux amd64 and arm64 GUI archives must each be produced on
+a matching native Linux runner because WebKitGTK is a cgo dependency.
+macOS is unsupported and has no archive. The version must equal the tag.
 
 ## 5. Checksums
 
@@ -91,7 +88,6 @@ loop.
 cd dist
 rm -f *.sha256 SHA256SUMS
 for f in praimate-code-* praimate-graphify-* \
-         praimate-darwin-amd64.tar.gz praimate-darwin-arm64.tar.gz \
          praimate-linux-amd64.tar.gz praimate-linux-arm64.tar.gz \
          praimate-windows-amd64.zip praimate-windows-arm64.zip; do
   sha256sum "$f" > "$f.sha256"
@@ -127,7 +123,7 @@ gh release create 1.0.10 \
 
 | Asset | Consumer |
 |---|---|
-| `praimate-windows-{amd64,arm64}.zip` (+ per-OS tarballs) | self-updater, install scripts |
+| `praimate-windows-{amd64,arm64}.zip`, `praimate-linux-{amd64,arm64}.tar.gz` | self-updater, install scripts |
 | `praimate-code-<os>-<arch>[.exe]` | CLIs-tab / `praimate code` install |
 | `praimate-code-<os>-amd64-baseline[.exe]` | same, on hosts without AVX2 (VMs, old CPUs) |
 | `praimate-graphify-linux-amd64` | managed graphify/RAG installation |

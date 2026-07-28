@@ -21,6 +21,17 @@ def test_install_creates_hook(tmp_path):
     assert "installed" in result
 
 
+def test_installed_hooks_create_no_log_files(tmp_path):
+    repo = _make_git_repo(tmp_path)
+    install(repo)
+    commit = (repo / ".git" / "hooks" / "post-commit").read_text()
+    checkout = (repo / ".git" / "hooks" / "post-checkout").read_text()
+    assert "graphify-rebuild.log" not in commit
+    assert "graphify-rebuild.log" not in checkout
+    assert "GRAPHIFY_REBUILD_LOG" not in commit
+    assert "GRAPHIFY_REBUILD_LOG" not in checkout
+
+
 def test_install_is_executable(tmp_path):
     repo = _make_git_repo(tmp_path)
     install(repo)

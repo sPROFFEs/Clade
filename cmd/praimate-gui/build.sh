@@ -12,11 +12,13 @@ cd "$(dirname "$0")"
 # Wails REQUIRES the `desktop` + `production` build tags — without them
 # the binary compiles but panics at startup ("Wails applications will
 # not build without the correct build tags"). On Linux we also select
-# the modern webkit (webkit2gtk-4.1) via webkit2_41; macOS/Windows
-# ignore that tag.
+# the modern webkit (webkit2gtk-4.1) via webkit2_41; Windows ignores
+# that tag. macOS is intentionally unsupported.
 TAGS="desktop,production"
 case "$(uname -s)" in
   Linux) TAGS="$TAGS,webkit2_41" ;;
+  MINGW*|MSYS*|CYGWIN*) ;;
+  *) echo "PrAImate GUI supports Linux and Windows only." >&2; exit 2 ;;
 esac
 
 # Windows icon: go build embeds the checked-in rsrc_windows_*.syso

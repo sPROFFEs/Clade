@@ -110,8 +110,7 @@ type mergeTableSpec struct {
 	skipCols  []string
 }
 
-// mergeTables lists the synced tables in FK-safe insert order (chats
-// before messages / memory_episodes).
+// mergeTables lists the synced tables in FK-safe insert order.
 var mergeTables = []mergeTableSpec{
 	{name: "agents", key: []string{"id"}, updatedAt: "updated_at"},
 	{name: "chats", key: []string{"id"}, updatedAt: "updated_at"},
@@ -119,9 +118,6 @@ var mergeTables = []mergeTableSpec{
 	{name: "mcp_servers", key: []string{"id"}},
 	{name: "settings_cli", key: []string{"key"}, updatedAt: "updated_at"},
 	{name: "settings_gui", key: []string{"key"}, updatedAt: "updated_at"},
-	{name: "memory_identity", key: []string{"key"}, updatedAt: "updated_at"},
-	{name: "memory_pinned", key: []string{"text", "created_at"}, skipCols: []string{"id"}},
-	{name: "memory_episodes", key: []string{"summary", "created_at"}, skipCols: []string{"id"}},
 }
 
 // ImportBackupState row-merges the snapshot at
@@ -138,7 +134,7 @@ func (c *Core) ImportBackupState(ctx context.Context, repoDir string) error {
 	if _, err := os.Stat(snapPath); err != nil {
 		return nil
 	}
-	snap, err := sql.Open("sqlite", "file:"+snapPath+"?mode=ro&_pragma=busy_timeout(5000)")
+	snap, err := sql.Open("sqlite3", "file:"+snapPath+"?mode=ro&_pragma=busy_timeout(5000)")
 	if err != nil {
 		return fmt.Errorf("import backup state: open snapshot: %w", err)
 	}
@@ -263,7 +259,7 @@ func tableColumns(ctx context.Context, db *sql.DB, table string) (map[string]boo
 	return cols, rows.Err()
 }
 
-func quoteCol(c string) string      { return `"` + c + `"` }
+func quoteCol(c string) string { return `"` + c + `"` }
 func quoteCols(cs []string) string {
 	q := make([]string, len(cs))
 	for i, c := range cs {

@@ -1,11 +1,10 @@
 package main
 
 // Apply the saved local endpoint to the config-file CLIs (opencode /
-// codex) from the GUI — the counterpart of the TUI's local-endpoint
-// wizard. claude/openclaude route by env (the per-chat "Use local LLM"
+// codex) from the GUI. claude/openclaude route by env (the per-chat "Use local LLM"
 // toggle); codex/opencode read a provider block from their own config
-// files (~/.codex/config.toml, opencode.json), which only the TUI wrote
-// until now. ApplyLocalToCLI writes that block so opencode/codex GUI
+// files (~/.codex/config.toml, opencode.json). ApplyLocalToCLI writes
+// that block so opencode/codex GUI
 // chats, code sessions and studio use the local model too.
 
 import (

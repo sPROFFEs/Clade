@@ -2,6 +2,9 @@ package main
 
 import (
 	"encoding/base64"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -53,9 +56,8 @@ func TestTerminalSnapshotKeepsBoundedTail(t *testing.T) {
 	}
 }
 
-func TestCodeSessionHistoryPersistsAcrossTerminalReplacement(t *testing.T) {
+func TestCodeSessionHistoryStaysInMemory(t *testing.T) {
 	tm := newTermManager()
-	tm.historyDir = t.TempDir()
 	tm.sessions["old"] = &termSession{id: "old"}
 
 	_, _ = tm.recordOutput("old", []byte("first process\r\n"))
@@ -68,15 +70,7 @@ func TestCodeSessionHistoryPersistsAcrossTerminalReplacement(t *testing.T) {
 	if err := tm.bindChat("old", "chat-1"); err != nil {
 		t.Fatal(err)
 	}
-	tm.close("old")
-
-	tm.sessions["new"] = &termSession{id: "new"}
-	_, _ = tm.recordOutput("new", []byte("replacement process\r\n"))
-	if err := tm.bindChat("new", "chat-1"); err != nil {
-		t.Fatal(err)
-	}
-
-	snapshot, err := tm.codeSnapshot("chat-1", "new")
+	snapshot, err := tm.codeSnapshot("chat-1", "old")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,30 +78,57 @@ func TestCodeSessionHistoryPersistsAcrossTerminalReplacement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "first process\r\nafter binding\r\nreplacement process\r\n"
+	want := "first process\r\nafter binding\r\n"
 	if string(raw) != want {
-		t.Fatalf("persistent transcript = %q, want %q", raw, want)
+		t.Fatalf("live transcript = %q, want %q", raw, want)
 	}
-	if snapshot.EndOffset != int64(len("replacement process\r\n")) {
+	if snapshot.EndOffset != int64(len(want)) {
 		t.Fatalf("live offset = %d", snapshot.EndOffset)
 	}
 
-	// The same transcript remains readable with no live process, as happens
-	// after restarting the application.
-	tm.close("new")
+	// Once the process is gone there is deliberately no archived output.
+	tm.close("old")
 	archived, err := tm.codeSnapshot("chat-1", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	archivedRaw, _ := base64.StdEncoding.DecodeString(archived.Data)
-	if string(archivedRaw) != want || archived.EndOffset != 0 {
-		t.Fatalf("archived snapshot = %+v, raw=%q", archived, archivedRaw)
+	if len(archivedRaw) != 0 || archived.EndOffset != 0 {
+		t.Fatalf("closed snapshot = %+v, raw=%q", archived, archivedRaw)
+	}
+}
+
+func TestTerminalOutputCreatesNoLogFilesAndRemovesLegacyHistory(t *testing.T) {
+	cache := t.TempDir()
+	if runtime.GOOS == "windows" {
+		t.Setenv("LOCALAPPDATA", cache)
+	} else {
+		t.Setenv("XDG_CACHE_HOME", cache)
+	}
+	legacyDir := filepath.Join(cache, "praimate", "code-history")
+	if err := os.MkdirAll(legacyDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyDir, "old.log"), []byte("sensitive output"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	tm := newTermManager()
+	if _, err := os.Stat(legacyDir); !os.IsNotExist(err) {
+		t.Fatalf("legacy terminal log directory still exists: %v", err)
+	}
+	tm.sessions["term-1"] = &termSession{id: "term-1"}
+	_, _ = tm.recordOutput("term-1", []byte("memory only"))
+	if err := tm.bindChat("term-1", "chat-1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(legacyDir); !os.IsNotExist(err) {
+		t.Fatalf("terminal output recreated a log directory: %v", err)
 	}
 }
 
 func TestBindChatRejectsMissingOrConflictingTerminal(t *testing.T) {
 	tm := newTermManager()
-	tm.historyDir = t.TempDir()
 	if err := tm.bindChat("missing", "chat-1"); err == nil {
 		t.Fatal("expected missing terminal error")
 	}

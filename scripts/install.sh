@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# PrAImate installer for Linux + macOS.
+# PrAImate GUI installer for Linux.
 #
 # One-liner:
 #   curl -fsSL https://raw.githubusercontent.com/sPROFFEs/praimate/main/scripts/install.sh | bash
@@ -173,8 +173,8 @@ detect_triplet() {
   os="$(uname -s | tr '[:upper:]' '[:lower:]')"
   case "$os" in
     linux)  os=linux ;;
-    darwin) os=darwin ;;
-    *) c_red "unsupported OS: $os"; exit 1 ;;
+    darwin) c_red "macOS is not supported. PrAImate supports Linux and Windows only."; exit 1 ;;
+    *) c_red "unsupported OS: $os (supported: Linux and Windows)"; exit 1 ;;
   esac
   arch="$(uname -m)"
   case "$arch" in
@@ -299,11 +299,7 @@ remove_managed_file() {
 }
 
 graphify_bin() {
-  if [[ "$(uname -s)" == "Darwin" ]]; then
-    printf '%s' "$HOME/Library/Application Support/praimate/bin/praimate-graphify"
-  else
-    printf '%s' "${XDG_CONFIG_HOME:-$HOME/.config}/praimate/bin/praimate-graphify"
-  fi
+  printf '%s' "${XDG_CONFIG_HOME:-$HOME/.config}/praimate/bin/praimate-graphify"
 }
 
 sync_samples() {
@@ -327,9 +323,10 @@ sync_bundle_extras() {
 
   if [[ -f "$bundle/praimate-gui" ]]; then
     $SUDO install -m 0755 "$bundle/praimate-gui" "$DEST/praimate-gui"
-    c_grn "  praimate-gui installed (launch with: praimate --gui)"
+    c_grn "  praimate-gui installed (launch with: praimate)"
   else
-    remove_managed_file "$DEST/praimate-gui" "praimate-gui"
+    c_red "bundle is missing mandatory praimate-gui"
+    return 1
   fi
 
   if [[ -f "$bundle/praimate-code" ]]; then
@@ -471,14 +468,8 @@ build_gui_from_source() {
 }
 
 detect_pkg_manager() {
-  # Print the apt/dnf/pacman/zypper/apk/brew install command for Go,
+  # Print the apt/dnf/pacman/zypper/apk install command for Go,
   # or empty if we don't know the system.
-  if [[ "$(uname -s)" == "Darwin" ]]; then
-    if command -v brew >/dev/null 2>&1; then
-      printf '%s' "brew install go"
-    fi
-    return
-  fi
   if command -v apt-get >/dev/null 2>&1; then
     printf '%s' "sudo apt-get update && sudo apt-get install -y golang-go"
   elif command -v dnf >/dev/null 2>&1; then
@@ -551,7 +542,7 @@ install_from_source() {
   ext="$(gui_ext)"
   gui_bin="$src/cmd/praimate-gui/praimate-gui$ext"
   if ! build_gui_from_source "$src"; then
-    c_red "praimate-gui was not built, so 'praimate --gui' will not work."
+    c_red "The mandatory PrAImate desktop app could not be built."
     c_red "Install the missing GUI dependencies above and re-run this installer."
     exit 1
   fi
@@ -610,7 +601,7 @@ EOF
 esac
 
 
-# ---------- desktop shortcuts (TUI + GUI) ----------
+# ---------- desktop shortcut (GUI only) ----------
 create_shortcuts() {
   local icon_src="$1"
   case "$(uname -s)" in
@@ -715,46 +706,27 @@ done
 PATH="$(awk -v RS=: -v ORS=: '!seen[$0]++ {print}' <<<"$PATH" | sed 's/:$//')"
 export PATH
 
+__praimate_bin="${0##*/}"
+__praimate_bin="${__praimate_bin%-launch}"
 __praimate_self="$(readlink -f "$0" 2>/dev/null || echo "$0")"
 __praimate_dir="$(dirname "$__praimate_self")"
-__praimate_bin="${__praimate_self##*/}"
-__praimate_bin="${__praimate_bin%-launch}"
 exec "$__praimate_dir/$__praimate_bin" "$@"
 WRAP
       chmod 755 "$DEST/praimate-launch"
 
+      ln -sf praimate-launch "$DEST/praimate-gui-launch"
       cat > "$apps/praimate.desktop" <<DESK
 [Desktop Entry]
 Type=Application
 Name=PrAImate
-Comment=Multi-CLI agent launcher (terminal UI)
-Exec=$DEST/praimate-launch %F
-Terminal=true
-$icon_line
-Categories=Development;Utility;
-DESK
-      if [[ -x "$DEST/praimate-gui" ]]; then
-        # praimate-gui-launch is the same script, exec'd via a symlink so
-        # the wrapper resolves its target binary from its own basename.
-        ln -sf praimate-launch "$DEST/praimate-gui-launch"
-        cat > "$apps/praimate-gui.desktop" <<DESK
-[Desktop Entry]
-Type=Application
-Name=PrAImate GUI
-Comment=Multi-CLI agent launcher (desktop app)
+Comment=Multi-CLI agent desktop app
 Exec=$DEST/praimate-gui-launch %F
 Terminal=false
 $icon_line
 Categories=Development;Utility;
 DESK
-      else
-        rm -f "$DEST/praimate-gui-launch" "$apps/praimate-gui.desktop"
-      fi
-      # Both files need the exec bit or Nautilus/GNOME Files renders
-      # them as plain text instead of resolving Icon=/Name= — and a
-      # well-formed .desktop without +x shows a generic gear icon.
+      rm -f "$apps/praimate-gui.desktop"
       chmod 755 "$apps/praimate.desktop" 2>/dev/null || true
-      [[ -f "$apps/praimate-gui.desktop" ]] && chmod 755 "$apps/praimate-gui.desktop" 2>/dev/null || true
       command -v update-desktop-database >/dev/null 2>&1 \
         && update-desktop-database "$apps" 2>/dev/null || true
       # Mirror onto the Desktop when one exists. Each copy needs its
@@ -763,11 +735,9 @@ DESK
       # click → "Allow Launching" before the icon resolves.
       local desk_dir
       desk_dir="$(command -v xdg-user-dir >/dev/null 2>&1 && xdg-user-dir DESKTOP || echo "$HOME/Desktop")"
-      if [[ ! -x "$DEST/praimate-gui" ]]; then
-        rm -f "$desk_dir/praimate-gui.desktop"
-      fi
+      rm -f "$desk_dir/praimate-gui.desktop"
       if [[ -d "$desk_dir" ]]; then
-        for f in praimate.desktop praimate-gui.desktop; do
+        for f in praimate.desktop; do
           [[ -f "$apps/$f" ]] || continue
           cp -f "$apps/$f" "$desk_dir/" 2>/dev/null || true
           chmod 755 "$desk_dir/$f" 2>/dev/null || true
@@ -776,33 +746,6 @@ DESK
         done
       fi
       c_grn "  desktop shortcuts created (app menu + Desktop)"
-      ;;
-    Darwin)
-      mkdir -p "$HOME/Applications"
-      # TUI: a .command opens Terminal and runs praimate.
-      printf '#!/bin/bash\nexec "%s/praimate"\n' "$DEST" > "$HOME/Applications/PrAImate.command"
-      chmod +x "$HOME/Applications/PrAImate.command"
-      [[ -d "$HOME/Desktop" ]] && cp -f "$HOME/Applications/PrAImate.command" "$HOME/Desktop/" 2>/dev/null || true
-      # GUI: minimal .app wrapper (only when the binary is installed).
-      if [[ -x "$DEST/praimate-gui" ]]; then
-        local app="$HOME/Applications/PrAImate GUI.app"
-        mkdir -p "$app/Contents/MacOS"
-        printf '#!/bin/bash\nexec "%s/praimate-gui"\n' "$DEST" > "$app/Contents/MacOS/PrAImate-GUI"
-        chmod +x "$app/Contents/MacOS/PrAImate-GUI"
-        cat > "$app/Contents/Info.plist" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>CFBundleName</key><string>PrAImate GUI</string>
-  <key>CFBundleExecutable</key><string>PrAImate-GUI</string>
-  <key>CFBundleIdentifier</key><string>dev.praimate.gui</string>
-  <key>CFBundlePackageType</key><string>APPL</string>
-</dict></plist>
-PLIST
-      else
-        rm -rf -- "$HOME/Applications/PrAImate GUI.app"
-      fi
-      c_grn "  shortcuts created in ~/Applications (and Desktop)"
       ;;
   esac
 }
@@ -814,4 +757,4 @@ create_shortcuts "$ICON_SRC" || true
 
 step "Done"
 printf 'Try it:    %s -version\n' "$DEST/praimate"
-printf '(after PATH update, just `praimate -version` from any new shell)\n'
+printf '(after PATH update, run `praimate` to launch the desktop app)\n'

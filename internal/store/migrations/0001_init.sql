@@ -45,40 +45,6 @@ CREATE TABLE agents (
   updated_at TEXT NOT NULL
 );
 
-CREATE TABLE memory_identity (
-  key TEXT PRIMARY KEY,
-  value TEXT NOT NULL,
-  source TEXT NOT NULL,
-  updated_at TEXT NOT NULL
-);
-
-CREATE TABLE memory_pinned (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  text TEXT NOT NULL,
-  salience REAL NOT NULL DEFAULT 0.5,
-  source_count INTEGER NOT NULL DEFAULT 1,
-  use_count INTEGER NOT NULL DEFAULT 0,
-  last_used TEXT,
-  created_at TEXT NOT NULL,
-  last_decayed_at TEXT NOT NULL
-);
-
-CREATE INDEX idx_memory_pinned_salience ON memory_pinned(salience DESC);
-
-CREATE TABLE memory_episodes (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  chat_id TEXT REFERENCES chats(id) ON DELETE SET NULL,
-  summary TEXT NOT NULL,
-  topics_json TEXT NOT NULL DEFAULT '[]',
-  entities_json TEXT NOT NULL DEFAULT '[]',
-  decisions_json TEXT NOT NULL DEFAULT '[]',
-  actions_json TEXT NOT NULL DEFAULT '[]',
-  salience REAL NOT NULL DEFAULT 0.5,
-  created_at TEXT NOT NULL
-);
-
-CREATE INDEX idx_memory_episodes_created_at ON memory_episodes(created_at DESC);
-
 CREATE TABLE mcp_servers (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,

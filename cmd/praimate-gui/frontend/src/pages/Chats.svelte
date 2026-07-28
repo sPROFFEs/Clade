@@ -74,12 +74,12 @@
   let mcpServers = []
   let newMCPs = []
 
-  // Per-chat settings editor (CLI / model / tools), mirroring the TUI's
-  // per-chat settings sheet. Works on the open thread AND from list rows.
+  // Per-chat settings editor (CLI / model / tools). Works on the open
+  // thread and from list rows.
   let cfg = null // {chat, cli, model, tools, local*, suggestions}
   let cfgSaving = false
 
-  // Search across titles AND message content (TUI parity).
+  // Search across titles and message content.
   let search = ''
   let searchResults = null
   let searchTimer
@@ -551,7 +551,7 @@
     on:close={(e) => (cfg.skills = e.detail)} />
   <div class="card" style="border-color: var(--accent, #888)">
     <div class="card-title">Chat settings — {cfg.chat.Title}</div>
-    <div class="card-sub">Same controls as the TUI's per-chat settings. Switching the CLI starts a fresh session on the next message; the history stays.</div>
+    <div class="card-sub">Switching the CLI starts a fresh session on the next message; the history stays.</div>
     <label class="lbl">CLI</label>
     <select class="field" style="max-width:320px" bind:value={cfg.cli} on:change={cfgCliChanged}>
       {#if clis.length === 0}
@@ -942,8 +942,8 @@
   {/if}
 
   {#if workspaceChats.length > 0}
-    <h1 style="font-size:16px; margin-top:24px">Workspace chats (TUI)</h1>
-    <p class="subtitle">Chats created in the <span class="mono">praimate</span> TUI. Open one to resume its CLI session in the Code terminal — same sandbox, native resume where the CLI supports it.</p>
+    <h1 style="font-size:16px; margin-top:24px">Workspace chats</h1>
+    <p class="subtitle">Existing workpath-based chats. Open one to resume its CLI session in the Code terminal — same sandbox, native resume where the CLI supports it.</p>
     {#each workspaceChats as wc}
       <div class="card row">
         <div class="grow">

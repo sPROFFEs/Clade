@@ -34,8 +34,6 @@ func TestAssetForHost(t *testing.T) {
 		Assets: []Asset{
 			{Name: "praimate-0.2.0-linux-amd64.tar.gz", BrowserDownloadURL: "u1"},
 			{Name: "praimate-0.2.0-linux-arm64.tar.gz", BrowserDownloadURL: "u2"},
-			{Name: "praimate-0.2.0-darwin-amd64.tar.gz", BrowserDownloadURL: "u3"},
-			{Name: "praimate-0.2.0-darwin-arm64.tar.gz", BrowserDownloadURL: "u4"},
 			{Name: "praimate-0.2.0-windows-amd64.zip", BrowserDownloadURL: "u5"},
 		},
 	}
@@ -46,6 +44,16 @@ func TestAssetForHost(t *testing.T) {
 	triplet := runtime.GOOS + "-" + runtime.GOARCH
 	if !strings.Contains(a.Name, triplet) {
 		t.Errorf("asset %q does not mention host triplet %q", a.Name, triplet)
+	}
+}
+
+func TestAssetForPlatform_RejectsMacOS(t *testing.T) {
+	rel := &Release{
+		TagName: "v0.2.0",
+		Assets:  []Asset{{Name: "praimate-0.2.0-darwin-arm64.tar.gz"}},
+	}
+	if _, err := assetForPlatform(rel, "darwin", "arm64"); err == nil {
+		t.Fatal("macOS must not resolve a release asset")
 	}
 }
 

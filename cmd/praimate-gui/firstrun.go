@@ -1,12 +1,11 @@
 package main
 
-// First-run setup — the GUI counterpart of the TUI's first-run flow:
+// First-run setup:
 // when no launcher config exists, the frontend shows a setup screen
 // asking for the workspaces root, whether to seed the bundled sample
 // templates, and (optionally) a git remote to clone an existing backup
-// from. Completing it writes the same config.json the TUI reads and
-// rebuilds Core on the new root, so the app continues without a
-// restart.
+// from. Completing it writes config.json and rebuilds Core on the new
+// root, so the app continues without a restart.
 
 import (
 	"context"
@@ -44,8 +43,8 @@ func (a *App) FirstRun() (*FirstRunInfo, error) {
 
 // CompleteFirstRun creates the workspaces root (or clones it from a
 // backup remote), optionally seeds the bundled sample templates, saves
-// the config and rebinds Core to the new root. Mirrors the TUI's three
-// first-run options: empty root / root + samples / clone from remote.
+// the config and rebinds Core to the new root. The options are empty
+// root, root plus samples, or clone from remote.
 func (a *App) CompleteFirstRun(root string, seedSamples bool, seedAgents bool, cloneURL string) error {
 	root = strings.TrimSpace(root)
 	if root == "" {
@@ -53,7 +52,14 @@ func (a *App) CompleteFirstRun(root string, seedSamples bool, seedAgents bool, c
 	}
 	cloneURL = strings.TrimSpace(cloneURL)
 
-	cfg := &launcher.Config{WorkspacesRoot: root}
+	cfg, err := launcher.LoadConfig()
+	if err != nil {
+		return err
+	}
+	if cfg == nil {
+		cfg = &launcher.Config{}
+	}
+	cfg.WorkspacesRoot = root
 	if cloneURL != "" {
 		// Probe before cloning so a typo'd URL fails with a clear
 		// message instead of a half-created root.

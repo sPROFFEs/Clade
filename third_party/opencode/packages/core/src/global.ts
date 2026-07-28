@@ -20,7 +20,6 @@ const paths = {
   },
   data,
   bin: path.join(cache, "bin"),
-  log: path.join(data, "log"),
   repos: path.join(data, "repos"),
   cache,
   config,
@@ -33,11 +32,14 @@ export const Path = paths
 Flock.setGlobal({ state })
 
 await Promise.all([
+  // Cleanup from log-writing releases must never make the application
+  // unusable when the legacy directory is owned by another user or mounted
+  // read-only.
+  fs.rm(path.join(data, "log"), { recursive: true, force: true }).catch(() => {}),
   fs.mkdir(Path.data, { recursive: true }),
   fs.mkdir(Path.config, { recursive: true }),
   fs.mkdir(Path.state, { recursive: true }),
   fs.mkdir(Path.tmp, { recursive: true }),
-  fs.mkdir(Path.log, { recursive: true }),
   fs.mkdir(Path.bin, { recursive: true }),
   fs.mkdir(Path.repos, { recursive: true }),
 ])
@@ -52,7 +54,6 @@ export interface Interface {
   readonly state: string
   readonly tmp: string
   readonly bin: string
-  readonly log: string
   readonly repos: string
 }
 
@@ -65,7 +66,6 @@ export function make(input: Partial<Interface> = {}): Interface {
     state: Path.state,
     tmp: Path.tmp,
     bin: Path.bin,
-    log: Path.log,
     repos: Path.repos,
     ...input,
   }

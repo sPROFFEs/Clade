@@ -1,7 +1,7 @@
 package main
 
 // CLIs tab bindings — detection + installation of the wrapped CLI
-// agents, mirroring the TUI's install screen: list the known CLIs with
+// agents: list the known CLIs with
 // live detection status, surface the per-OS install methods from
 // internal/installer, and run the chosen method with its output
 // streamed to the frontend over "praimate:install" events.
