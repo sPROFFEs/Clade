@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -151,13 +152,17 @@ func migratePlainDatabase(path string, key []byte) error {
 }
 
 func plainDSN(path string, readOnly bool) string {
-	mode := ""
+	q := make(url.Values)
 	if readOnly {
-		mode = "?mode=ro"
+		q.Set("mode", "ro")
 	}
-	return "file:" + filepath.ToSlash(path) + mode
+	return sqliteFileURI(path, q)
 }
 
 func encryptedVacuumURI(path string, key []byte) string {
-	return "file:" + filepath.ToSlash(path) + "?vfs=xts&hexkey=" + fmt.Sprintf("%x", key)
+	q := url.Values{
+		"hexkey": {fmt.Sprintf("%x", key)},
+		"vfs":    {"xts"},
+	}
+	return sqliteFileURI(path, q)
 }

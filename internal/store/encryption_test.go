@@ -2,10 +2,45 @@ package store
 
 import (
 	"database/sql"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestSQLiteURIsPreserveWindowsDrivePath(t *testing.T) {
+	// filepath.ToSlash produces this form from the native backslash path when
+	// the application runs on Windows.
+	const path = `C:/Users/evaluator/AppData/Roaming/PrAImate/db.sqlite`
+	const wantPrefix = "file:C:/Users/evaluator/AppData/Roaming/PrAImate/db.sqlite"
+	key := make([]byte, encryptionKeyBytes)
+
+	tests := map[string]string{
+		"encrypted open":   encryptedDSN(path, key, false),
+		"plaintext open":   plainDSN(path, false),
+		"encrypted vacuum": encryptedVacuumURI(path, key),
+		"plain snapshot":   sqliteFileURI(path, url.Values{"vfs": {"os"}}),
+	}
+	for name, got := range tests {
+		t.Run(name, func(t *testing.T) {
+			if !strings.HasPrefix(got, wantPrefix) {
+				t.Fatalf("URI = %q, want prefix %q", got, wantPrefix)
+			}
+			if strings.HasPrefix(got, "file://C:/") {
+				t.Fatalf("URI %q turns drive C: into a UNC authority", got)
+			}
+		})
+	}
+}
+
+func TestSQLiteFileURIEscapesPathCharacters(t *testing.T) {
+	got := sqliteFileURI("C:/Users/test user/data#1.sqlite", nil)
+	const want = "file:C:/Users/test%20user/data%231.sqlite"
+	if got != want {
+		t.Fatalf("URI = %q, want %q", got, want)
+	}
+}
 
 func TestOpenCreatesEncryptedDatabaseAndReopens(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "db.sqlite")

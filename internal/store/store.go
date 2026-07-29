@@ -127,7 +127,7 @@ func (s *Store) Snapshot(ctx context.Context, dest string) error {
 	// normal SQLite file. The first-run privacy notice calls this out:
 	// access to the configured git remote must be treated as DB access.
 	// dest is a trusted, app-controlled path; quote single quotes defensively.
-	plainDest := "file:" + filepath.ToSlash(dest) + "?vfs=os"
+	plainDest := sqliteFileURI(dest, url.Values{"vfs": {"os"}})
 	q := "VACUUM INTO '" + strings.ReplaceAll(plainDest, "'", "''") + "'"
 	if _, err := s.db.ExecContext(ctx, q); err != nil {
 		return fmt.Errorf("store.Snapshot: vacuum into %s: %w", dest, err)
@@ -136,8 +136,7 @@ func (s *Store) Snapshot(ctx context.Context, dest string) error {
 }
 
 func encryptedDSN(path string, key []byte, readOnly bool) string {
-	u := &url.URL{Scheme: "file", Path: filepath.ToSlash(path)}
-	q := u.Query()
+	q := make(url.Values)
 	q.Set("vfs", "xts")
 	if readOnly {
 		q.Set("mode", "ro")
@@ -149,8 +148,20 @@ func encryptedDSN(path string, key []byte, readOnly bool) string {
 	if !readOnly {
 		q.Add("_pragma", "journal_mode(WAL)")
 	}
-	u.RawQuery = q.Encode()
-	return u.String()
+	return sqliteFileURI(path, q)
+}
+
+// sqliteFileURI builds a SQLite file URI without promoting a Windows drive
+// letter to a URL authority. net/url serializes a URL Path such as C:/Users as
+// file://C:/Users, which SQLite passes to Windows as the invalid UNC path
+// //C:/Users. SQLite expects the drive-safe form file:C:/Users instead.
+func sqliteFileURI(path string, query url.Values) string {
+	pathURL := &url.URL{Path: filepath.ToSlash(path)}
+	dsn := "file:" + pathURL.EscapedPath()
+	if encoded := query.Encode(); encoded != "" {
+		dsn += "?" + encoded
+	}
+	return dsn
 }
 
 // SchemaVersion returns the highest applied migration number, or 0 if
