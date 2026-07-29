@@ -1047,18 +1047,6 @@ func (a *App) MCPServers() ([]core.MCPServer, error) {
 	return c.ListMCPServers(a.ctx, false)
 }
 
-// ConnectMCP connects a catalogue provider with an optional API key.
-func (a *App) ConnectMCP(catalogueKey, apiKey string) (*core.MCPServer, error) {
-	c, err := a.requireCore()
-	if err != nil {
-		return nil, err
-	}
-	return c.ConnectMCP(a.ctx, core.ConnectMCPRequest{
-		CatalogueKey: catalogueKey,
-		APIKey:       apiKey,
-	})
-}
-
 // AddCustomMCP registers a user-defined MCP server (local or remote)
 // that isn't in the catalogue — e.g. hexstrike-ai. envText is
 // newline/comma-separated KEY=VALUE pairs.
@@ -1068,6 +1056,22 @@ func (a *App) AddCustomMCP(name, transport, command, url, envText string) (*core
 		return nil, err
 	}
 	return c.AddCustomMCP(a.ctx, core.AddCustomMCPRequest{
+		Name:      name,
+		Transport: transport,
+		Command:   command,
+		URL:       url,
+		Env:       core.ParseEnvLines(envText),
+	})
+}
+
+// UpdateMCPServer edits an MCP server while preserving its stable ID and
+// enabled state.
+func (a *App) UpdateMCPServer(id, name, transport, command, url, envText string) (*core.MCPServer, error) {
+	c, err := a.requireCore()
+	if err != nil {
+		return nil, err
+	}
+	return c.UpdateMCPServer(a.ctx, id, core.AddCustomMCPRequest{
 		Name:      name,
 		Transport: transport,
 		Command:   command,

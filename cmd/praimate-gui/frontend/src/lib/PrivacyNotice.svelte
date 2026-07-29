@@ -1,6 +1,11 @@
 <script>
   import { createEventDispatcher } from 'svelte'
   import { api } from './api.js'
+  import {
+    privacyCompatibility,
+    privacyDisclosures,
+    privacyIntroduction,
+  } from './privacyContent.js'
 
   const dispatch = createEventDispatcher()
   let busy = false
@@ -23,70 +28,33 @@
 
 <div class="privacy-backdrop">
   <section class="privacy-modal" role="dialog" aria-modal="true" aria-labelledby="privacy-title">
-    <div class="eyebrow">Before you start</div>
-    <h1 id="privacy-title">Privacy and local-data notice</h1>
-    <p>
-      PrAImate has no product telemetry and does not generate application,
-      query, or terminal log files. It stores chats, agents, settings, and MCP
-      configuration locally.
-    </p>
+    <header>
+      <div class="eyebrow">Before you start</div>
+      <h1 id="privacy-title">Privacy and local-data notice</h1>
+      <p class="introduction">{privacyIntroduction}</p>
+    </header>
 
-    <div class="notice-grid">
-      <div class="notice">
-        <strong>Encrypted local database</strong>
-        <span>
-          The SQLite database is encrypted at rest with AES-256-XTS. Its
-          random key is stored separately with user-only permissions. This
-          protects a copied database, but not someone controlling your OS
-          account, and XTS does not authenticate against tampering. Keep the
-          database and key together when backing up: losing the key makes the
-          database unreadable.
-        </span>
-      </div>
-      <div class="notice">
-        <strong>AI providers receive what you send</strong>
-        <span>
-          Prompts, selected files, and tool output go to the CLI and model
-          provider you choose. Built-in redaction catches common secrets but
-          cannot guarantee that every sensitive value is removed.
-        </span>
-      </div>
-      <div class="notice">
-        <strong>Agents can change files</strong>
-        <span>
-          Tool-enabled sessions may read, create, edit, or execute files in
-          the working folder according to the permission level you select.
-          Review the folder and permissions before starting.
-        </span>
-      </div>
-      <div class="notice">
-        <strong>Terminal output is memory-only</strong>
-        <span>
-          Live Code-terminal scrollback is retained only while its process is
-          running. It is not written to a diagnostic or history log and cannot
-          be recovered after the terminal or application closes.
-        </span>
-      </div>
-      <div class="notice">
-        <strong>Backups are your responsibility</strong>
-        <span>
-          Git backup is off by default. If enabled, it includes workspace
-          files, per-chat MEMORY.md files, and a portable plaintext database
-          snapshot. Use a private remote you trust and protect its credentials.
-        </span>
-      </div>
+    <div class="notice-list">
+      {#each privacyDisclosures as disclosure, index}
+        <article class="notice">
+          <span class="notice-number" aria-hidden="true">{String(index + 1).padStart(2, '0')}</span>
+          <div>
+            <h2>{disclosure.title}</h2>
+            <p>{disclosure.body}</p>
+          </div>
+        </article>
+      {/each}
     </div>
 
-    <p class="fine">
-      PrAImate supports Linux and Windows. You can review this information
-      later on the About page.
-    </p>
-    {#if error}<div class="banner">{error}</div>{/if}
-    <div class="actions">
-      <button class="btn primary" disabled={busy} on:click={accept}>
-        {busy ? 'Saving…' : 'I understand — continue'}
-      </button>
-    </div>
+    <footer>
+      <p class="fine">{privacyCompatibility}</p>
+      {#if error}<div class="banner">{error}</div>{/if}
+      <div class="actions">
+        <button class="btn primary" disabled={busy} on:click={accept}>
+          {busy ? 'Saving…' : 'I understand — continue'}
+        </button>
+      </div>
+    </footer>
   </section>
 </div>
 
@@ -102,43 +70,78 @@
     backdrop-filter: blur(10px);
   }
   .privacy-modal {
-    width: min(760px, 94vw);
-    max-height: 90vh;
+    width: min(680px, 94vw);
+    max-height: 92vh;
     overflow: auto;
-    padding: 28px;
-    border: 1px solid var(--border);
-    border-radius: 18px;
-    background: var(--panel);
-    box-shadow: 0 24px 80px rgba(0, 0, 0, .32);
+    border: 1px solid var(--border-bright);
+    border-radius: 14px;
+    background: var(--bg-panel);
+    box-shadow: 0 24px 80px rgba(0, 0, 0, .38);
   }
-  .privacy-modal h1 { margin: 4px 0 8px; font-size: 25px; }
-  .privacy-modal > p { color: var(--text-dim); line-height: 1.55; }
+  header { padding: 28px 30px 22px; }
+  .privacy-modal h1 {
+    margin: 5px 0 10px;
+    font-size: 25px;
+    letter-spacing: -.02em;
+  }
+  .introduction {
+    max-width: 600px;
+    margin: 0;
+    color: var(--text-dim);
+    font-size: 14px;
+    line-height: 1.6;
+  }
   .eyebrow {
-    color: var(--accent);
-    font-size: 12px;
+    color: var(--text-dim);
+    font-size: 11px;
     font-weight: 700;
-    letter-spacing: .09em;
+    letter-spacing: .1em;
     text-transform: uppercase;
   }
-  .notice-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
-    margin: 20px 0;
+  .notice-list {
+    padding: 0 30px;
+    border-top: 1px solid var(--border);
   }
   .notice {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    padding: 14px;
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    background: var(--bg-raised);
+    display: grid;
+    grid-template-columns: 34px minmax(0, 1fr);
+    gap: 12px;
+    padding: 17px 0;
+    border-bottom: 1px solid var(--border);
   }
-  .notice span { color: var(--text-dim); font-size: 13px; line-height: 1.45; }
-  .fine { font-size: 12px; }
-  .actions { display: flex; justify-content: flex-end; margin-top: 16px; }
-  @media (max-width: 680px) {
-    .notice-grid { grid-template-columns: 1fr; }
+  .notice-number {
+    padding-top: 2px;
+    color: var(--text-dim);
+    font: 11px/1.5 var(--mono);
+  }
+  .notice h2 {
+    margin: 0 0 4px;
+    font-size: 14px;
+    font-weight: 650;
+  }
+  .notice p {
+    margin: 0;
+    color: var(--text-dim);
+    font-size: 13px;
+    line-height: 1.55;
+  }
+  footer { padding: 18px 30px 24px; }
+  .fine {
+    margin: 0;
+    color: var(--text-dim);
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 16px;
+  }
+  footer .banner { margin-top: 14px; }
+  @media (max-width: 560px) {
+    .privacy-backdrop { padding: 12px; }
+    header, footer { padding-left: 20px; padding-right: 20px; }
+    .notice-list { padding: 0 20px; }
+    .notice { grid-template-columns: 28px minmax(0, 1fr); gap: 8px; }
   }
 </style>

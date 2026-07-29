@@ -5,7 +5,7 @@
   import { onMount, onDestroy } from 'svelte'
   import { get } from 'svelte/store'
   import { api } from '../lib/api.js'
-  import { cliCache, activePage } from '../lib/stores.js'
+  import { cliCache } from '../lib/stores.js'
 
   let clis = []
   let error = ''
@@ -16,8 +16,6 @@
   let log = []
   let unsub = () => {}
 
-  // praimate-code (bundled OpenCode) status
-  let codeInstalled = false
   // managed helper tools (graphify, gstack, scrapegraph)
   let tools = []
   let toolMethods = {}
@@ -31,12 +29,11 @@
     } catch (e) {
       error = String(e)
     }
-    try { codeInstalled = await api.praimateCodeInstalled() } catch {}
     try { tools = (await api.listManagedTools()) || [] } catch { tools = [] }
     loading = false
     // Keep the app-wide prefetch cache warm so re-opening the tab is
     // instant after this fresh probe.
-    cliCache.set({ clis, tools, codeInstalled, loaded: true })
+    cliCache.set({ clis, tools, loaded: true })
   }
 
   async function showToolMethods(t) {
@@ -95,42 +92,6 @@
     }
   }
 
-  let compileOffer = null // { tool, label } when the prebuilt asset isn't available
-  async function installCode() {
-    installing = 'praimate-code'
-    log = []
-    try {
-      const res = await api.installPraimateCode()
-      if (res && res.ok === false) {
-        if (res.noPrebuiltAsset) {
-          compileOffer = { tool: 'praimate-code', label: 'PrAImate Code' }
-        } else {
-          error = res.error || 'install failed'
-        }
-      }
-      await load()
-    } catch (e) {
-      error = String(e)
-    } finally {
-      installing = ''
-    }
-  }
-  async function compileNow() {
-    if (!compileOffer) return
-    const tool = compileOffer.tool
-    compileOffer = null
-    installing = tool
-    log = []
-    try {
-      await api.buildToolFromSource(tool)
-      await load()
-    } catch (e) {
-      error = `Compile failed: ${e}`
-    } finally {
-      installing = ''
-    }
-  }
-
   onMount(async () => {
     if (typeof window !== 'undefined' && window.runtime?.EventsOn) {
       window.runtime.EventsOn('praimate:install', (ev) => {
@@ -144,7 +105,6 @@
     if (cached.loaded) {
       clis = cached.clis
       tools = cached.tools
-      codeInstalled = cached.codeInstalled
       loading = false
     }
     await load()
@@ -194,27 +154,6 @@
   {/if}
 {/if}
 
-{#if compileOffer}
-  <!-- svelte-ignore a11y-click-events-have-key-events -->
-  <!-- svelte-ignore a11y-no-static-element-interactions -->
-  <div class="modal-backdrop" on:click={() => (compileOffer = null)}>
-    <div class="modal-content" on:click|stopPropagation>
-      <h2>No prebuilt {compileOffer.label} for this platform</h2>
-      <p class="subtitle" style="margin-bottom:12px">
-        The release page doesn't ship a {compileOffer.label} binary for {''+''+''}your OS/architecture, so the download returned 404.
-        Building from source takes a few minutes but produces a binary tuned to this machine. The temporary checkout is deleted afterwards.
-      </p>
-      <p class="subtitle" style="margin-top:0">
-        Required tools (bun for PrAImate Code, uv for Graphify) must already be on PATH. Settings → Build from source shows the prerequisites and progress.
-      </p>
-      <div class="row" style="margin-top:16px; justify-content:flex-end; gap:8px">
-        <button class="btn" on:click={() => (compileOffer = null)}>Not now</button>
-        <button class="btn primary" on:click={compileNow}>Compile from source</button>
-      </div>
-    </div>
-  </div>
-{/if}
-
 {#if loading && clis.length === 0}<div class="empty">Probing installed CLIs…</div>{/if}
 
 {#each clis as c}
@@ -261,28 +200,6 @@
     {/if}
   </div>
 {/each}
-
-<div class="card">
-  <div class="row">
-    <div class="grow">
-      <div class="card-title">
-        PrAImate Code
-        <span class="pill" class:ok={codeInstalled} class:err={!codeInstalled}>{codeInstalled ? 'installed' : 'not installed'}</span>
-      </div>
-      <div class="card-sub">Our version-pinned, rebranded OpenCode build (~150MB download).</div>
-    </div>
-    {#if !codeInstalled}
-      <div class="row">
-        <button class="btn primary" on:click={installCode} disabled={installing !== ''}>
-          {installing === 'praimate-code' ? 'Installing…' : 'Install'}
-        </button>
-        <button class="btn" on:click={() => activePage.set('settings')}>
-          Build from source…
-        </button>
-      </div>
-    {/if}
-  </div>
-</div>
 
 {#if tools.length > 0}
   <h1 style="font-size:16px; margin-top:24px">Managed tools</h1>

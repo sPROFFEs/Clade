@@ -574,7 +574,11 @@ func stageAndCommit(ctx context.Context, dir, extraSummary string) error {
 	if mid := strings.TrimSpace(os.Getenv("PRAIMATE_BACKUP_MACHINE_ID")); mid != "" {
 		msg += "\n\nMachine-ID: " + mid
 	}
-	args := []string{"commit", "-m", msg,
+	// Supply a repository-independent committer identity for PrAImate-owned
+	// backup commits. --author only covers the author; Git still refuses to
+	// commit when the user's global committer identity is unset.
+	args := []string{"-c", "user.name=PrAImate", "-c", "user.email=praimate@local",
+		"commit", "-m", msg,
 		"--author=PrAImate <praimate@local>"}
 	if r := Run(ctx, dir, args...); r.Failed() {
 		return fmt.Errorf("git commit: %s", UserError(r))

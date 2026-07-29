@@ -38,11 +38,11 @@ type Config struct {
 	// user flips it on. The workspaces root behaves exactly as it did
 	// before 0.1.11 — just a directory of chats and templates.
 	//
-	// Flipping the switch on initialises the workspaces root as a git
-	// repo (creates .git, writes the managed metadata, registers the
-	// MEMORY.md merge driver). Flipping it off removes the configured
-	// remote and disables auto-sync but leaves the .git dir + the
-	// managed files alone so re-enabling later is cheap.
+	// First-time setup explicitly chooses a new local history or an
+	// existing remote before initialising the workspaces root. After
+	// setup, this switch only pauses/resumes sync. Flipping it off removes
+	// the configured remote and disables auto-sync but leaves the .git dir
+	// and managed files alone so re-enabling later is cheap.
 	BackupEnabled bool `json:"backupEnabled,omitempty"`
 	// BackupRemoteURL is the configured remote when the workspaces root
 	// is being managed as a git repo. Empty = no remote configured.

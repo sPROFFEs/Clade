@@ -354,14 +354,6 @@
     } catch (e) { error = String(e) }
   }
 
-  async function importTemplate() {
-    error = ''
-    try {
-      const msg = await api.importWorkpathTemplateDialog()
-      if (msg) { notice = msg; await load() }
-    } catch (e) { error = String(e) }
-  }
-
   async function exportYAML(a) {
     try {
       // Pack-aware: .praimate-agent (yaml + knowledge) by default,
@@ -546,7 +538,6 @@
     <h1 class="grow" style="margin:0">Agents</h1>
     <button class="btn" on:click={() => openLaunch(null, 'studio')} title="Open the document studio without an agent persona">Open studio…</button>
     <button class="btn" on:click={importYAML}>Import…</button>
-    <button class="btn" on:click={importTemplate} title="Convert a pre-1.1 workpath template folder into an agent with its knowledge base">Import template…</button>
     <button class="btn primary" on:click={() => agentStudio.set({ id: '' })}>+ New agent</button>
   </div>
   <p class="subtitle">Portable YAML agents. Launch them in a Chat, a live Terminal, or the document Studio — each agent declares which surfaces it allows.</p>

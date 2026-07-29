@@ -95,7 +95,7 @@ func (a *App) backupState(ctx context.Context) (*BackupState, error) {
 		return &BackupState{Supported: false}, nil
 	}
 	st := backup.Status{}
-	if cfg.BackupEnabled && backup.IsGitRepo(dir) {
+	if backup.IsGitRepo(dir) {
 		st, _ = backup.CurrentStatus(ctx, dir) // best-effort (offline OK)
 	}
 	return backupStateFrom(cfg, st), nil
@@ -108,11 +108,9 @@ func (a *App) BackupStatus() (*BackupState, error) {
 	return a.backupState(ctx)
 }
 
-// SetBackupEnabled flips the master switch. Enabling initialises the
-// workspaces root as a git repo (idempotent) and points origin at the
-// saved remote URL when one exists; disabling unlinks the remote and
-// turns auto-sync off, leaving the local .git in place (re-enabling is
-// cheap).
+// SetBackupEnabled pauses or resumes an already configured backup. Initial
+// setup is deliberately handled by ConfigureBackup so flipping a toggle can
+// never create a repository or commit files without an explicit mode choice.
 func (a *App) SetBackupEnabled(on bool) (*BackupState, error) {
 	cfg, dir, err := a.backupConfig()
 	if err != nil || cfg == nil {
@@ -122,8 +120,8 @@ func (a *App) SetBackupEnabled(on bool) (*BackupState, error) {
 	defer cancel()
 
 	if on {
-		if _, err := backup.Init(ctx, dir); err != nil {
-			return nil, fmt.Errorf("git init: %w", err)
+		if !backup.IsGitRepo(dir) {
+			return nil, fmt.Errorf("backup is not configured — choose a setup mode first")
 		}
 		cfg.BackupEnabled = true
 		if cfg.BackupMachineID == "" {
@@ -144,6 +142,60 @@ func (a *App) SetBackupEnabled(on bool) (*BackupState, error) {
 		return nil, fmt.Errorf("save config: %w", err)
 	}
 	return a.backupState(ctx)
+}
+
+// ConfigureBackup performs the explicit first-time setup selected in Settings.
+// mode is "new" for a new local history or "existing" to attach and compare an
+// existing remote. Existing remote data is never allowed to overwrite local
+// files automatically; Sync surfaces divergence for a user decision.
+func (a *App) ConfigureBackup(mode, remoteURL string) (*BackupSyncResult, error) {
+	cfg, dir, err := a.backupConfig()
+	if err != nil || cfg == nil {
+		return nil, fmt.Errorf("backup unavailable: no workspaces root configured")
+	}
+	mode = strings.TrimSpace(mode)
+	remoteURL = strings.TrimSpace(remoteURL)
+	switch mode {
+	case "new":
+	case "existing":
+		if remoteURL == "" {
+			return nil, fmt.Errorf("existing backup requires a remote URL")
+		}
+	default:
+		return nil, fmt.Errorf("unknown backup setup mode %q", mode)
+	}
+
+	ctx, cancel := context.WithTimeout(a.ctx, 120*time.Second)
+	defer cancel()
+	if mode == "existing" {
+		if _, err := backup.LsRemote(ctx, remoteURL); err != nil {
+			return nil, fmt.Errorf("test existing remote: %w", err)
+		}
+	}
+	if _, err := backup.Init(ctx, dir); err != nil {
+		return nil, fmt.Errorf("git init: %w", err)
+	}
+	if remoteURL != "" {
+		if err := backup.AddRemote(ctx, dir, remoteURL); err != nil {
+			return nil, fmt.Errorf("set remote: %w", err)
+		}
+	}
+	cfg.BackupEnabled = true
+	cfg.BackupRemoteURL = remoteURL
+	if cfg.BackupMachineID == "" {
+		cfg.BackupMachineID = guiNewMachineID()
+	}
+	if err := launcher.SaveConfig(cfg); err != nil {
+		return nil, fmt.Errorf("save config: %w", err)
+	}
+	if remoteURL != "" {
+		return a.BackupSyncNow()
+	}
+	state, err := a.backupState(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &BackupSyncResult{Action: string(backup.SyncActionNoRemote), State: state}, nil
 }
 
 // SetBackupRemote saves the remote URL and (when the repo exists)

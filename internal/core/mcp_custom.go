@@ -25,6 +25,7 @@ type AddCustomMCPRequest struct {
 	Args      []string
 	URL       string            // http/sse endpoint
 	Env       map[string]string // KEY=VALUE pairs (e.g. API tokens)
+	Enabled   *bool             // optional; defaults to enabled for new servers
 }
 
 // AddCustomMCP validates and persists a user-defined MCP server. Returns
@@ -75,7 +76,21 @@ func (c *Core) AddCustomMCP(ctx context.Context, req AddCustomMCPRequest) (*MCPS
 		Args:      args,
 		URL:       strings.TrimSpace(req.URL),
 		Env:       req.Env,
+		Enabled:   req.Enabled,
 	})
+}
+
+// UpdateMCPServer edits a stored server without changing its stable ID or
+// enabled state. Editing a catalogue-derived entry turns it into a custom
+// definition so future catalogue changes cannot overwrite the user's values.
+func (c *Core) UpdateMCPServer(ctx context.Context, id string, req AddCustomMCPRequest) (*MCPServer, error) {
+	current, err := c.GetMCPServer(ctx, strings.TrimSpace(id))
+	if err != nil {
+		return nil, err
+	}
+	req.ID = current.ID
+	req.Enabled = &current.Enabled
+	return c.AddCustomMCP(ctx, req)
 }
 
 // ParseEnvLines turns "KEY=VALUE" lines (newline- or comma-separated)

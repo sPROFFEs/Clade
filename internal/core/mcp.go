@@ -388,30 +388,10 @@ func copyStringMap(in map[string]string) map[string]string {
 }
 
 var mcpCatalogue = []MCPCatalogueEntry{
-	stdioMCP("github", "GitHub", "Issues, pull requests, repositories, and code search.", "GITHUB_PERSONAL_ACCESS_TOKEN", "@modelcontextprotocol/server-github"),
-	stdioMCP("gitlab", "GitLab", "Projects, merge requests, issues, and pipelines.", "GITLAB_PERSONAL_ACCESS_TOKEN", "@modelcontextprotocol/server-gitlab"),
-	stdioMCP("linear", "Linear", "Issues, projects, cycles, and team planning.", "LINEAR_API_KEY", "@modelcontextprotocol/server-linear"),
-	stdioMCP("notion", "Notion", "Pages, databases, and workspace search.", "NOTION_API_KEY", "@modelcontextprotocol/server-notion"),
-	stdioMCP("slack", "Slack", "Channels, messages, threads, and search.", "SLACK_BOT_TOKEN", "@modelcontextprotocol/server-slack"),
-	stdioMCP("sentry", "Sentry", "Issues, projects, traces, and release health.", "SENTRY_AUTH_TOKEN", "@modelcontextprotocol/server-sentry"),
-	stdioMCP("stripe", "Stripe", "Customers, payments, subscriptions, and invoices.", "STRIPE_API_KEY", "@modelcontextprotocol/server-stripe"),
-	stdioMCP("vercel", "Vercel", "Projects, deployments, domains, and logs.", "VERCEL_TOKEN", "@modelcontextprotocol/server-vercel"),
-	stdioMCP("supabase", "Supabase", "Projects, SQL, auth, storage, and edge functions.", "SUPABASE_ACCESS_TOKEN", "@modelcontextprotocol/server-supabase"),
-	stdioMCP("cloudflare", "Cloudflare", "Zones, DNS, workers, pages, and logs.", "CLOUDFLARE_API_TOKEN", "@modelcontextprotocol/server-cloudflare"),
-	stdioMCP("postgres", "Postgres", "Read and inspect a Postgres database.", "POSTGRES_CONNECTION_STRING", "@modelcontextprotocol/server-postgres"),
 	stdioMCP("sqlite", "SQLite", "Read and inspect a local SQLite database.", "SQLITE_DB_PATH", "@modelcontextprotocol/server-sqlite"),
 	stdioMCP("filesystem", "Filesystem", "Scoped local file access for selected directories.", "", "@modelcontextprotocol/server-filesystem"),
 	stdioMCP("fetch", "Fetch", "HTTP fetch and web content conversion.", "", "@modelcontextprotocol/server-fetch"),
 	stdioMCP("browser", "Browser", "Browser automation for web QA and scraping.", "", "@modelcontextprotocol/server-puppeteer"),
-	stdioMCP("figma", "Figma", "Files, components, comments, and design metadata.", "FIGMA_ACCESS_TOKEN", "@modelcontextprotocol/server-figma"),
-	stdioMCP("jira", "Jira", "Issues, projects, boards, and sprints.", "JIRA_API_TOKEN", "@modelcontextprotocol/server-jira"),
-	stdioMCP("confluence", "Confluence", "Spaces, pages, comments, and search.", "CONFLUENCE_API_TOKEN", "@modelcontextprotocol/server-confluence"),
-	stdioMCP("asana", "Asana", "Tasks, projects, teams, and portfolios.", "ASANA_ACCESS_TOKEN", "@modelcontextprotocol/server-asana"),
-	stdioMCP("trello", "Trello", "Boards, lists, cards, and checklists.", "TRELLO_API_KEY", "@modelcontextprotocol/server-trello"),
-	oauthMCP("google-drive", "Google Drive", "Drive files, folders, permissions, and search.", "@modelcontextprotocol/server-google-drive", "https://accounts.google.com", "https://www.googleapis.com/auth/drive.readonly"),
-	oauthMCP("gmail", "Gmail", "Mail search, labels, drafts, and messages.", "@modelcontextprotocol/server-gmail", "https://accounts.google.com", "https://www.googleapis.com/auth/gmail.readonly"),
-	oauthMCP("google-calendar", "Google Calendar", "Calendars, events, availability, and scheduling.", "@modelcontextprotocol/server-google-calendar", "https://accounts.google.com", "https://www.googleapis.com/auth/calendar.readonly"),
-	stdioMCP("obsidian", "Obsidian", "Vault notes, backlinks, and search.", "OBSIDIAN_API_KEY", "@modelcontextprotocol/server-obsidian"),
 	stdioMCP("sequential-thinking", "Sequential Thinking", "Structured reasoning scratchpad for multi-step tasks.", "", "@modelcontextprotocol/server-sequential-thinking"),
 }
 
@@ -428,22 +408,5 @@ func stdioMCP(key, name, desc, envVar, pkg string) MCPCatalogueEntry {
 		Command:     "npx",
 		Args:        []string{"-y", pkg},
 		Auth:        auth,
-	}
-}
-
-func oauthMCP(key, name, desc, pkg, issuer string, scopes ...string) MCPCatalogueEntry {
-	return MCPCatalogueEntry{
-		Key:         key,
-		Name:        name,
-		Description: desc,
-		Transport:   MCPTransportStdio,
-		Command:     "npx",
-		Args:        []string{"-y", pkg},
-		Auth: MCPAuthSpec{
-			Type:        MCPAuthOAuth,
-			Label:       name + " OAuth",
-			OAuthIssuer: issuer,
-			Scopes:      scopes,
-		},
 	}
 }

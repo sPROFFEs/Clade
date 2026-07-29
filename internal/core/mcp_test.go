@@ -10,14 +10,14 @@ import (
 	"testing"
 )
 
-func TestListMCPCatalogue_HasExpectedProviders(t *testing.T) {
+func TestListMCPCatalogue_OnlyOffersLocalProcesses(t *testing.T) {
 	got := ListMCPCatalogue()
-	if len(got) < 25 {
-		t.Fatalf("catalogue has %d providers, want at least 25", len(got))
+	if len(got) != 5 {
+		t.Fatalf("catalogue has %d providers, want 5 local utilities", len(got))
 	}
 	want := map[string]bool{
-		"github": false, "linear": false, "notion": false,
-		"vercel": false, "supabase": false, "google-drive": false,
+		"browser": false, "fetch": false, "filesystem": false,
+		"sequential-thinking": false, "sqlite": false,
 	}
 	for _, entry := range got {
 		if entry.Key == "" || entry.Name == "" {
@@ -26,8 +26,13 @@ func TestListMCPCatalogue_HasExpectedProviders(t *testing.T) {
 		if !knownMCPTransport(entry.Transport) {
 			t.Fatalf("%s has bad transport %q", entry.Key, entry.Transport)
 		}
+		if entry.Transport != MCPTransportStdio || entry.Command == "" {
+			t.Fatalf("%s is not a local process: %+v", entry.Key, entry)
+		}
 		if _, ok := want[entry.Key]; ok {
 			want[entry.Key] = true
+		} else {
+			t.Fatalf("third-party service remains in catalogue: %q", entry.Key)
 		}
 	}
 	for key, seen := range want {
@@ -37,57 +42,14 @@ func TestListMCPCatalogue_HasExpectedProviders(t *testing.T) {
 	}
 }
 
-func TestConnectMCP_CatalogueAPIKeyPersistsEnv(t *testing.T) {
+func TestConnectMCP_RejectsRemovedServiceCatalogueEntry(t *testing.T) {
 	s := openTempStore(t)
 	defer s.Close()
 	c, _ := New(Options{Store: s})
 
-	got, err := c.ConnectMCP(context.Background(), ConnectMCPRequest{
-		CatalogueKey: "github",
-		APIKey:       "ghp_test",
-	})
-	if err != nil {
-		t.Fatalf("ConnectMCP: %v", err)
-	}
-	if got.ID != "github" || got.Name != "GitHub" || got.Command != "npx" {
-		t.Fatalf("catalogue defaults not applied: %+v", got)
-	}
-	if got.Env["GITHUB_PERSONAL_ACCESS_TOKEN"] != "ghp_test" {
-		t.Fatalf("API key not mapped to env: %+v", got.Env)
-	}
-	if got.Auth["type"] != string(MCPAuthAPIKey) {
-		t.Fatalf("auth type not persisted: %+v", got.Auth)
-	}
-}
-
-func TestConnectMCP_RequiresAPIKeyForAPIKeyProvider(t *testing.T) {
-	s := openTempStore(t)
-	defer s.Close()
-	c, _ := New(Options{Store: s})
-
-	_, err := c.ConnectMCP(context.Background(), ConnectMCPRequest{CatalogueKey: "linear"})
-	if err == nil || !strings.Contains(err.Error(), "APIKey required") {
-		t.Fatalf("expected APIKey required error, got %v", err)
-	}
-}
-
-func TestConnectMCP_OAuthCataloguePersistsOAuthMetadata(t *testing.T) {
-	s := openTempStore(t)
-	defer s.Close()
-	c, _ := New(Options{Store: s})
-
-	got, err := c.ConnectMCP(context.Background(), ConnectMCPRequest{CatalogueKey: "google-drive"})
-	if err != nil {
-		t.Fatalf("ConnectMCP: %v", err)
-	}
-	if got.Auth["type"] != string(MCPAuthOAuth) {
-		t.Fatalf("expected oauth auth, got %+v", got.Auth)
-	}
-	if got.Auth["issuer"] != "https://accounts.google.com" {
-		t.Fatalf("oauth issuer not persisted: %+v", got.Auth)
-	}
-	if !strings.Contains(got.Auth["scopes"], "drive.readonly") {
-		t.Fatalf("oauth scopes not persisted: %+v", got.Auth)
+	_, err := c.ConnectMCP(context.Background(), ConnectMCPRequest{CatalogueKey: "github"})
+	if err == nil || !strings.Contains(err.Error(), "unknown catalogue key") {
+		t.Fatalf("expected removed catalogue key error, got %v", err)
 	}
 }
 
@@ -170,8 +132,12 @@ func TestRunWorkflow_PreparesClaudeMCPConfigAndEnv(t *testing.T) {
 	defer s.Close()
 	c, _ := New(Options{Store: s})
 	_, err := c.ConnectMCP(context.Background(), ConnectMCPRequest{
-		CatalogueKey: "github",
-		APIKey:       "ghp_test",
+		ID:        "github",
+		Name:      "GitHub",
+		Transport: MCPTransportStdio,
+		Command:   "npx",
+		Args:      []string{"-y", "@modelcontextprotocol/server-github"},
+		Env:       map[string]string{"GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_test"},
 	})
 	if err != nil {
 		t.Fatalf("ConnectMCP: %v", err)
@@ -470,6 +436,44 @@ func TestAddCustomMCP_HTTPRequiresURL(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected URL-required error for http transport")
+	}
+}
+
+func TestUpdateMCPServer_PreservesIdentityAndEnabledState(t *testing.T) {
+	c, _ := New(Options{Store: openTempStore(t)})
+	ctx := context.Background()
+	disabled := false
+	original, err := c.AddCustomMCP(ctx, AddCustomMCPRequest{
+		Name:      "Local tools",
+		Transport: "stdio",
+		Command:   "old-server",
+		Enabled:   &disabled,
+	})
+	if err != nil {
+		t.Fatalf("AddCustomMCP: %v", err)
+	}
+
+	updated, err := c.UpdateMCPServer(ctx, original.ID, AddCustomMCPRequest{
+		Name:      "Local tools renamed",
+		Transport: "http",
+		URL:       "http://127.0.0.1:9000/mcp",
+		Env:       map[string]string{"TOKEN": "new"},
+	})
+	if err != nil {
+		t.Fatalf("UpdateMCPServer: %v", err)
+	}
+	if updated.ID != original.ID {
+		t.Fatalf("ID changed from %q to %q", original.ID, updated.ID)
+	}
+	if updated.Enabled {
+		t.Fatal("edit unexpectedly enabled a disabled server")
+	}
+	if updated.Name != "Local tools renamed" || updated.Transport != MCPTransportHTTP ||
+		updated.URL != "http://127.0.0.1:9000/mcp" || updated.Command != "" {
+		t.Fatalf("edited fields not persisted: %+v", updated)
+	}
+	if updated.Env["TOKEN"] != "new" {
+		t.Fatalf("edited environment not persisted: %+v", updated.Env)
 	}
 }
 

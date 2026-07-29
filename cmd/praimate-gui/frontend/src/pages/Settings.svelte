@@ -38,6 +38,7 @@
   let bkMsg = ''           // last op result line
   let bkRemote = ''        // remote URL input
   let bkDiverged = null    // {localCommits, remoteCommits} when resolution needed
+  let bkSetupMode = 'new'  // 'new' | 'existing'
 
   function fmtDate(s) {
     try { return new Date(s).toLocaleString() } catch { return s }
@@ -78,16 +79,42 @@
     bkDiverged = null
     try {
       const res = await api.backupSyncNow()
-      bk = res.state
-      bkRemote = bk.remoteUrl || ''
-      if (res.action === 'diverged') {
-        bkDiverged = { local: res.localCommits || [], remote: res.remoteCommits || [] }
-        bkMsg = 'Diverged — pick a resolution below.'
-      } else {
-        bkMsg = { in_sync: 'In sync ✓', pushed: 'Pushed local changes ✓', pulled: 'Pulled remote changes ✓', no_remote: 'No remote configured.' }[res.action] || res.action
-      }
+      applyBackupResult(res)
     } catch (e) {
       error = String(e)
+    } finally {
+      bkBusy = ''
+    }
+  }
+
+  function applyBackupResult(res) {
+    bk = res.state
+    bkRemote = bk.remoteUrl || ''
+    if (res.action === 'diverged') {
+      bkDiverged = { local: res.localCommits || [], remote: res.remoteCommits || [] }
+      bkMsg = 'Local and remote histories differ — choose how to reconcile them below.'
+    } else {
+      bkMsg = {
+        in_sync: 'In sync ✓',
+        pushed: 'Pushed local changes ✓',
+        pulled: 'Pulled remote changes ✓',
+        no_remote: 'Local backup created. Add a remote when you are ready.',
+      }[res.action] || res.action
+    }
+  }
+
+  async function bkConfigure() {
+    if (bkBusy) return
+    bkBusy = 'Configure'
+    bkMsg = ''
+    error = ''
+    bkDiverged = null
+    try {
+      const res = await api.configureBackup(bkSetupMode, bkRemote.trim())
+      applyBackupResult(res)
+    } catch (e) {
+      error = String(e)
+      await bkLoad()
     } finally {
       bkBusy = ''
     }
@@ -296,7 +323,7 @@
   <div class="card">
     <div class="row" style="justify-content: space-between">
       <div>
-        <div class="card-title">Backup enabled</div>
+        <div class="card-title">Git backup</div>
         <div class="card-sub">
           {#if bk.enabled && bk.initialized}
             {bk.branch || 'main'}
@@ -304,22 +331,26 @@
             {#if bk.lastCommit} · {bk.lastCommit}{/if}
           {:else if bk.enabled}
             enabled, repo not initialised yet
+          {:else if bk.initialized}
+            paused — repository and history remain on disk
           {:else}
-            off — flip to initialise the workspaces root as a git repo
+            not configured
           {/if}
         </div>
         {#if bk.lastSyncAt}<div class="card-sub">last sync: {fmtDate(bk.lastSyncAt)}{#if bk.machineId} · machine: <span class="mono">{bk.machineId}</span>{/if}</div>{/if}
       </div>
-      <button class="btn" class:primary={bk.enabled} disabled={!!bkBusy}
-        on:click={() => bkOp(bk.enabled ? 'Disable' : 'Enable', () => api.setBackupEnabled(!bk.enabled))}>
-        {bk.enabled ? 'On' : 'Off'}
-      </button>
+      {#if bk.initialized}
+        <button class="btn" class:primary={bk.enabled} disabled={!!bkBusy}
+          on:click={() => bkOp(bk.enabled ? 'Disable' : 'Enable', () => api.setBackupEnabled(!bk.enabled))}>
+          {bk.enabled ? 'Disable' : 'Enable'}
+        </button>
+      {/if}
     </div>
 
     {#if bk.enabled}
-      <label class="lbl">Remote URL (https or ssh — uses your git client's credentials)</label>
+      <label class="lbl" for="backup-remote-url">Remote URL (HTTPS or SSH — uses your Git credentials)</label>
       <div class="row">
-        <input class="field grow mono" placeholder="git@github.com:you/praimate-backup.git" bind:value={bkRemote} />
+        <input id="backup-remote-url" class="field grow mono" placeholder="git@github.com:you/praimate-backup.git" bind:value={bkRemote} />
         <button class="btn" disabled={!!bkBusy || !bkRemote.trim()} on:click={bkTest}>Test</button>
         <button class="btn" disabled={!!bkBusy} on:click={() => bkOp('Save remote', () => api.setBackupRemote(bkRemote))}>Save</button>
       </div>
@@ -374,9 +405,84 @@
           </div>
         </div>
       {/if}
+    {:else if !bk.initialized}
+      <div class="setup-divider"></div>
+      <div class="card-title">Choose how to set up backup</div>
+      <div class="setup-options">
+        <button class="setup-option" class:selected={bkSetupMode === 'new'} on:click={() => (bkSetupMode = 'new')}>
+          <strong>Start a new backup</strong>
+          <span>Create local Git history from the current workspace. A remote URL is optional.</span>
+        </button>
+        <button class="setup-option" class:selected={bkSetupMode === 'existing'} on:click={() => (bkSetupMode = 'existing')}>
+          <strong>Connect an existing backup</strong>
+          <span>Attach an existing remote, fetch it, and compare it with the current workspace.</span>
+        </button>
+      </div>
+
+      <label class="lbl" for="backup-setup-remote">
+        Remote URL {bkSetupMode === 'new' ? '(optional)' : '(required)'}
+      </label>
+      <div class="row">
+        <input id="backup-setup-remote" class="field grow mono" placeholder="git@github.com:you/praimate-backup.git" bind:value={bkRemote} />
+        <button class="btn" disabled={!!bkBusy || !bkRemote.trim()} on:click={bkTest}>Test</button>
+      </div>
+      {#if bkSetupMode === 'existing'}
+        <p class="setup-note">PrAImate will not overwrite either side automatically. If local and remote histories differ, you will choose whether to merge, rebase, keep local, or keep remote.</p>
+      {:else}
+        <p class="setup-note">This creates commits only inside the configured workspaces folder. It does not change your global Git identity.</p>
+      {/if}
+      <button class="btn primary" disabled={!!bkBusy || (bkSetupMode === 'existing' && !bkRemote.trim())} on:click={bkConfigure}>
+        {bkBusy === 'Configure' ? 'Configuring…' : (bkSetupMode === 'existing' ? 'Connect and compare' : 'Create backup')}
+      </button>
     {/if}
   </div>
 {/if}
+
+<style>
+  .setup-divider {
+    margin: 16px 0;
+    border-top: 1px solid var(--border);
+  }
+  .setup-options {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin: 10px 0 14px;
+  }
+  .setup-option {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-height: 76px;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text);
+    text-align: left;
+    cursor: pointer;
+    font-family: var(--sans);
+  }
+  .setup-option:hover { background: var(--bg-raised); }
+  .setup-option.selected {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .setup-option span {
+    color: var(--text-dim);
+    font-size: 12px;
+    line-height: 1.45;
+  }
+  .setup-note {
+    margin: 8px 0 12px;
+    color: var(--text-dim);
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  @media (max-width: 700px) {
+    .setup-options { grid-template-columns: 1fr; }
+  }
+</style>
 
 {#if prereqModal}
   <!-- svelte-ignore a11y-click-events-have-key-events -->

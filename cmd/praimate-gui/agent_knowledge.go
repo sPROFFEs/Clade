@@ -795,51 +795,6 @@ func (a *App) InstallBundledGraphify() error {
 	return nil
 }
 
-// ImportWorkpathTemplateDialog opens a folder picker and converts the
-// chosen pre-1.1 workpath template (or a parent dir of templates) into
-// agent(s) with their knowledge bases. Returns a short summary.
-func (a *App) ImportWorkpathTemplateDialog() (string, error) {
-	c, err := a.requireCore()
-	if err != nil {
-		return "", err
-	}
-	dir, err := wruntime.OpenDirectoryDialog(a.ctx, wruntime.OpenDialogOptions{
-		Title: "Import a workpath template folder (or a folder of templates)",
-	})
-	if err != nil || dir == "" {
-		return "", err
-	}
-	if core.IsWorkpathTemplate(dir) {
-		ag, err := c.ImportWorkpathTemplate(a.ctx, dir, "", nil)
-		if err != nil {
-			return "", err
-		}
-		return "Imported agent: " + ag.Name, nil
-	}
-	// Parent dir: import every template subdir (skip _common / dotdirs).
-	entries, rerr := os.ReadDir(dir)
-	if rerr != nil {
-		return "", rerr
-	}
-	var names []string
-	for _, e := range entries {
-		if !e.IsDir() || e.Name() == "_common" || strings.HasPrefix(e.Name(), ".") {
-			continue
-		}
-		sub := filepath.Join(dir, e.Name())
-		if !core.IsWorkpathTemplate(sub) {
-			continue
-		}
-		if ag, err := c.ImportWorkpathTemplate(a.ctx, sub, "", nil); err == nil {
-			names = append(names, ag.Name)
-		}
-	}
-	if len(names) == 0 {
-		return "", fmt.Errorf("no workpath templates found in %s", dir)
-	}
-	return fmt.Sprintf("Imported %d agent(s): %s", len(names), strings.Join(names, ", ")), nil
-}
-
 // ExportAgentPackDialog saves the agent as a .praimate-agent pack
 // (yaml + knowledge, RAG index included) — or bare YAML when the user
 // picks that extension.

@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "test:endpoint-security": "node --test src/lib/endpointSecurity.test.js",
+    "test:mcp-form": "node --test src/lib/mcpForm.test.js",
     "test:terminal": "node --test src/lib/terminal.test.js",
     "test:studio": "node --test src/pages/AgentStudio.test.js"
   },

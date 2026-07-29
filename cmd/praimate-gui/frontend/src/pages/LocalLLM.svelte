@@ -4,6 +4,7 @@
   // backup syncs it across machines.
   import { onMount } from 'svelte'
   import { api } from '../lib/api.js'
+  import { endpointTransport } from '../lib/endpointSecurity.js'
 
   let d = { endpoint: '', apiKey: '', wireApi: '', contextTokens: 0, outputTokens: 0 }
   let error = ''
@@ -11,6 +12,7 @@
   let testing = false
   let saving = false
   let models = null
+  $: transport = endpointTransport(d.endpoint)
 
   async function load() {
     try {
@@ -104,14 +106,27 @@
 {#if notice}<div class="card card-sub">{notice}</div>{/if}
 
 <div class="card">
-  <label class="lbl">Endpoint URL</label>
-  <input class="field mono" bind:value={d.endpoint} placeholder="http://localhost:11434" />
+  <label class="lbl" for="local-llm-endpoint">Endpoint URL</label>
+  <input id="local-llm-endpoint" class="field mono" bind:value={d.endpoint} placeholder="http://localhost:11434" />
+  {#if transport.insecure}
+    <div class="transport-warning" role="alert">
+      <span class="transport-label">HTTP</span>
+      <div>
+        <strong>{transport.loopback ? 'Unencrypted local connection' : 'Unencrypted remote connection'}</strong>
+        {#if transport.loopback}
+          <p>The underlying CLI communicates with the model server over HTTP. Traffic is not encrypted, but this address stays on this computer as long as the server listens only on loopback.</p>
+        {:else}
+          <p>The underlying CLI will send prompts, selected file content, tool output, credentials, and model responses to this endpoint over unencrypted HTTP. Use HTTPS, a trusted VPN, or an SSH tunnel when the server is on another machine.</p>
+        {/if}
+      </div>
+    </div>
+  {/if}
 
-  <label class="lbl">API key (optional)</label>
-  <input class="field mono" type="password" bind:value={d.apiKey} placeholder="empty for plain Ollama" />
+  <label class="lbl" for="local-llm-api-key">API key (optional)</label>
+  <input id="local-llm-api-key" class="field mono" type="password" bind:value={d.apiKey} placeholder="empty for plain Ollama" />
 
-  <label class="lbl">Codex wire API</label>
-  <select class="field" style="max-width:260px" bind:value={d.wireApi}>
+  <label class="lbl" for="local-llm-wire-api">Codex wire API</label>
+  <select id="local-llm-wire-api" class="field" style="max-width:260px" bind:value={d.wireApi}>
     <option value="">auto</option>
     <option value="responses">responses (codex ≥0.130)</option>
     <option value="chat">chat completions</option>
@@ -119,12 +134,12 @@
 
   <div class="row">
     <div class="grow">
-      <label class="lbl">Context tokens hint</label>
-      <input class="field" type="number" bind:value={d.contextTokens} placeholder="e.g. 32768" />
+      <label class="lbl" for="local-llm-context-tokens">Context tokens hint</label>
+      <input id="local-llm-context-tokens" class="field" type="number" bind:value={d.contextTokens} placeholder="e.g. 32768" />
     </div>
     <div class="grow">
-      <label class="lbl">Output tokens hint</label>
-      <input class="field" type="number" bind:value={d.outputTokens} placeholder="e.g. 8192" />
+      <label class="lbl" for="local-llm-output-tokens">Output tokens hint</label>
+      <input id="local-llm-output-tokens" class="field" type="number" bind:value={d.outputTokens} placeholder="e.g. 8192" />
     </div>
   </div>
 
@@ -134,6 +149,35 @@
     <button class="btn danger" on:click={clearAll}>Clear</button>
   </div>
 </div>
+
+<style>
+  .transport-warning {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 11px;
+    margin: 8px 0 14px;
+    padding: 12px 13px;
+    border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--border));
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--warn) 8%, var(--bg-panel));
+  }
+  .transport-label {
+    align-self: start;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--warn) 18%, transparent);
+    color: var(--warn);
+    font: 700 10px/1.5 var(--mono);
+    letter-spacing: .05em;
+  }
+  .transport-warning strong { font-size: 13px; }
+  .transport-warning p {
+    margin: 3px 0 0;
+    color: var(--text-dim);
+    font-size: 12px;
+    line-height: 1.5;
+  }
+</style>
 
 {#if models !== null}
   <div class="card">
@@ -151,8 +195,8 @@
   <strong>opencode / praimate-code</strong> and <strong>codex</strong> read their endpoint from their own config files, so apply it once here and every session (chat, code, studio) uses the local model.
 </p>
 <div class="card">
-  <label class="lbl">Model to route to</label>
-  <input class="field mono" style="max-width:420px" list="apply-models" bind:value={applyModel} placeholder="e.g. qwen2.5-coder:14b" />
+  <label class="lbl" for="local-llm-route-model">Model to route to</label>
+  <input id="local-llm-route-model" class="field mono" style="max-width:420px" list="apply-models" bind:value={applyModel} placeholder="e.g. qwen2.5-coder:14b" />
   <datalist id="apply-models">{#each models || [] as m}<option value={m}></option>{/each}</datalist>
   <div class="card-sub" style="margin-top:4px">Tip: press “Test connection” above to populate the model list.</div>
 

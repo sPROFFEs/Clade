@@ -113,6 +113,27 @@ func TestInit_CreatesRepoWithManagedFilesAndInitialCommit(t *testing.T) {
 	}
 }
 
+func TestInit_DoesNotRequireGlobalGitIdentity(t *testing.T) {
+	skipIfNoGit(t)
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "user.useConfigOnly")
+	t.Setenv("GIT_CONFIG_VALUE_0", "true")
+
+	dir := t.TempDir()
+	if _, err := Init(context.Background(), dir); err != nil {
+		t.Fatalf("Init should supply its own commit identity: %v", err)
+	}
+	r := Run(context.Background(), dir, "log", "-1", "--format=%an|%ae|%cn|%ce")
+	if r.Failed() {
+		t.Fatalf("git log: %s", UserError(r))
+	}
+	if got := strings.TrimSpace(r.Stdout); got != "PrAImate|praimate@local|PrAImate|praimate@local" {
+		t.Fatalf("backup commit identity = %q", got)
+	}
+}
+
 func TestInit_Idempotent(t *testing.T) {
 	skipIfNoGit(t)
 	dir := t.TempDir()

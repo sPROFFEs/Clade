@@ -69,7 +69,6 @@ export const api = {
   cancelAgentRAG: (id) => call('CancelAgentRAG', id),
   installBundledGraphify: () => call('InstallBundledGraphify'),
   exportAgentPackDialog: (id) => call('ExportAgentPackDialog', id),
-  importWorkpathTemplateDialog: () => call('ImportWorkpathTemplateDialog'),
 
   updateChatConfig: (chatID, cli, model, tools, localEndpoint, localApiKey, localModel) =>
     call('UpdateChatConfig', chatID, cli, model, tools, localEndpoint || '', localApiKey || '', localModel || ''),
@@ -145,9 +144,10 @@ export const api = {
 
   mcpCatalogue: () => call('MCPCatalogue'),
   mcpServers: () => call('MCPServers'),
-  connectMCP: (key, apiKey) => call('ConnectMCP', key, apiKey),
   addCustomMCP: (name, transport, command, url, envText) =>
     call('AddCustomMCP', name, transport, command, url, envText),
+  updateMCPServer: (id, name, transport, command, url, envText) =>
+    call('UpdateMCPServer', id, name, transport, command, url, envText),
   setMCPEnabled: (id, on) => call('SetMCPEnabled', id, on),
   deleteMCPServer: (id) => call('DeleteMCPServer', id),
 
@@ -174,6 +174,7 @@ export const api = {
 
   backupStatus: () => call('BackupStatus'),
   setBackupEnabled: (on) => call('SetBackupEnabled', on),
+  configureBackup: (mode, remoteURL) => call('ConfigureBackup', mode, remoteURL || ''),
   setBackupRemote: (url) => call('SetBackupRemote', url),
   testBackupRemote: (url) => call('TestBackupRemote', url),
   backupSyncNow: () => call('BackupSyncNow'),

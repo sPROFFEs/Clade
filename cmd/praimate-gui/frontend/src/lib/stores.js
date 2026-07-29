@@ -19,9 +19,9 @@ export const agentStudio = writable(null)
 // CLI & Tools detection cache. Probing the CLIs + managed tools takes
 // several seconds; prefetching at app startup means the "CLI & Tools"
 // tab renders instantly from cache when the user opens it, then
-// refreshes in the background. Shape: { clis, tools, codeInstalled,
-// loaded } — loaded=false while the first probe is in flight.
-export const cliCache = writable({ clis: [], tools: [], codeInstalled: false, loaded: false })
+// refreshes in the background. Shape: { clis, tools, loaded } —
+// loaded=false while the first probe is in flight.
+export const cliCache = writable({ clis: [], tools: [], loaded: false })
 
 // prefetchCLIs runs the detection once and fills cliCache. force=true
 // re-probes even if already loaded (used by the tab's Re-detect button).
@@ -33,12 +33,11 @@ export async function prefetchCLIs(force = false) {
   if (already && !force) return
   prefetchInFlight = true
   try {
-    const [clis, tools, codeInstalled] = await Promise.all([
+    const [clis, tools] = await Promise.all([
       api.listCLIBackends().catch(() => []),
       api.listManagedTools().catch(() => []),
-      api.praimateCodeInstalled().catch(() => false),
     ])
-    cliCache.set({ clis: clis || [], tools: tools || [], codeInstalled: !!codeInstalled, loaded: true })
+    cliCache.set({ clis: clis || [], tools: tools || [], loaded: true })
   } finally {
     prefetchInFlight = false
   }
