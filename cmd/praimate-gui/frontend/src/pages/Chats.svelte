@@ -3,6 +3,7 @@
   import { api, onChatStream, onApproval } from '../lib/api.js'
   import { activePage, pageRevision, openChatId, pendingTerm } from '../lib/stores.js'
   import SkillsPicker from '../lib/SkillsPicker.svelte'
+  import { renderMarkdown } from '../lib/markdown.js'
   import { findTerminalForChat } from '../lib/terminal.js'
 
   let skillsPickerOpen = false
@@ -678,7 +679,11 @@
               </div>
             </details>
           {/if}
-          {cleanMsg(m.Content)}
+          {#if m.Role === 'user'}
+            {cleanMsg(m.Content)}
+          {:else}
+            <div class="markdown">{@html renderMarkdown(cleanMsg(m.Content))}</div>
+          {/if}
           {#if m.Meta?.attachments}
             <div class="att-row">
               {#each m.Meta.attachments as path}
@@ -726,7 +731,7 @@
           </div>
         {/if}
         {#if stream?.text}
-          <span>{stream.text}</span><span class="cursor">▍</span>
+          <div class="markdown">{@html renderMarkdown(stream.text)}</div><span class="cursor">▍</span>
         {:else}
           <span class="typing">…thinking</span>
         {/if}

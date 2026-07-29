@@ -7,23 +7,12 @@
   // cursor-preserving diff; user keystrokes flush to disk debounced so
   // the agent's next turn reads what's on screen.
   import { onMount, onDestroy, tick } from 'svelte'
-  import { marked } from 'marked'
-  marked.use({ gfm: true, breaks: true })
-
-  // Render markdown for the preview pane. marked handles GFM task
-  // lists only in some shapes — normalize any leftover literal [ ]/[x]
-  // at the start of a list item into a real (disabled) checkbox.
-  function renderMD(src) {
-    let html = marked.parse(src || '')
-    html = html.replace(/<li>\s*\[(\s|x|X)\]\s?/g, (m, c) =>
-      `<li class="task-item"><input type="checkbox" disabled${c.trim() ? ' checked' : ''}> `)
-    return html
-  }
   import { api, onChatStream, onApproval } from '../lib/api.js'
   import SkillsPicker from '../lib/SkillsPicker.svelte'
   import CodeEditor from '../lib/CodeEditor.svelte'
   import ContextMenu from '../lib/ContextMenu.svelte'
   import { langOf as fileLang } from '../lib/langOf.js'
+  import { renderMarkdown } from '../lib/markdown.js'
 
   export let folder = ''
   export let chatId = ''
@@ -233,7 +222,7 @@
     const t = tabs.find((x) => x.path === active)
     if (t?.ref) item.act(t.ref)
   }
-  $: previewHTML = preview && activeTab ? renderMD(activeTab.content) : ''
+  $: previewHTML = preview && activeTab ? renderMarkdown(activeTab.content) : ''
 
   // --- right-click → ask the agent about the selection ----------------------
   //
@@ -716,7 +705,11 @@
               </div>
             </details>
           {/if}
-          {cleanMsg(m.Content)}
+          {#if m.Role === 'user'}
+            {cleanMsg(m.Content)}
+          {:else}
+            <div class="markdown">{@html renderMarkdown(cleanMsg(m.Content))}</div>
+          {/if}
         </div>
       {/each}
       {#if sending}
@@ -743,7 +736,7 @@
               {/each}
             </div>
           {/if}
-          {#if stream?.text}{stream.text}<span class="cursor">▍</span>{:else}<span class="typing">…working</span>{/if}
+          {#if stream?.text}<div class="markdown">{@html renderMarkdown(stream.text)}</div><span class="cursor">▍</span>{:else}<span class="typing">…working</span>{/if}
         </div>
       {/if}
       {#each approvals as ap (ap.id)}

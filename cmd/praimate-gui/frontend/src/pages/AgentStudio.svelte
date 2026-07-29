@@ -14,6 +14,7 @@
   import CodeEditor from '../lib/CodeEditor.svelte'
   import ContextMenu from '../lib/ContextMenu.svelte'
   import { langOf as fileLang } from '../lib/langOf.js'
+  import { renderMarkdown } from '../lib/markdown.js'
 
   const DEF = '__definition__'
 
@@ -835,7 +836,11 @@
               </div>
             </details>
           {/if}
-          {cleanMsg(m.Content)}
+          {#if m.Role === 'user'}
+            {cleanMsg(m.Content)}
+          {:else}
+            <div class="markdown">{@html renderMarkdown(cleanMsg(m.Content))}</div>
+          {/if}
         </div>
       {/each}
       {#if sending}
@@ -843,7 +848,7 @@
           {#if stream?.reasoning?.length}<div class="tool-feed">{#each stream.reasoning as r}<div class="tool-line reasoning-line">? reasoning {r}</div>{/each}</div>{/if}
           {#if stream?.steps?.length}<div class="tool-feed">{#each stream.steps as s}<div class="tool-line" class:err={!s.ok}>{s.ok ? (s.type === 'step_finish' ? '✓' : '◌') : '✗'} {s.type === 'error' ? 'error' : s.type === 'step_finish' ? 'step done' : 'step'} {s.detail || ''}</div>{/each}</div>{/if}
           {#if stream?.tools?.length}<div class="tool-feed">{#each stream.tools as t}<div>{t.done ? (t.ok ? '✓' : '✗') : '◌'} {t.tool}</div>{/each}</div>{/if}
-          {#if stream?.text}{stream.text}<span class="cursor">▍</span>{:else}<span class="typing">…thinking</span>{/if}
+          {#if stream?.text}<div class="markdown">{@html renderMarkdown(stream.text)}</div><span class="cursor">▍</span>{:else}<span class="typing">…thinking</span>{/if}
         </div>
       {/if}
       {#each approvals as ap (ap.id)}

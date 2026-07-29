@@ -1,6 +1,7 @@
 <script>
   import { createEventDispatcher, onDestroy, onMount } from 'svelte'
   import { api, onTurn, onWorkflowStream, onChatStream } from './api.js'
+  import { renderMarkdown } from './markdown.js'
 
   export let agent
   export let localOpt = null
@@ -322,12 +323,12 @@
         </div>
       {/if}
       {#if workflowStream.text}
-        <div class="msg assistant"><div class="who">assistant streaming</div>{workflowStream.text}<span class="cursor">▍</span></div>
+        <div class="msg assistant"><div class="who">assistant streaming</div><div class="markdown">{@html renderMarkdown(workflowStream.text)}</div><span class="cursor">▍</span></div>
       {/if}
     {/if}
     {#each turns as t}
       <div class="msg user"><div class="who">{t.workflow_name || 'workflow'} · you (turn {t.index + 1})</div>{t.user_msg}</div>
-      <div class="msg assistant"><div class="who">assistant · {t.duration_ms}ms</div>{t.reply}</div>
+      <div class="msg assistant"><div class="who">assistant · {t.duration_ms}ms</div><div class="markdown">{@html renderMarkdown(t.reply)}</div></div>
     {/each}
   {:else if result}
     <div class="row" style="margin-bottom:14px">
@@ -341,13 +342,13 @@
       {#each runConversation as m}
         <div class={'msg ' + (m.Role === 'user' ? 'user' : 'assistant') + (m._pending ? ' pending' : '')}>
           <div class="who">{m.Role === 'user' ? 'you' : 'assistant'}</div>
-          {m.Content}
+          {#if m.Role === 'user'}{m.Content}{:else}<div class="markdown">{@html renderMarkdown(m.Content)}</div>{/if}
         </div>
       {/each}
     {:else}
       {#each result.turns || [] as t}
         <div class="msg user"><div class="who">{t.workflow_name || 'workflow'} · you (turn {t.index + 1})</div>{t.user_msg}</div>
-        <div class="msg assistant"><div class="who">assistant · {t.duration_ms}ms</div>{t.reply}</div>
+        <div class="msg assistant"><div class="who">assistant · {t.duration_ms}ms</div><div class="markdown">{@html renderMarkdown(t.reply)}</div></div>
       {/each}
     {/if}
     {#if runChatStream}
@@ -381,7 +382,7 @@
         </div>
       {/if}
       {#if runChatStream.text}
-        <div class="msg assistant"><div class="who">assistant streaming</div>{runChatStream.text}<span class="cursor">▍</span></div>
+        <div class="msg assistant"><div class="who">assistant streaming</div><div class="markdown">{@html renderMarkdown(runChatStream.text)}</div><span class="cursor">▍</span></div>
       {/if}
     {/if}
     {#if result.chat_id}
