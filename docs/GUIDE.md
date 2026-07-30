@@ -187,7 +187,7 @@ instructions: |
 supports: [claude, codex, opencode, praimate-code]
 tools: [edits]
 mcp_servers: [local-filesystem]
-surfaces: [chat, code, workflow]
+surfaces: [chat, terminal, editor]
 knowledge: raw
 ```
 
@@ -206,6 +206,11 @@ shows an explicit confirmation before running one.
 
 Agent Studio edits the YAML and associated files. It can use an installed CLI
 as a helper, then lets the user review/apply the helper's changes.
+
+See the [Agent creation manual](AGENT_GUIDE.md) for a step-by-step tutorial,
+the complete `praimate.agent/v1` field reference, workflow templates,
+knowledge and RAG setup, MCP references, requirements scripts, and pack
+portability.
 
 ### Knowledge
 

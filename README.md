@@ -253,6 +253,7 @@ asset matrix and checksum process.
 | Document | Scope |
 |---|---|
 | [Full guide](docs/GUIDE.md) | Installation, every GUI page, storage, privacy, agents, skills, MCP, local LLMs, sessions, backup, and deletion. |
+| [Agent creation manual](docs/AGENT_GUIDE.md) | Create, configure, test, package, and share agents; complete `praimate.agent/v1` YAML reference. |
 | [Workpath quickstart](docs/QUICKSTART.md) | Create and compile a workpath with `wpc`. |
 | [Workpath schema](docs/SCHEMA.md) | Source files, imports, hooks, tools, and subagents. |
 | [Compile targets](docs/TARGETS.md) | Files produced for each `wpc` target. |
