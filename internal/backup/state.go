@@ -1,8 +1,8 @@
 package backup
 
 // State syncer hook — bridges the git-level backup to the SQLite DB +
-// user config that live OUTSIDE the workspaces root (~/.praimate /
-// %APPDATA%). The backup package stays free of database imports: the
+// user config that live OUTSIDE the workspaces root (under the OS-specific
+// PrAImate data root). The backup package stays free of database imports: the
 // desktop app registers a syncer at startup, and the git
 // operations call back into it at the two integration points:
 //
@@ -14,8 +14,9 @@ package backup
 //            what makes multiple hosts share chats/agents/settings: git
 //            moves the snapshot, the syncer merges it.
 //
-// Both directions are best-effort: a missing or failing syncer never
-// blocks the git flow (better to sync the sandboxes than nothing).
+// A missing syncer keeps the pre-database behavior. A registered syncer's
+// failures are propagated: silently committing a stale DB snapshot or
+// pretending an encrypted restore succeeded would make backup status unsafe.
 
 import (
 	"context"
@@ -54,8 +55,7 @@ func currentStateSyncer() StateSyncer {
 	return stateSyncer
 }
 
-// exportState runs the registered syncer's Export. Returns the error
-// for callers that want to log it; never fatal to the git flow.
+// exportState runs the registered syncer's Export.
 func exportState(ctx context.Context, repoDir string) error {
 	s := currentStateSyncer()
 	if s == nil {

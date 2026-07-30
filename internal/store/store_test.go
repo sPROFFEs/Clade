@@ -6,6 +6,19 @@ import (
 	"testing"
 )
 
+const testDatabasePassword = "correct horse battery staple"
+
+func openTestStore(t *testing.T, path string) *Store {
+	t.Helper()
+	s, err := initializeWithPassword(path, testDatabasePassword, kdfParams{
+		time: 1, memoryKiB: 8 * 1024, threads: 1,
+	})
+	if err != nil {
+		t.Fatalf("initialize test store: %v", err)
+	}
+	return s
+}
+
 // TestOpen_CreatesFileAndAppliesMigrations verifies that Open() bootstraps
 // a fresh database, runs every embedded migration, and records the
 // resulting schema version.
@@ -13,10 +26,7 @@ func TestOpen_CreatesFileAndAppliesMigrations(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "db.sqlite")
 
-	s, err := Open(path)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
+	s := openTestStore(t, path)
 	defer s.Close()
 
 	v, err := s.SchemaVersion(context.Background())
@@ -32,16 +42,13 @@ func TestOpen_CreatesFileAndAppliesMigrations(t *testing.T) {
 // migrated database is a no-op and reports the same schema version.
 func TestOpen_Idempotent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "db.sqlite")
-	s1, err := Open(path)
-	if err != nil {
-		t.Fatalf("first Open: %v", err)
-	}
+	s1 := openTestStore(t, path)
 	v1, _ := s1.SchemaVersion(context.Background())
 	if err := s1.Close(); err != nil {
 		t.Fatalf("close 1: %v", err)
 	}
 
-	s2, err := Open(path)
+	s2, err := OpenWithPassword(path, testDatabasePassword)
 	if err != nil {
 		t.Fatalf("second Open: %v", err)
 	}
@@ -56,10 +63,7 @@ func TestOpen_Idempotent(t *testing.T) {
 // migration. If a table is renamed or dropped in a future migration,
 // this test must be updated to match.
 func TestSchemaTables_Present(t *testing.T) {
-	s, err := Open(filepath.Join(t.TempDir(), "db.sqlite"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
+	s := openTestStore(t, filepath.Join(t.TempDir(), "db.sqlite"))
 	defer s.Close()
 
 	want := []string{
@@ -80,10 +84,7 @@ func TestSchemaTables_Present(t *testing.T) {
 }
 
 func TestSchemaTables_CrossChatMemoryAbsent(t *testing.T) {
-	s, err := Open(filepath.Join(t.TempDir(), "db.sqlite"))
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
+	s := openTestStore(t, filepath.Join(t.TempDir(), "db.sqlite"))
 	defer s.Close()
 
 	for _, table := range []string{"memory_identity", "memory_pinned", "memory_episodes"} {

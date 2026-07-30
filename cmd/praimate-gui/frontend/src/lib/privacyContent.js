@@ -4,7 +4,7 @@ export const privacyIntroduction =
 export const privacyDisclosures = [
   {
     title: 'Encrypted local database',
-    body: 'The SQLite database is encrypted at rest with AES-256-XTS. Its random key is stored separately with user-only permissions. This protects a copied database, but not someone controlling your OS account, and XTS does not authenticate against tampering. Keep the database and key together when backing up: losing the key makes the database unreadable.',
+    body: 'The SQLite database is encrypted at rest with AES-256-XTS. A password-protected envelope contains its random key; the raw key is held only in process memory while PrAImate is unlocked. XTS provides confidentiality rather than tamper authentication. Losing the database password makes local data and encrypted backups unrecoverable.',
   },
   {
     title: 'AI providers receive what you send',
@@ -20,7 +20,7 @@ export const privacyDisclosures = [
   },
   {
     title: 'Backups are your responsibility',
-    body: 'Git backup is off by default. If enabled, it includes workspace files, per-chat MEMORY.md files, and a portable plaintext database snapshot. Use a private remote you trust and protect its credentials.',
+    body: 'Git backup is off by default. The database snapshot and its key envelope are encrypted with the same database password, so another Windows or Linux installation can restore them with that password. A copied repository permits offline password guessing, so use a strong unique password. Workspace files, transcripts, and per-chat MEMORY.md files remain normal Git files and may contain sensitive content. Use a private remote you trust.',
   },
 ]
 

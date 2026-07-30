@@ -37,10 +37,13 @@ import (
 // App carries the shared Core plus the Wails context used for dialogs
 // and event emission.
 type App struct {
-	ctx     context.Context
-	st      *store.Store
-	core    *core.Core
-	initErr string
+	ctx      context.Context
+	st       *store.Store
+	core     *core.Core
+	dbPath   string
+	initErr  string
+	quit     func(context.Context)
+	unlockMu sync.Mutex
 
 	// daemonMu guards the daemon handles — Wails dispatches each
 	// binding call on its own goroutine, so two watcher mutations can
@@ -67,6 +70,9 @@ type App struct {
 	requirementsCancelMu sync.Mutex
 	requirementsCancels  map[string]*requirementsRun
 
+	resetMu   sync.Mutex
+	dataReset bool
+
 	// approval is the lazily-started mid-turn approval broker ("ask"
 	// Tools level). Guarded by approvalMu.
 	approvalMu sync.Mutex
@@ -84,6 +90,7 @@ func NewApp() *App {
 		chatCancels:         map[string]context.CancelFunc{},
 		ragCancels:          map[string]*ragRun{},
 		requirementsCancels: map[string]*requirementsRun{},
+		quit:                wruntime.Quit,
 	}
 }
 
@@ -133,11 +140,23 @@ func (a *App) startup(ctx context.Context) {
 		a.initErr = err.Error()
 		return
 	}
+	a.dbPath = dbPath
 	st, err := store.Open(dbPath)
 	if err != nil {
+		if errors.Is(err, store.ErrPasswordRequired) ||
+			errors.Is(err, store.ErrPasswordSetupRequired) {
+			return
+		}
 		a.initErr = err.Error()
 		return
 	}
+	if err := a.initializeUnlockedStore(ctx, st); err != nil {
+		_ = st.Close()
+		a.initErr = err.Error()
+	}
+}
+
+func (a *App) initializeUnlockedStore(ctx context.Context, st *store.Store) error {
 	// Load the legacy workspaces root (best-effort) so existing on-disk
 	// chats remain available in the Code terminal. Without a config the
 	// workspace chats section stays empty.
@@ -149,14 +168,13 @@ func (a *App) startup(ctx context.Context) {
 	}
 	c, err := core.New(core.Options{Store: st, WorkspacesRoot: workspacesRoot})
 	if err != nil {
-		_ = st.Close()
-		a.initErr = err.Error()
-		return
+		return err
 	}
 	if _, err := c.SeedBuiltins(ctx); err != nil {
-		_ = st.Close()
-		a.initErr = err.Error()
-		return
+		return err
+	}
+	if err := migrateLegacyLocalLLMAPIKey(c, launcherCfg); err != nil {
+		return err
 	}
 	core.RegisterAllCLIAdapters()
 	// From here on, every backup commit snapshots the DB + shareable
@@ -194,9 +212,13 @@ func (a *App) startup(ctx context.Context) {
 		// edits) into the open tabs.
 		a.startEditorWatcher()
 	}
+	return nil
 }
 
 func (a *App) shutdown(ctx context.Context) {
+	a.resetMu.Lock()
+	resetting := a.dataReset
+	a.resetMu.Unlock()
 	a.daemonMu.Lock()
 	if a.watchers != nil {
 		a.watchers.Stop()
@@ -210,8 +232,10 @@ func (a *App) shutdown(ctx context.Context) {
 	if a.terms != nil {
 		a.terms.closeAll()
 	}
-	if cfg, err := launcher.LoadConfig(); err == nil {
-		runGUIAutoSync(context.Background(), cfg)
+	if !resetting {
+		if cfg, err := launcher.LoadConfig(); err == nil {
+			runGUIAutoSync(context.Background(), cfg)
+		}
 	}
 	if a.st != nil {
 		_ = a.st.Close()

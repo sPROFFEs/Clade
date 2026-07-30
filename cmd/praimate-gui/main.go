@@ -4,7 +4,7 @@
 //
 //	cd cmd/praimate-gui
 //	(cd frontend && pnpm install && pnpm build)
-//	go build -tags webkit2_41 -o praimate-gui .
+//	go build -tags desktop,production,webkit2_41 -o praimate-gui .
 //
 // On Windows the webkit2_41 tag is ignored; on Linux it selects
 // webkit2gtk-4.1 (modern distros no longer ship 4.0). macOS is not a

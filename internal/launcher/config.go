@@ -12,6 +12,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"git.jtsec.local/lab/PrAImate/internal/appdata"
 )
 
 // Config is the persisted, per-user launcher state.
@@ -106,11 +108,10 @@ func (c *Config) HasLocalDefault() bool {
 // On Linux this is $XDG_CONFIG_HOME/praimate/config.json (or ~/.config/...);
 // on Windows it is %AppData%/praimate/... — courtesy of os.UserConfigDir().
 func ConfigPaths() (dir, file string, err error) {
-	base, err := os.UserConfigDir()
+	dir, err = appdata.Root()
 	if err != nil {
-		return "", "", fmt.Errorf("locate user config dir: %w", err)
+		return "", "", err
 	}
-	dir = filepath.Join(base, "praimate")
 	file = filepath.Join(dir, "config.json")
 	return dir, file, nil
 }

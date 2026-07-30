@@ -3,6 +3,7 @@ package launcher
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -118,5 +119,22 @@ func TestHasLocalDefault(t *testing.T) {
 		got.DefaultLocalContextTokens != want.DefaultLocalContextTokens ||
 		got.DefaultLocalOutputTokens != want.DefaultLocalOutputTokens {
 		t.Errorf("DefaultLocal* round-trip mismatch: got %+v", got)
+	}
+}
+
+func TestShareableConfigExcludesLocalLLMAPIKey(t *testing.T) {
+	t.Setenv("PRAIMATE_HOME", t.TempDir())
+	if err := SaveConfig(&Config{
+		DefaultLocalEndpoint: "https://llm.example",
+		DefaultLocalAPIKey:   "must-stay-local",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := ShareableConfigJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "must-stay-local") || strings.Contains(string(raw), "defaultLocalApiKey") {
+		t.Fatalf("shareable config leaked local API key: %s", raw)
 	}
 }

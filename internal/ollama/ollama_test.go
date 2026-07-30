@@ -136,9 +136,8 @@ func TestListModels_SendsBearerWhenKeySet(t *testing.T) {
 	}
 }
 
-// TestApplyOpenCode_WritesAPIKeyIntoOptions: when a key is configured,
-// it lands inside provider.<name>.options.apiKey where @ai-sdk/openai-
-// compatible expects it.
+// TestApplyOpenCode_ReferencesAPIKeyEnvironment: the plaintext config
+// contains only an environment reference, never the credential itself.
 // TestProbeCodexCompat_PassesWhenServerImplementsResponses: 2xx from
 // /v1/responses → probe passes, no error, no warning.
 func TestProbeCodexCompat_PassesWhenServerImplementsResponses(t *testing.T) {
@@ -251,7 +250,7 @@ func TestProbeCodexCompat_UnreachableEndpointReportsClearly(t *testing.T) {
 	}
 }
 
-func TestApplyOpenCode_WritesAPIKeyIntoOptions(t *testing.T) {
+func TestApplyOpenCode_ReferencesAPIKeyEnvironment(t *testing.T) {
 	tmp := t.TempDir()
 	redirectHome(t, tmp)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmp, "xdg"))
@@ -266,8 +265,11 @@ func TestApplyOpenCode_WritesAPIKeyIntoOptions(t *testing.T) {
 	prov := cfg["provider"].(map[string]any)
 	entry := prov["ollama_remote"].(map[string]any)
 	opts := entry["options"].(map[string]any)
-	if opts["apiKey"] != "sk-abc" {
-		t.Errorf("options.apiKey = %v, want sk-abc", opts["apiKey"])
+	if opts["apiKey"] != "{env:OPENAI_API_KEY}" {
+		t.Errorf("options.apiKey = %v, want environment reference", opts["apiKey"])
+	}
+	if strings.Contains(string(raw), "sk-abc") {
+		t.Fatalf("opencode config leaked API key:\n%s", raw)
 	}
 }
 
@@ -312,15 +314,18 @@ func TestApplyOpenCode_OmitsAPIKeyWhenBlank(t *testing.T) {
 	}
 }
 
-// TestApplyDeepSeek_WritesInlineKey: when a key is set, the managed
-// block contains `api_key = "<key>"`. Blank case omits the line.
-func TestApplyDeepSeek_WritesInlineKey(t *testing.T) {
+// TestApplyDeepSeek_ReferencesKeyEnvironment keeps the credential out of
+// DeepSeek's plaintext TOML.
+func TestApplyDeepSeek_ReferencesKeyEnvironment(t *testing.T) {
 	tmp := t.TempDir()
 	redirectHome(t, tmp)
 	path, _ := ApplyDeepSeek(Settings{Endpoint: "h:1", Model: "m", APIKey: "sk-deepseek"})
 	body, _ := os.ReadFile(path)
-	if !strings.Contains(string(body), `api_key = "sk-deepseek"`) {
-		t.Errorf("expected inline api_key in managed block:\n%s", body)
+	if !strings.Contains(string(body), `api_key_env = "OPENAI_API_KEY"`) {
+		t.Errorf("expected api_key_env in managed block:\n%s", body)
+	}
+	if strings.Contains(string(body), "sk-deepseek") {
+		t.Errorf("DeepSeek config leaked API key:\n%s", body)
 	}
 
 	// Re-apply without a key: the api_key line must disappear.

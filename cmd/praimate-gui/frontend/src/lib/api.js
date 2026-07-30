@@ -19,6 +19,12 @@ function call(method, ...args) {
 }
 
 export const api = {
+  databaseLockStatus: () => call('DatabaseLockStatus'),
+  initializeDatabasePassword: (password, confirmation, remember) =>
+    call('InitializeDatabasePassword', password, confirmation, !!remember),
+  unlockDatabase: (password, remember) =>
+    call('UnlockDatabase', password, !!remember),
+  forgetDatabasePassword: () => call('ForgetDatabasePassword'),
   health: () => call('Health'),
   about: () => call('About'),
   privacyNotice: () => call('PrivacyNotice'),
@@ -141,6 +147,9 @@ export const api = {
   runAllWorkflows: (agentID, cli, model, cwd, inputsByWorkflow, localEndpoint, localApiKey, localModel) =>
     call('RunAllWorkflows', agentID, cli, model || '', cwd, inputsByWorkflow || {}, localEndpoint || '', localApiKey || '', localModel || ''),
   privacyPreview: (text) => call('PrivacyPreview', text),
+  storedDataInfo: () => call('StoredDataInfo'),
+  deleteAllStoredData: (projectsRoot, phrase) =>
+    call('DeleteAllStoredData', projectsRoot || '', phrase || ''),
 
   mcpCatalogue: () => call('MCPCatalogue'),
   mcpServers: () => call('MCPServers'),

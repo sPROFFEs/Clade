@@ -36,9 +36,15 @@ Release archives and source builds revolve around four executables:
 | `praimate-code` | Bundled, version-pinned, rebranded OpenCode build. Launched directly or through `praimate code`. |
 | `wpc` | Workpath compiler. Validates and compiles portable workpaths into Claude/Codex/OpenCode/Cursor/mika/generic target files. |
 
-The desktop app uses an AES-256-XTS encrypted SQLite database at
-`~/.praimate/db.sqlite`. Its random key is stored separately at
-`~/.praimate/db.sqlite.key` with user-only permissions.
+The desktop app keeps its persistent state under one OS config folder:
+`$XDG_CONFIG_HOME/praimate` (normally `~/.config/praimate`) on Linux and
+`%APPDATA%\praimate` on Windows. The AES-256-XTS encrypted SQLite database
+and its password-protected key envelope live there with user-only permissions.
+The raw database key exists only in process memory while the app is unlocked;
+by default the database password is required on every launch. An explicit
+“Remember on this device” opt-in uses Windows Credential Manager or the Linux
+desktop Secret Service.
+Saved API keys are stored in the encrypted database, not `config.json`.
 PrAImate does not create application, Graphify-query, or terminal
 log files. Live Code-terminal scrollback is memory-only and disappears
 when its process closes. Agent CLIs may still maintain their own native

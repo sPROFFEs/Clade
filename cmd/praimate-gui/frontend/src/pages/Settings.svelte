@@ -31,6 +31,25 @@
 
   let error = ''
   let agents = []
+  let storedData = null
+  let deleteModal = false
+  let deleteProjects = false
+  let deleteProjectsRoot = ''
+  let deletePhrase = ''
+  let deleteUnderstood = false
+  let deletingData = false
+  let passwordMsg = ''
+
+  async function requirePasswordNextLaunch() {
+    passwordMsg = ''
+    error = ''
+    try {
+      await api.forgetDatabasePassword()
+      passwordMsg = 'Password will be required next launch.'
+    } catch (e) {
+      error = String(e)
+    }
+  }
 
   // Backup (git sync of the workspaces root)
   let bk = null            // BackupState
@@ -143,6 +162,45 @@
       error = String(e)
     }
     await bkLoad()
+    try {
+      storedData = await api.storedDataInfo()
+      deleteProjectsRoot = storedData?.projectsRoot || ''
+    } catch (e) {
+      error = String(e)
+    }
+  }
+
+  async function chooseDeleteProjectsRoot() {
+    try {
+      const picked = await api.pickFolder()
+      if (picked) deleteProjectsRoot = picked
+    } catch (e) {
+      error = String(e)
+    }
+  }
+
+  function openDeleteModal() {
+    deleteProjects = false
+    deleteProjectsRoot = storedData?.projectsRoot || ''
+    deletePhrase = ''
+    deleteUnderstood = false
+    deleteModal = true
+  }
+
+  async function deleteAllData() {
+    if (deletingData || !deleteUnderstood || deletePhrase !== storedData?.phrase) return
+    const scope = deleteProjects
+      ? `PrAImate data and the projects folder:\n${deleteProjectsRoot}`
+      : 'all PrAImate application data (the projects folder will be kept)'
+    if (!confirm(`Final confirmation: permanently delete ${scope}?\n\nPrAImate will close and start clean next time.`)) return
+    deletingData = true
+    error = ''
+    try {
+      await api.deleteAllStoredData(deleteProjects ? deleteProjectsRoot : '', deletePhrase)
+    } catch (e) {
+      error = String(e)
+      deletingData = false
+    }
   }
 
   // Build tools from source — for platforms where we don't ship a
@@ -229,7 +287,7 @@
 <h1 style="font-size:16px; margin-top:24px">Build bundled tools from source</h1>
 <p class="subtitle" style="margin-top:-6px">
   On platforms where we don't ship a prebuilt binary, build it locally from our repo.
-  We clone the source, compile, install it into <span class="mono">~/.config/praimate/bin</span>, and delete the temporary checkout.
+  We clone the source, compile, install it into <span class="mono">&lt;PrAImate data folder&gt;/bin</span>, and delete the temporary checkout.
 </p>
 {#each [{ id: 'praimate-code', name: 'PrAImate Code' }, { id: 'graphify', name: 'Graphify (RAG)' }] as t}
   {@const info = buildInfo[t.id]}
@@ -313,7 +371,7 @@
 </div>
 
 <h1 style="font-size:16px; margin-top:24px">Backup — git sync</h1>
-<p class="subtitle">Mirrors your workspace chats and templates to a git remote.</p>
+<p class="subtitle">Mirrors workspaces and a password-encrypted database snapshot to a git remote.</p>
 
 {#if !bk}
   <div class="card card-sub">Loading backup status…</div>
@@ -337,7 +395,10 @@
             not configured
           {/if}
         </div>
-        {#if bk.lastSyncAt}<div class="card-sub">last sync: {fmtDate(bk.lastSyncAt)}{#if bk.machineId} · machine: <span class="mono">{bk.machineId}</span>{/if}</div>{/if}
+      {#if bk.lastSyncAt}<div class="card-sub">last sync: {fmtDate(bk.lastSyncAt)}{#if bk.machineId} · machine: <span class="mono">{bk.machineId}</span>{/if}</div>{/if}
+      <div class="card-sub" style="margin-top:6px">
+        Database snapshots use your PrAImate database password. Restoring on another system requires the same password; workspace files remain normal Git content.
+      </div>
       </div>
       {#if bk.initialized}
         <button class="btn" class:primary={bk.enabled} disabled={!!bkBusy}
@@ -438,6 +499,35 @@
   </div>
 {/if}
 
+<h1 style="font-size:16px; margin-top:24px">Data and privacy</h1>
+<div class="card">
+  <div class="row" style="align-items:flex-start">
+    <div class="grow">
+      <div class="card-title">PrAImate storage</div>
+      <div class="card-sub">
+        Application data, encrypted database, managed tools, agents, and settings are kept under one folder.
+      </div>
+      {#if storedData}
+        <div class="storage-path"><span>Application data</span><span class="mono">{storedData.dataRoot}</span></div>
+        <div class="storage-path"><span>Projects</span><span class="mono">{storedData.projectsRoot || 'not configured'}</span></div>
+      {/if}
+      <div class="card-sub" style="margin-top:8px">
+        API keys saved by PrAImate live in the encrypted database. CLI-owned session data and configuration remain under each CLI's own folders.
+      </div>
+      <div class="card-sub" style="margin-top:8px">
+        The raw database key exists only while PrAImate is unlocked. If automatic unlock was enabled, you can remove its OS-protected credential now.
+      </div>
+    </div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end">
+      <button class="btn" on:click={requirePasswordNextLaunch}>
+        Require password next launch
+      </button>
+      <button class="btn danger" on:click={openDeleteModal} disabled={!storedData}>Delete all stored data…</button>
+    </div>
+  </div>
+  {#if passwordMsg}<div class="card-sub" style="margin-top:8px">{passwordMsg}</div>{/if}
+</div>
+
 <style>
   .setup-divider {
     margin: 16px 0;
@@ -482,7 +572,80 @@
   @media (max-width: 700px) {
     .setup-options { grid-template-columns: 1fr; }
   }
+  .storage-path {
+    display: grid;
+    grid-template-columns: 120px minmax(0, 1fr);
+    gap: 10px;
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  .storage-path .mono {
+    overflow-wrap: anywhere;
+    color: var(--text);
+  }
+  .danger-panel {
+    border: 1px solid color-mix(in srgb, var(--danger) 55%, var(--border));
+    background: color-mix(in srgb, var(--danger) 7%, var(--bg-raised));
+  }
+  .danger-copy {
+    line-height: 1.55;
+    color: var(--text-dim);
+    font-size: 13px;
+  }
+  .confirm-line {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-top: 12px;
+    font-size: 13px;
+    line-height: 1.4;
+  }
 </style>
+
+{#if deleteModal}
+  <!-- svelte-ignore a11y-click-events-have-key-events -->
+  <!-- svelte-ignore a11y-no-static-element-interactions -->
+  <div class="modal-backdrop" on:click={() => !deletingData && (deleteModal = false)}>
+    <div class="modal-content danger-panel" on:click|stopPropagation>
+      <h2>Delete all PrAImate data</h2>
+      <p class="danger-copy">
+        This permanently deletes the encrypted database, its password-protected key envelope, settings, agents,
+        skills, MCP credentials, and PrAImate-managed tools. Managed PrAImate routing is removed
+        from Codex, OpenCode, and DeepSeek config without deleting their unrelated data.
+      </p>
+
+      <label class="confirm-line">
+        <input type="checkbox" bind:checked={deleteProjects} />
+        <span>Also permanently delete the configured projects folder.</span>
+      </label>
+      {#if deleteProjects}
+        <label class="lbl" for="delete-projects-root">Projects folder (must match the configured folder exactly)</label>
+        <div class="row">
+          <input id="delete-projects-root" class="field grow mono" bind:value={deleteProjectsRoot} />
+          <button class="btn" on:click={chooseDeleteProjectsRoot} disabled={deletingData}>Choose…</button>
+        </div>
+      {/if}
+
+      <label class="confirm-line">
+        <input type="checkbox" bind:checked={deleteUnderstood} />
+        <span>I understand this cannot be undone and PrAImate will close immediately.</span>
+      </label>
+      <label class="lbl" for="delete-confirm-phrase">Type <span class="mono">{storedData.phrase}</span></label>
+      <input id="delete-confirm-phrase" class="field mono" bind:value={deletePhrase} autocomplete="off" />
+
+      <div class="row" style="margin-top:16px; justify-content:flex-end">
+        <button class="btn" on:click={() => (deleteModal = false)} disabled={deletingData}>Cancel</button>
+        <button
+          class="btn danger"
+          on:click={deleteAllData}
+          disabled={deletingData || !deleteUnderstood || deletePhrase !== storedData.phrase || (deleteProjects && !deleteProjectsRoot.trim())}>
+          {deletingData ? 'Deleting…' : 'Continue to final confirmation'}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
 
 {#if prereqModal}
   <!-- svelte-ignore a11y-click-events-have-key-events -->

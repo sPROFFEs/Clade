@@ -27,7 +27,14 @@ esac
 EOF
 chmod +x "$TEST_TMP/bin/bun"
 
-PATH="$TEST_TMP/bin:$PATH" OUT="$TEST_TMP/out" \
+cat > "$TEST_TMP/bin/df" <<'EOF'
+#!/usr/bin/env bash
+printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n'
+printf 'testfs 20971520 0 20971520 0%% /tmp\n'
+EOF
+chmod +x "$TEST_TMP/bin/df"
+
+PATH="$TEST_TMP/bin:$PATH" XDG_CONFIG_HOME="$TEST_TMP/config" OUT="$TEST_TMP/out" \
   bash "$REPO_ROOT/scripts/build-praimate-code.sh" >/dev/null
 
 test -x "$TEST_TMP/out/praimate-code"

@@ -2,13 +2,15 @@ package core
 
 // Backup state export — the 1.1 structure moved the source of truth for
 // chats, agents, memory, MCP, schedules and watchers into the SQLite DB
-// under ~/.praimate, which the workspaces-root backup repo doesn't see.
+// under the PrAImate data root, which the workspaces-root backup repo
+// doesn't see.
 // ExportBackupState writes a consistent snapshot of that state into a
 // subdir of the backup repo so the existing git-based backup commits it
 // alongside the on-disk chat sandboxes.
 //
 // Layout under <repoDir>/.praimate-state/:
-//   db.sqlite        consistent VACUUM INTO snapshot of the live DB
+//   db.sqlite        encrypted VACUUM INTO snapshot of the live DB
+//   db.sqlite.key    password-protected portable key envelope
 //   agents/<id>.yaml exported agent definitions (portable, human-readable)
 //
 // ImportBackupState is the other direction: after a clone/pull brings a
@@ -21,7 +23,10 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -53,8 +58,18 @@ func (c *Core) ExportBackupState(ctx context.Context, repoDir string) error {
 	}
 	if same, _ := filesEqual(dbDest, dbTmp); same {
 		_ = os.Remove(dbTmp)
-	} else if err := os.Rename(dbTmp, dbDest); err != nil {
+	} else if err := replaceFile(dbTmp, dbDest); err != nil {
 		return fmt.Errorf("export backup state: replace snapshot: %w", err)
+	}
+	envelopeDest := dbDest + ".key"
+	envelopeTmp := envelopeDest + ".tmp"
+	if err := copyPrivateFile(c.store.EncryptionKeyPath(), envelopeTmp); err != nil {
+		return fmt.Errorf("export backup state: key envelope: %w", err)
+	}
+	if same, _ := filesEqual(envelopeDest, envelopeTmp); same {
+		_ = os.Remove(envelopeTmp)
+	} else if err := replaceFile(envelopeTmp, envelopeDest); err != nil {
+		return fmt.Errorf("export backup state: replace key envelope: %w", err)
 	}
 
 	// 2. Agents as portable YAML. Rewritten each time; stale files for
@@ -134,7 +149,7 @@ func (c *Core) ImportBackupState(ctx context.Context, repoDir string) error {
 	if _, err := os.Stat(snapPath); err != nil {
 		return nil
 	}
-	snap, err := sql.Open("sqlite3", "file:"+snapPath+"?mode=ro&_pragma=busy_timeout(5000)")
+	snap, legacyPlaintext, err := c.store.OpenSnapshot(snapPath, snapPath+".key")
 	if err != nil {
 		return fmt.Errorf("import backup state: open snapshot: %w", err)
 	}
@@ -143,18 +158,23 @@ func (c *Core) ImportBackupState(ctx context.Context, repoDir string) error {
 	live := c.store.DB()
 	var firstErr error
 	for _, spec := range mergeTables {
-		if err := mergeTable(ctx, live, snap, spec); err != nil && firstErr == nil {
+		if err := mergeTable(ctx, live, snap, spec, legacyPlaintext); err != nil && firstErr == nil {
 			firstErr = fmt.Errorf("import backup state: %s: %w", spec.name, err)
 		}
 	}
 	return firstErr
 }
 
+func portableSQLiteURI(path string) string {
+	pathURL := &url.URL{Path: filepath.ToSlash(path)}
+	return "file:" + pathURL.EscapedPath()
+}
+
 // mergeTable applies one table's merge strategy. Columns are read from
 // the snapshot and intersected with the live table's columns, so a
 // snapshot written by a newer or older PrAImate version degrades to the
 // shared column set instead of failing.
-func mergeTable(ctx context.Context, live, snap *sql.DB, spec mergeTableSpec) error {
+func mergeTable(ctx context.Context, live, snap *sql.DB, spec mergeTableSpec, sanitizeLegacy bool) error {
 	snapCols, err := tableColumns(ctx, snap, spec.name)
 	if err != nil {
 		return nil // table absent in snapshot — older remote version
@@ -199,6 +219,9 @@ func mergeTable(ctx context.Context, live, snap *sql.DB, spec mergeTableSpec) er
 		if err := rows.Scan(ptrs...); err != nil {
 			return fmt.Errorf("scan snapshot row: %w", err)
 		}
+		if sanitizeLegacy && !sanitizeImportedRow(spec.name, cols, vals) {
+			continue
+		}
 		keyVals := make([]any, len(keyIdx))
 		for i, idx := range keyIdx {
 			keyVals[i] = vals[idx]
@@ -235,6 +258,79 @@ func mergeTable(ctx context.Context, live, snap *sql.DB, spec mergeTableSpec) er
 		}
 	}
 	return rows.Err()
+}
+
+func copyPrivateFile(src, dest string) error {
+	body, err := os.ReadFile(src)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(dest, body, 0o600); err != nil {
+		return err
+	}
+	return nil
+}
+
+func replaceFile(src, dest string) error {
+	old := dest + ".replacing"
+	_ = os.Remove(old)
+	if _, err := os.Stat(dest); err == nil {
+		if err := os.Rename(dest, old); err != nil {
+			return err
+		}
+	}
+	if err := os.Rename(src, dest); err != nil {
+		_ = os.Rename(old, dest)
+		return err
+	}
+	if err := os.Remove(old); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+// sanitizeImportedRow enforces the same credential boundary on old backup
+// repositories created before exports were scrubbed.
+func sanitizeImportedRow(table string, cols []string, vals []any) bool {
+	switch table {
+	case "settings_cli":
+		if idx := indexOf(cols, "key"); idx >= 0 && stringValue(vals[idx]) == "local_llm.api_key" {
+			return false
+		}
+	case "mcp_servers":
+		for _, col := range []string{"env_json", "auth_json"} {
+			if idx := indexOf(cols, col); idx >= 0 {
+				vals[idx] = "{}"
+			}
+		}
+	case "chats":
+		idx := indexOf(cols, "settings_json")
+		if idx < 0 {
+			break
+		}
+		var settings map[string]any
+		if json.Unmarshal([]byte(stringValue(vals[idx])), &settings) != nil {
+			break
+		}
+		if local, _ := settings["local"].(map[string]any); local != nil {
+			delete(local, "api_key")
+			if body, err := json.Marshal(settings); err == nil {
+				vals[idx] = string(body)
+			}
+		}
+	}
+	return true
+}
+
+func stringValue(v any) string {
+	switch value := v.(type) {
+	case string:
+		return value
+	case []byte:
+		return string(value)
+	default:
+		return ""
+	}
 }
 
 // tableColumns returns the column set of a table (error when the table

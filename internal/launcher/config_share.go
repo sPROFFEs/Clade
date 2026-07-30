@@ -12,8 +12,10 @@ import "encoding/json"
 // ShareableConfig is the subset of Config that syncs across machines
 // via the backup repo's .praimate-state/config.json.
 type ShareableConfig struct {
-	LastAgent                 string `json:"lastAgent,omitempty"`
-	DefaultLocalEndpoint      string `json:"defaultLocalEndpoint,omitempty"`
+	LastAgent            string `json:"lastAgent,omitempty"`
+	DefaultLocalEndpoint string `json:"defaultLocalEndpoint,omitempty"`
+	// Kept only so older remote files decode cleanly. Secrets are local-only
+	// and never exported or applied.
 	DefaultLocalAPIKey        string `json:"defaultLocalApiKey,omitempty"`
 	DefaultLocalWireAPI       string `json:"defaultLocalWireApi,omitempty"`
 	DefaultLocalContextTokens int    `json:"defaultLocalContextTokens,omitempty"`
@@ -30,7 +32,6 @@ func ShareableConfigJSON() ([]byte, error) {
 	s := ShareableConfig{
 		LastAgent:                 cfg.LastAgent,
 		DefaultLocalEndpoint:      cfg.DefaultLocalEndpoint,
-		DefaultLocalAPIKey:        cfg.DefaultLocalAPIKey,
 		DefaultLocalWireAPI:       cfg.DefaultLocalWireAPI,
 		DefaultLocalContextTokens: cfg.DefaultLocalContextTokens,
 		DefaultLocalOutputTokens:  cfg.DefaultLocalOutputTokens,
@@ -70,7 +71,6 @@ func ApplyShareableConfig(raw []byte) error {
 	}
 	apply(&cfg.LastAgent, s.LastAgent)
 	apply(&cfg.DefaultLocalEndpoint, s.DefaultLocalEndpoint)
-	apply(&cfg.DefaultLocalAPIKey, s.DefaultLocalAPIKey)
 	apply(&cfg.DefaultLocalWireAPI, s.DefaultLocalWireAPI)
 	if s.DefaultLocalContextTokens != 0 && cfg.DefaultLocalContextTokens != s.DefaultLocalContextTokens {
 		cfg.DefaultLocalContextTokens = s.DefaultLocalContextTokens

@@ -11,7 +11,7 @@ import (
 func TestPrivacyPatterns_PersistAndLoad(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "db.sqlite")
-	st, err := store.Open(path)
+	st, err := store.InitializeWithPassword(path, "correct horse battery staple")
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
@@ -27,7 +27,7 @@ func TestPrivacyPatterns_PersistAndLoad(t *testing.T) {
 	}
 	_ = st.Close()
 
-	st2, err := store.Open(path)
+	st2, err := store.OpenWithPassword(path, "correct horse battery staple")
 	if err != nil {
 		t.Fatalf("store.Open second: %v", err)
 	}

@@ -14,6 +14,7 @@ import (
 
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
+	"git.jtsec.local/lab/PrAImate/internal/appdata"
 	"git.jtsec.local/lab/PrAImate/internal/core"
 )
 
@@ -92,11 +93,10 @@ func (a *App) SkillsForCLI(cli string) []core.Skill {
 // a plain JSON file alongside the praimate config. Kept separate from
 // the SQLite store so the file is greppable / hand-editable.
 func defaultsFile() (string, error) {
-	base, err := os.UserConfigDir()
+	dir, err := appdata.Root()
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(base, "praimate")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}

@@ -125,9 +125,10 @@ func Clone(ctx context.Context, url, dir string) error {
 		return err
 	}
 	// First-clone onboarding: merge the remote's state snapshot into
-	// this machine's live DB so chats/agents/settings show up
-	// immediately. Best-effort.
-	_ = importState(ctx, dir)
+	// this machine's live DB so chats/agents/settings show up immediately.
+	if err := importState(ctx, dir); err != nil {
+		return fmt.Errorf("restore cloned PrAImate state: %w", err)
+	}
 	return nil
 }
 
@@ -416,8 +417,10 @@ func Pull(ctx context.Context, dir string, ffOnly bool) error {
 		return fmt.Errorf("git pull failed: %s", UserError(r))
 	}
 	// Remote content just landed — merge its state snapshot into the
-	// live DB / config. Best-effort.
-	_ = importState(ctx, dir)
+	// live DB / config.
+	if err := importState(ctx, dir); err != nil {
+		return fmt.Errorf("restore pulled PrAImate state: %w", err)
+	}
 	return nil
 }
 
@@ -437,7 +440,9 @@ func MergeFromRemote(ctx context.Context, dir string) error {
 		}
 		return fmt.Errorf("git merge failed: %s", UserError(r))
 	}
-	_ = importState(ctx, dir)
+	if err := importState(ctx, dir); err != nil {
+		return fmt.Errorf("restore merged PrAImate state: %w", err)
+	}
 	return nil
 }
 
@@ -455,7 +460,9 @@ func RebaseOntoRemote(ctx context.Context, dir string) error {
 		}
 		return fmt.Errorf("git rebase failed: %s", UserError(r))
 	}
-	_ = importState(ctx, dir)
+	if err := importState(ctx, dir); err != nil {
+		return fmt.Errorf("restore rebased PrAImate state: %w", err)
+	}
 	return nil
 }
 
@@ -486,7 +493,9 @@ func ResetHardToRemote(ctx context.Context, dir string) error {
 	// The git history was reset to remote, but the live DB still holds
 	// this machine's rows — the import row-merges the remote snapshot
 	// on top, so "reset" loses git history without losing local chats.
-	_ = importState(ctx, dir)
+	if err := importState(ctx, dir); err != nil {
+		return fmt.Errorf("restore reset PrAImate state: %w", err)
+	}
 	return nil
 }
 
@@ -550,9 +559,10 @@ func stageAndCommit(ctx context.Context, dir, extraSummary string) error {
 		_ = os.MkdirAll(filepath.Join(dir, sub), 0o755)
 	}
 	// Snapshot the live DB + shareable config into .praimate-state/ so
-	// the commit carries them. Best-effort: a failed export must not
-	// block syncing the on-disk sandboxes.
-	_ = exportState(ctx, dir)
+	// the commit carries them. Never commit a stale snapshot.
+	if err := exportState(ctx, dir); err != nil {
+		return fmt.Errorf("export PrAImate state: %w", err)
+	}
 	// Stage. `--all` flag picks up deletions too.
 	r := Run(ctx, dir, "add", "--all", ".gitignore", ".gitattributes", "chats", "templates", ".praimate-state")
 	if r.Failed() {

@@ -33,9 +33,12 @@ new chats use Claude Code, OpenClaude, Codex, OpenCode, or PrAImate Code.
 ## Surface
 
 PrAImate is a Wails/Svelte desktop application backed by an
-AES-256-XTS encrypted SQLite database at `~/.praimate/db.sqlite`.
-Its random 512-bit XTS key lives separately at
-`~/.praimate/db.sqlite.key` with user-only filesystem permissions.
+AES-256-XTS encrypted SQLite database under the single PrAImate data root:
+`$XDG_CONFIG_HOME/praimate` (normally `~/.config/praimate`) on Linux and
+`%APPDATA%\praimate` on Windows. Its random 512-bit XTS key is wrapped in
+an Argon2id-derived, authenticated password envelope beside the database.
+The raw key exists only in process memory while PrAImate is unlocked. Saved API keys live
+inside the encrypted database rather than plaintext `config.json`.
 Run `praimate` to launch it;
 the lightweight bootstrap finds the mandatory sibling `praimate-gui`
 binary and exits after the window starts. `praimate --gui` remains as a
@@ -72,7 +75,11 @@ to GitHub. Updates refresh both the bootstrap and desktop binary.
 
 ## First run
 
-The first GUI execution opens a mandatory privacy notice explaining
+The first GUI execution first asks the user to create and confirm a database
+password. Every later launch requires that password before SQLite or Core is
+opened. “Remember on this device” is an explicit opt-in backed by Windows
+Credential Manager or the Linux desktop Secret Service; when it is off, no
+automatic-unlock credential is retained. The GUI then opens a mandatory privacy notice explaining
 local storage, model-provider data flow, agent file permissions,
 database encryption limits, and optional backup exposure. After you
 acknowledge it, first run asks where your data lives and what to seed:
@@ -246,8 +253,8 @@ What gets written, per agent:
 |---|---|---|
 | **Claude** | `chat.json` `settings.ollama` block — per-chat | `Plan()` injects `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` / `OPENAI_API_KEY` env + `--model <model>` flag |
 | **Codex** | `~/.codex/config.toml` `[model_providers.ollama_remote]` + `[profiles.ollama_remote]` | Launched with `-p ollama_remote`; codex reads `OPENAI_API_KEY` via `env_key` |
-| **OpenCode** | `opencode.json` `provider.ollama_remote` block, including inline `options.apiKey` when a key is set | OpenCode picks it up automatically; `OPENAI_API_KEY` also exported as fallback |
-| **DeepSeek-TUI** | `~/.deepseek/config.toml` managed block with `provider = "ollama"`, `[providers.ollama]`, and optional inline `api_key`. Wrapped in marker comments. | Read by deepseek-tui on startup |
+| **OpenCode** | `opencode.json` `provider.ollama_remote` block; authenticated routes reference `{env:OPENAI_API_KEY}` rather than writing the key inline | PrAImate exports `OPENAI_API_KEY` for the launch |
+| **DeepSeek-TUI** | `~/.deepseek/config.toml` managed block with `provider = "ollama"`, `[providers.ollama]`, and optional `api_key_env = "OPENAI_API_KEY"`. Wrapped in marker comments. | PrAImate exports `OPENAI_API_KEY` for the launch |
 | **Gemini** | Not auto-configured (see below) | — |
 
 ### Codex wire_api probe
@@ -306,8 +313,8 @@ just uses its native Google auth, which is the default.
 
 | Path                                                | Holds                                                   |
 |-----------------------------------------------------|---------------------------------------------------------|
-| `~/.config/praimate/config.json` (Linux/XDG)           | `workspacesRoot`, `lastAgent`                           |
-| `%AppData%\praimate\config.json` (Windows)             | same                                                    |
+| `<config>/praimate/` (Linux XDG / Windows AppData)     | encrypted DB + password envelope, settings, agents, skills, managed tools |
+| `<config>/praimate/config.json`                        | non-secret bootstrap settings such as `workspacesRoot` |
 | `<root>/templates/<name>/workpath/`                 | wpc source: `mission.md`, `playbook.md`, `rules.md`, `personality.md`, `tools/`, `agents/`, `knowledge/` |
 | `<root>/templates/<name>/template.json`             | defaults inherited by new chats (memory, language, skills) |
 | `<root>/chats/<chat-id>/workpath/`                  | cloned from template at chat creation                   |
@@ -713,11 +720,13 @@ process closes. External agent CLIs can still maintain their own native
 session data for resume. The About page keeps the same disclosure
 available after first run.
 
-The local database is encrypted with AES-256-XTS. This protects a
-database copied without its separate key file. It does not protect
-against an attacker controlling the same OS account, and XTS provides
-confidentiality rather than tamper authentication. Losing the key file
-means losing access to the local database.
+The local database is encrypted with AES-256-XTS. Its random database key is
+wrapped with XChaCha20-Poly1305 under an Argon2id-derived password key. The raw
+database key is held only in process memory while PrAImate is unlocked. This
+does not protect against an attacker controlling the same OS account or
+reading the unlocked process, and XTS provides confidentiality rather than
+database-page tamper authentication. Losing the password means losing access
+to the local database and its encrypted backup snapshots.
 
 ## Backup (optional cloud sync over git)
 
@@ -772,11 +781,19 @@ the snapshot, PrAImate merges it. (Deletions don't propagate yet — a
 chat deleted on one host can reappear after syncing with a host that
 still has it.)
 
-The `.praimate-state/db.sqlite` backup snapshot is deliberately normal,
-plaintext SQLite so another machine can row-merge it without copying a
-device-local encryption key. Treat repository access as access to the
-database: use a private remote, protect its credentials, and do not
-enable backup for data that must never leave the device.
+The `.praimate-state/db.sqlite` snapshot is encrypted and travels with
+`.praimate-state/db.sqlite.key`, a copy of its authenticated password
+envelope. Another Windows or Linux installation can open and row-merge it
+using the same database password; the raw key and password are never committed.
+Because the snapshot is encrypted, structured credentials remain part of the
+recoverable database backup. Anyone who copies the repository can attempt
+offline password guesses against the envelope, so use a strong password unique
+to PrAImate.
+
+The rest of the backup repository is not an encrypted vault: workspace files,
+captured transcripts, native session slices, and per-chat `MEMORY.md` files are
+normal Git objects and may contain sensitive text. Use a private remote you
+trust and do not enable backup for projects that must never leave the device.
 
 If you hand-edit `.gitignore`, the absence of the PrAImate-managed
 marker line tells the launcher to leave it alone on the next sync.

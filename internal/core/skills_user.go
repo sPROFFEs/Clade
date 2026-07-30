@@ -28,15 +28,16 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"git.jtsec.local/lab/PrAImate/internal/appdata"
 )
 
 // userSkillsFile is the on-disk location of the JSON catalogue.
 func userSkillsFile() (string, error) {
-	base, err := os.UserConfigDir()
+	dir, err := appdata.Root()
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(base, "praimate")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}

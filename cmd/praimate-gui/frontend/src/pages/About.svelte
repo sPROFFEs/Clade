@@ -58,7 +58,7 @@
   </div>
   {#if info?.dbPath}
     <div class="path"><span>Database</span><code>{info.dbPath}</code></div>
-    <div class="path"><span>Key file</span><code>{info.dbKeyPath}</code></div>
+    <div class="path"><span>Password envelope</span><code>{info.dbKeyPath}</code></div>
   {/if}
 </div>
 

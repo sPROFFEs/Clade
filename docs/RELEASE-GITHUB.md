@@ -22,7 +22,7 @@ On Linux amd64:
 ```bash
 rm -rf dist
 PATH="$HOME/.bun/bin:$HOME/.local/bin:$PATH" \
-  bash scripts/build.sh --version=1.1.0 --with-code --with-graphify
+  bash scripts/build.sh --version=1.1.1 --with-code --with-graphify
 ```
 
 This produces the native Linux amd64 GUI bundle and cross-compiled Windows
@@ -91,17 +91,17 @@ done
 Create a published release, not a draft or prerelease:
 
 ```bash
-git tag -a 1.1.0 -m "PrAImate 1.1.0"
+git tag -a 1.1.1 -m "PrAImate 1.1.1"
 git push origin main
-git push origin 1.1.0
+git push origin 1.1.1
 
-gh release create 1.1.0 \
+gh release create 1.1.1 \
   --repo sPROFFEs/praimate \
   --target main \
-  --title "PrAImate 1.1.0" \
+  --title "PrAImate 1.1.1" \
   --notes-file RELEASE_NOTES.md
 
-gh release upload 1.1.0 --clobber \
+gh release upload 1.1.1 --clobber \
   dist/praimate-linux-amd64.tar.gz \
   dist/praimate-windows-amd64.zip \
   dist/praimate-windows-arm64.zip \
@@ -128,5 +128,5 @@ gh release upload 1.1.0 --clobber \
 | `*.sha256`, `SHA256SUMS` | Release verification |
 
 After publishing, verify `praimate -check-update` reports the installed
-`1.1.0` build as current and that the GitHub release is neither draft nor
+`1.1.1` build as current and that the GitHub release is neither draft nor
 prerelease.

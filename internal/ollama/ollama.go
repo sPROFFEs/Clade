@@ -228,18 +228,18 @@ const (
 // (a transient upstream 503 from GPUStack would block a config that
 // IS valid — the worker just isn't reachable). The probe distinguishes:
 //
-//   2xx                          → pass clean
-//   401 / 403                    → pass clean (route exists; auth's the
-//                                  only complaint, real launch handles
-//                                  via env_key)
-//   502 / 503 / 504              → pass + warn ("route exists but
-//                                  upstream returned X — backend may
-//                                  need to come up before codex works")
-//   404 / 405 / 501              → REFUSE: route doesn't exist
-//   400 + chat-completions hint  → REFUSE: server is chat-completions-only
-//   400 (other)                  → REFUSE: surface body
-//   500 / other 5xx              → REFUSE: surface body
-//   Network error                → REFUSE: endpoint unreachable
+//	2xx                          → pass clean
+//	401 / 403                    → pass clean (route exists; auth's the
+//	                               only complaint, real launch handles
+//	                               via env_key)
+//	502 / 503 / 504              → pass + warn ("route exists but
+//	                               upstream returned X — backend may
+//	                               need to come up before codex works")
+//	404 / 405 / 501              → REFUSE: route doesn't exist
+//	400 + chat-completions hint  → REFUSE: server is chat-completions-only
+//	400 (other)                  → REFUSE: surface body
+//	500 / other 5xx              → REFUSE: surface body
+//	Network error                → REFUSE: endpoint unreachable
 //
 // Probe timeout is short (12s) — slow servers degrade UX but the
 // probe must not block the wizard indefinitely.
@@ -538,10 +538,10 @@ func ApplyOpenCode(s Settings, makeDefault bool) (string, error) {
 		"baseURL": NormalizeEndpoint(s.Endpoint) + "/v1",
 	}
 	if s.APIKey != "" {
-		// @ai-sdk/openai-compatible reads `apiKey` from options and sends
-		// it as `Authorization: Bearer <key>`. Required by GPUStack and
-		// other gated OpenAI-compatible backends.
-		options["apiKey"] = s.APIKey
+		// OpenCode expands {env:VAR} at runtime. Keep the credential out
+		// of its plaintext config; PrAImate injects OPENAI_API_KEY when it
+		// launches the configured local route.
+		options["apiKey"] = "{env:OPENAI_API_KEY}"
 	}
 	modelEntry := map[string]any{"name": s.Model}
 	if s.ContextTokens > 0 || s.OutputTokens > 0 {
@@ -686,12 +686,11 @@ func ApplyDeepSeek(s Settings) (string, error) {
 	existing, _ := os.ReadFile(configPath)
 	stripped := stripDeepSeekBlock(string(existing))
 
-	// When the endpoint requires Bearer auth (GPUStack et al.), write the
-	// key inline. DeepSeek-TUI also honours `api_key_env`, but the
-	// inline form is one less moving piece for the user.
+	// Keep credentials out of DeepSeek's plaintext config. PrAImate injects
+	// OPENAI_API_KEY for launches using this route.
 	keyLine := ""
 	if s.APIKey != "" {
-		keyLine = fmt.Sprintf("api_key = %q\n", s.APIKey)
+		keyLine = "api_key_env = \"OPENAI_API_KEY\"\n"
 	}
 	block := fmt.Sprintf(`
 %s

@@ -503,7 +503,11 @@ func (a *App) BuildAgentRAG(id, backend, apiKey, model string) error {
 			return fmt.Errorf("local backend needs a model name — enter the exact model name served by the endpoint, e.g. `qwen2.5-coder:7b`")
 		}
 
-		key := strings.TrimSpace(cfg.DefaultLocalAPIKey)
+		key, err := loadLocalLLMAPIKey(a.core)
+		if err != nil {
+			return fmt.Errorf("load local LLM credential: %w", err)
+		}
+		key = strings.TrimSpace(key)
 		if key == "" {
 			// Both the OpenAI SDK and graphify expect a non-empty key,
 			// although a normal local Ollama installation ignores it.

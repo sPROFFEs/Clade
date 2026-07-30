@@ -27,6 +27,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"git.jtsec.local/lab/PrAImate/internal/appdata"
 )
 
 // AgentDir returns the agent's on-disk root: <config>/praimate/agents/<id>/.
@@ -38,11 +40,11 @@ func AgentDir(id string) (string, error) {
 	if id == "" {
 		return "", fmt.Errorf("AgentDir: empty agent id")
 	}
-	base, err := os.UserConfigDir()
+	base, err := appdata.Root()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(base, "praimate", "agents", id), nil
+	return filepath.Join(base, "agents", id), nil
 }
 
 // AgentKnowledgeDir returns the knowledge folder for an agent id. The

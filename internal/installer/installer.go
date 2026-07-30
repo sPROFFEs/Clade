@@ -16,6 +16,8 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+
+	"git.jtsec.local/lab/PrAImate/internal/appdata"
 )
 
 // OS is the launcher's runtime classification. Distinct from runtime.GOOS
@@ -763,11 +765,11 @@ func buildCmd(ctx context.Context, m Method) *exec.Cmd {
 // agents (openclaude) whose upstream package can't be installed cleanly
 // via `pnpm add -g` — see installIntoManagedPrefix.
 func ManagedAgentPrefix(name string) (string, error) {
-	base, err := os.UserConfigDir()
+	base, err := appdata.Root()
 	if err != nil {
-		return "", fmt.Errorf("locate user config dir: %w", err)
+		return "", err
 	}
-	return filepath.Join(base, "praimate", "agents", name), nil
+	return filepath.Join(base, "agents", name), nil
 }
 
 // ManagedAgentBinDir returns <prefix>/node_modules/.bin for the named

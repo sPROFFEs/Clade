@@ -25,6 +25,7 @@ import (
 	"sort"
 	"strings"
 
+	"git.jtsec.local/lab/PrAImate/internal/appdata"
 	"git.jtsec.local/lab/PrAImate/internal/core"
 	"git.jtsec.local/lab/PrAImate/internal/installer"
 	"git.jtsec.local/lab/PrAImate/internal/store"
@@ -40,13 +41,21 @@ func codeBinaryName() string {
 // resolveCodeBinary returns the path to praimate-code, or "" if not
 // found. Split out for testability.
 func resolveCodeBinary(exePath, configDir string) string {
+	dataRoot := ""
+	if configDir != "" {
+		dataRoot = filepath.Join(configDir, "praimate")
+	}
+	return resolveCodeBinaryAtRoot(exePath, dataRoot)
+}
+
+func resolveCodeBinaryAtRoot(exePath, dataRoot string) string {
 	name := codeBinaryName()
 	candidates := []string{}
 	if exePath != "" {
 		candidates = append(candidates, filepath.Join(filepath.Dir(exePath), name))
 	}
-	if configDir != "" {
-		candidates = append(candidates, filepath.Join(configDir, "praimate", "bin", name))
+	if dataRoot != "" {
+		candidates = append(candidates, filepath.Join(dataRoot, "bin", name))
 	}
 	for _, c := range candidates {
 		if fi, err := os.Stat(c); err == nil && !fi.IsDir() {
@@ -64,15 +73,15 @@ func resolveCodeBinary(exePath, configDir string) string {
 func runCode(args []string) int {
 	exePath, _ := os.Executable()
 	exePath, _ = filepath.EvalSymlinks(exePath)
-	configDir, _ := os.UserConfigDir()
+	dataRoot, _ := appdata.Root()
 
-	bin := resolveCodeBinary(exePath, configDir)
+	bin := resolveCodeBinaryAtRoot(exePath, dataRoot)
 	if bin == "" {
 		fmt.Fprintln(os.Stderr, "praimate: praimate-code not found next to this binary or on PATH.")
 		if !offerCodeInstall() {
 			return 127
 		}
-		bin = resolveCodeBinary(exePath, configDir)
+		bin = resolveCodeBinaryAtRoot(exePath, dataRoot)
 		if bin == "" {
 			fmt.Fprintln(os.Stderr, "praimate: install finished but praimate-code still can't be resolved.")
 			return 127

@@ -33,6 +33,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"git.jtsec.local/lab/PrAImate/internal/appdata"
 )
 
 // buildIn carries the per-turn inputs to an execAdapter's build func.
@@ -85,11 +87,11 @@ func (a *execAdapter) resolveBin() (string, error) {
 // import (core must not grow an installer dependency): the managed
 // standalone dir is <user config dir>/praimate/bin.
 func praimateManagedBinDir() string {
-	base, err := os.UserConfigDir()
+	base, err := appdata.Root()
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(base, "praimate", "bin")
+	return filepath.Join(base, "bin")
 }
 
 func (a *execAdapter) Name() string { return a.name }

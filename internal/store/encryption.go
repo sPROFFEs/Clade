@@ -2,66 +2,18 @@ package store
 
 import (
 	"bytes"
-	"crypto/rand"
 	"database/sql"
 	"errors"
 	"fmt"
 	"io"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 )
 
 const encryptionKeyBytes = 64 // two 256-bit AES-XTS keys
 
 var sqliteHeader = []byte("SQLite format 3\x00")
-
-func loadOrCreateKey(path string) ([]byte, error) {
-	key, err := os.ReadFile(path)
-	if err == nil {
-		if len(key) != encryptionKeyBytes {
-			return nil, fmt.Errorf("%s has %d bytes; expected %d", path, len(key), encryptionKeyBytes)
-		}
-		_ = os.Chmod(path, 0o600)
-		return key, nil
-	}
-	if !errors.Is(err, os.ErrNotExist) {
-		return nil, err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return nil, err
-	}
-	key = make([]byte, encryptionKeyBytes)
-	if _, err := io.ReadFull(rand.Reader, key); err != nil {
-		return nil, fmt.Errorf("generate key: %w", err)
-	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if errors.Is(err, os.ErrExist) {
-		return loadOrCreateKey(path)
-	}
-	if err != nil {
-		return nil, err
-	}
-	ok := false
-	defer func() {
-		_ = f.Close()
-		if !ok {
-			_ = os.Remove(path)
-		}
-	}()
-	if _, err := f.Write(key); err != nil {
-		return nil, err
-	}
-	if err := f.Sync(); err != nil {
-		return nil, err
-	}
-	if err := f.Close(); err != nil {
-		return nil, err
-	}
-	ok = true
-	return key, nil
-}
 
 func migratePlainDatabase(path string, key []byte) error {
 	f, err := os.Open(path)

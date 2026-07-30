@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"git.jtsec.local/lab/PrAImate/internal/appdata"
 	"git.jtsec.local/lab/PrAImate/internal/gitutil"
 	"git.jtsec.local/lab/PrAImate/internal/version"
 )
@@ -49,11 +50,11 @@ const (
 // binaries (praimate-code) are installed and where the `praimate code`
 // dispatcher looks for them.
 func PraimateBinDir() (string, error) {
-	base, err := os.UserConfigDir()
+	base, err := appdata.Root()
 	if err != nil {
-		return "", fmt.Errorf("locate user config dir: %w", err)
+		return "", err
 	}
-	return filepath.Join(base, "praimate", "bin"), nil
+	return filepath.Join(base, "bin"), nil
 }
 
 // Tool describes an installable non-agent capability. Same shape as
@@ -232,11 +233,11 @@ func firstOutputLine(out []byte) string {
 // but a separate subtree so an agent named "graphify" couldn't ever
 // collide with a tool named "graphify".
 func ManagedToolPrefix(name string) (string, error) {
-	base, err := os.UserConfigDir()
+	base, err := appdata.Root()
 	if err != nil {
-		return "", fmt.Errorf("locate user config dir: %w", err)
+		return "", err
 	}
-	return filepath.Join(base, "praimate", "tools", name), nil
+	return filepath.Join(base, "tools", name), nil
 }
 
 // ManagedToolBinDir returns <prefix>/bin — the dir uv writes the
@@ -644,7 +645,7 @@ func EnsureUvReady(ctx context.Context, w io.Writer) ([]string, error) {
 //
 // Safe to call repeatedly; existing entries on PATH are not duplicated.
 func ImportManagedToolsToPath() {
-	base, err := os.UserConfigDir()
+	root, err := appdata.Root()
 	if err != nil {
 		return
 	}
@@ -655,9 +656,12 @@ func ImportManagedToolsToPath() {
 	// Scan the praimate prefix AND the legacy clade prefix: tools
 	// installed before the rebrand live under clade/tools and must keep
 	// resolving ("graphify installed but not detected").
+	toolRoots := []string{filepath.Join(root, "tools")}
+	if base, err := os.UserConfigDir(); err == nil {
+		toolRoots = append(toolRoots, filepath.Join(base, "clade", "tools"))
+	}
 	var dirs []string
-	for _, brand := range []string{"praimate", "clade"} {
-		toolsDir := filepath.Join(base, brand, "tools")
+	for _, toolsDir := range toolRoots {
 		entries, err := os.ReadDir(toolsDir)
 		if err != nil {
 			continue

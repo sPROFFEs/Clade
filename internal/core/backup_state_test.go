@@ -4,7 +4,10 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"git.jtsec.local/lab/PrAImate/internal/store"
 )
 
 func TestExportBackupState_SnapshotsDBAndAgents(t *testing.T) {
@@ -23,6 +26,108 @@ func TestExportBackupState_SnapshotsDBAndAgents(t *testing.T) {
 	entries, _ := os.ReadDir(filepath.Join(repo, BackupStateDir, "agents"))
 	if len(entries) < 3 {
 		t.Fatalf("expected ≥3 agent yaml exports, got %d", len(entries))
+	}
+}
+
+func TestExportBackupState_EncryptsAndPreservesStructuredSecrets(t *testing.T) {
+	ctx := context.Background()
+	c, _ := New(Options{Store: openTempStore(t)})
+	chat, err := c.CreateChat(ctx, CreateChatRequest{
+		Title: "secret", CLIAgent: "claude",
+		Settings: ChatSettings{Local: &ChatLocalEndpoint{
+			Endpoint: "https://llm.example", APIKey: "chat-secret", Model: "m",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.ConnectMCP(ctx, ConnectMCPRequest{
+		ID: "private", Name: "private", Transport: MCPTransportHTTP,
+		URL: "https://mcp.example", Env: map[string]string{"TOKEN": "mcp-secret"},
+		Auth: map[string]string{"type": "bearer", "token": "auth-secret"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.SetSetting(ctx, ScopeCLI, "local_llm.api_key", []byte(`"default-secret"`)); err != nil {
+		t.Fatal(err)
+	}
+
+	repo := t.TempDir()
+	if err := c.ExportBackupState(ctx, repo); err != nil {
+		t.Fatal(err)
+	}
+	snapPath := filepath.Join(repo, BackupStateDir, "db.sqlite")
+	raw, err := os.ReadFile(snapPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(raw) >= 16 && string(raw[:16]) == "SQLite format 3\x00" {
+		t.Fatal("backup DB is plaintext")
+	}
+	if _, err := os.Stat(snapPath + ".key"); err != nil {
+		t.Fatalf("backup key envelope missing: %v", err)
+	}
+	snap, legacy, err := c.store.OpenSnapshot(snapPath, snapPath+".key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer snap.Close()
+	if legacy {
+		t.Fatal("current backup unexpectedly opened as legacy plaintext")
+	}
+	var settings, envJSON, authJSON string
+	if err := snap.QueryRow(`SELECT settings_json FROM chats WHERE id = ?`, chat.ID).Scan(&settings); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(settings, "chat-secret") {
+		t.Fatalf("encrypted backup lost chat API key: %s", settings)
+	}
+	if err := snap.QueryRow(`SELECT env_json, auth_json FROM mcp_servers WHERE id = 'private'`).Scan(&envJSON, &authJSON); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(envJSON, "mcp-secret") || !strings.Contains(authJSON, "auth-secret") {
+		t.Fatalf("encrypted backup lost MCP secrets: env=%s auth=%s", envJSON, authJSON)
+	}
+	var count int
+	if err := snap.QueryRow(`SELECT COUNT(*) FROM settings_cli WHERE key = 'local_llm.api_key'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatal("encrypted backup lost saved local LLM key")
+	}
+}
+
+func TestSanitizeImportedRowRejectsLegacyBackupCredentials(t *testing.T) {
+	settingsCols := []string{"key", "value_json"}
+	settingsVals := []any{"local_llm.api_key", `"remote-secret"`}
+	if sanitizeImportedRow("settings_cli", settingsCols, settingsVals) {
+		t.Fatal("legacy local LLM credential row should not import")
+	}
+
+	mcpCols := []string{"id", "env_json", "auth_json"}
+	mcpVals := []any{"mcp", `{"TOKEN":"secret"}`, `{"token":"secret"}`}
+	if !sanitizeImportedRow("mcp_servers", mcpCols, mcpVals) {
+		t.Fatal("MCP metadata row should still import")
+	}
+	if mcpVals[1] != "{}" || mcpVals[2] != "{}" {
+		t.Fatalf("MCP credentials not stripped: %#v", mcpVals)
+	}
+
+	chatCols := []string{"id", "settings_json"}
+	chatVals := []any{"chat", `{"local":{"endpoint":"https://llm","api_key":"secret","model":"m"}}`}
+	if !sanitizeImportedRow("chats", chatCols, chatVals) {
+		t.Fatal("chat row should still import")
+	}
+	if strings.Contains(stringValue(chatVals[1]), "secret") {
+		t.Fatalf("chat credential not stripped: %s", chatVals[1])
+	}
+}
+
+func TestPortableSQLiteURIPreservesWindowsDriveAndEscapesPath(t *testing.T) {
+	got := portableSQLiteURI(`C:/Users/test user/backup#1.sqlite`)
+	const want = `file:C:/Users/test%20user/backup%231.sqlite`
+	if got != want {
+		t.Fatalf("URI = %q, want %q", got, want)
 	}
 }
 
@@ -74,6 +179,28 @@ func TestImportBackupState_MergesChatsAcrossMachines(t *testing.T) {
 	msgs, _ = b.ListMessages(ctx, chA.ID, 0)
 	if len(msgs) != 1 {
 		t.Fatalf("re-import duplicated messages: got %d", len(msgs))
+	}
+}
+
+func TestImportBackupState_RejectsDifferentDatabasePassword(t *testing.T) {
+	ctx := context.Background()
+	source, _ := New(Options{Store: openTempStore(t)})
+	otherStore, err := store.InitializeWithPassword(
+		filepath.Join(t.TempDir(), "db.sqlite"),
+		"a completely different database password",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = otherStore.Close() })
+	target, _ := New(Options{Store: otherStore})
+
+	repo := t.TempDir()
+	if err := source.ExportBackupState(ctx, repo); err != nil {
+		t.Fatal(err)
+	}
+	if err := target.ImportBackupState(ctx, repo); err == nil {
+		t.Fatal("encrypted backup opened with a different database password")
 	}
 }
 

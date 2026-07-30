@@ -19,6 +19,7 @@
   import Skills from './pages/Skills.svelte'
   import SessionPanel from './lib/SessionPanel.svelte'
   import PrivacyNotice from './lib/PrivacyNotice.svelte'
+  import DatabaseUnlock from './lib/DatabaseUnlock.svelte'
 
   // Lucide-style outline icon paths (24x24 viewBox, stroke-based).
   const icons = {
@@ -71,9 +72,9 @@
   // First-run setup when no launcher config exists yet.
   let firstRun = null
   let privacyNotice = null
+  let databaseLock = null
 
-  onMount(async () => {
-    initTheme()
+  async function loadUnlockedApp() {
     try {
       editorMode = await api.editorMode()
     } catch {
@@ -100,7 +101,24 @@
     if (editorMode && !editorMode.active && !firstRun?.needed) {
       prefetchCLIs()
     }
+  }
+
+  onMount(async () => {
+    initTheme()
+    try {
+      databaseLock = await api.databaseLockStatus()
+    } catch (e) {
+      databaseLock = { unlocked: false, setupRequired: false, error: String(e) }
+    }
+    if (databaseLock?.unlocked) {
+      await loadUnlockedApp()
+    }
   })
+
+  async function databaseUnlocked(event) {
+    databaseLock = { ...databaseLock, unlocked: true, setupRequired: false }
+    await loadUnlockedApp()
+  }
 
   function setupDone() {
     firstRun = { ...firstRun, needed: false }
@@ -124,7 +142,11 @@
   $: current = pages.find((p) => p.id === $activePage) || pages[0]
 </script>
 
-{#if editorMode?.active}
+{#if !databaseLock}
+  <div class="boot-screen">Preparing secure storage…</div>
+{:else if !databaseLock.unlocked}
+  <DatabaseUnlock info={databaseLock} on:unlocked={databaseUnlocked} />
+{:else if editorMode?.active}
   <Editor folder={editorMode.folder} chatId={editorMode.chatId} />
 {:else if editorMode && firstRun?.needed}
   <Setup defaultRoot={firstRun.defaultRoot} on:done={setupDone} />
@@ -192,6 +214,6 @@
 </div>
 {/if}
 
-{#if privacyNotice?.required && !editorMode?.active}
+{#if databaseLock?.unlocked && privacyNotice?.required && !editorMode?.active}
   <PrivacyNotice on:accepted={privacyAccepted} />
 {/if}

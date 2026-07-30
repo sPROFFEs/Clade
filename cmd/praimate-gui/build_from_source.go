@@ -27,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"git.jtsec.local/lab/PrAImate/internal/appdata"
 	"git.jtsec.local/lab/PrAImate/internal/gitutil"
 	"git.jtsec.local/lab/PrAImate/internal/installer"
 )
@@ -256,11 +257,11 @@ func copyFileSimple(src, dst string) error {
 }
 
 // resolveBuildParent picks a disk-backed scratch parent for the
-// from-source builds. The default per OS is the standard cache root —
-// big, persistent across reboots, never tmpfs:
+// from-source builds. The default sits inside PrAImate's single data
+// root so Settings can accurately enumerate and delete all app state:
 //
-//	Linux:   $XDG_CACHE_HOME/praimate/build  (else ~/.cache/praimate/build)
-//	Windows: %LOCALAPPDATA%\praimate\build
+//	Linux:   $XDG_CONFIG_HOME/praimate/build (else ~/.config/praimate/build)
+//	Windows: %APPDATA%\praimate\build
 //
 // Users with non-standard layouts (encrypted home, slow disk, etc.)
 // override with PRAIMATE_BUILD_DIR. We also accept TMPDIR as a fallback
@@ -272,18 +273,8 @@ func resolveBuildParent() (string, string) {
 	if v := strings.TrimSpace(os.Getenv("PRAIMATE_BUILD_DIR")); v != "" {
 		return v, "PRAIMATE_BUILD_DIR override"
 	}
-	switch runtime.GOOS {
-	case "windows":
-		if local := os.Getenv("LOCALAPPDATA"); local != "" {
-			return filepath.Join(local, "praimate", "build"), "%LOCALAPPDATA%\\praimate\\build"
-		}
-	default:
-		if xdg := strings.TrimSpace(os.Getenv("XDG_CACHE_HOME")); xdg != "" {
-			return filepath.Join(xdg, "praimate", "build"), "$XDG_CACHE_HOME/praimate/build"
-		}
-		if home, _ := os.UserHomeDir(); home != "" {
-			return filepath.Join(home, ".cache", "praimate", "build"), "~/.cache/praimate/build"
-		}
+	if root, err := appdata.Root(); err == nil {
+		return filepath.Join(root, "build"), filepath.Join(root, "build")
 	}
 	// Last resort — the OS default temp dir. Caller will likely run out
 	// of space on tmpfs-backed /tmp, but at least we won't panic on a

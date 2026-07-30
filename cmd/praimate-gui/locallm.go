@@ -5,11 +5,16 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"time"
 
+	"git.jtsec.local/lab/PrAImate/internal/core"
 	"git.jtsec.local/lab/PrAImate/internal/launcher"
 	"git.jtsec.local/lab/PrAImate/internal/ollama"
 )
+
+const localLLMAPIKeySetting = "local_llm.api_key"
 
 // LocalLLMDefaults mirrors launcher.Config's DefaultLocal* slice.
 type LocalLLMDefaults struct {
@@ -30,9 +35,20 @@ func (a *App) GetLocalLLM() (*LocalLLMDefaults, error) {
 	if cfg == nil {
 		return &LocalLLMDefaults{}, nil
 	}
+	apiKey := ""
+	if a.core != nil {
+		apiKey, err = loadLocalLLMAPIKey(a.core)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		// Startup failures may leave Core unavailable. Preserve read-only
+		// access to a legacy config until the next successful migration.
+		apiKey = cfg.DefaultLocalAPIKey
+	}
 	return &LocalLLMDefaults{
 		Endpoint:      cfg.DefaultLocalEndpoint,
-		APIKey:        cfg.DefaultLocalAPIKey,
+		APIKey:        apiKey,
 		WireAPI:       cfg.DefaultLocalWireAPI,
 		ContextTokens: cfg.DefaultLocalContextTokens,
 		OutputTokens:  cfg.DefaultLocalOutputTokens,
@@ -42,6 +58,10 @@ func (a *App) GetLocalLLM() (*LocalLLMDefaults, error) {
 // SetLocalLLM persists the global default endpoint and shares it with
 // other machines via the backup's shareable-config sync.
 func (a *App) SetLocalLLM(d LocalLLMDefaults) error {
+	c, err := a.requireCore()
+	if err != nil {
+		return err
+	}
 	cfg, err := launcher.LoadConfig()
 	if err != nil {
 		return err
@@ -50,10 +70,58 @@ func (a *App) SetLocalLLM(d LocalLLMDefaults) error {
 		cfg = &launcher.Config{}
 	}
 	cfg.DefaultLocalEndpoint = d.Endpoint
-	cfg.DefaultLocalAPIKey = d.APIKey
+	cfg.DefaultLocalAPIKey = "" // migrated secret must never return to plaintext config
 	cfg.DefaultLocalWireAPI = d.WireAPI
 	cfg.DefaultLocalContextTokens = d.ContextTokens
 	cfg.DefaultLocalOutputTokens = d.OutputTokens
+	if err := saveLocalLLMAPIKey(c, d.APIKey); err != nil {
+		return err
+	}
+	return launcher.SaveConfig(cfg)
+}
+
+func loadLocalLLMAPIKey(c *core.Core) (string, error) {
+	raw, err := c.GetSetting(context.Background(), core.ScopeCLI, localLLMAPIKeySetting)
+	if err != nil || raw == nil {
+		return "", err
+	}
+	var key string
+	if err := json.Unmarshal(raw, &key); err != nil {
+		return "", err
+	}
+	return key, nil
+}
+
+func saveLocalLLMAPIKey(c *core.Core, key string) error {
+	if c == nil {
+		return errors.New("save local LLM API key: core unavailable")
+	}
+	if key == "" {
+		return c.DeleteSetting(context.Background(), core.ScopeCLI, localLLMAPIKeySetting)
+	}
+	raw, err := json.Marshal(key)
+	if err != nil {
+		return err
+	}
+	return c.SetSetting(context.Background(), core.ScopeCLI, localLLMAPIKeySetting, raw)
+}
+
+// migrateLegacyLocalLLMAPIKey moves the pre-1.1 plaintext config field into
+// the encrypted database. Saving config last makes the migration retry-safe.
+func migrateLegacyLocalLLMAPIKey(c *core.Core, cfg *launcher.Config) error {
+	if c == nil || cfg == nil || cfg.DefaultLocalAPIKey == "" {
+		return nil
+	}
+	existing, err := loadLocalLLMAPIKey(c)
+	if err != nil {
+		return err
+	}
+	if existing == "" {
+		if err := saveLocalLLMAPIKey(c, cfg.DefaultLocalAPIKey); err != nil {
+			return err
+		}
+	}
+	cfg.DefaultLocalAPIKey = ""
 	return launcher.SaveConfig(cfg)
 }
 

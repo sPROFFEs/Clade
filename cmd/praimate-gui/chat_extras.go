@@ -24,6 +24,7 @@ import (
 
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
+	"git.jtsec.local/lab/PrAImate/internal/appdata"
 	"git.jtsec.local/lab/PrAImate/internal/core"
 )
 
@@ -129,11 +130,11 @@ type ChatAttachment struct {
 // the source location (Downloads cleanups, USB drives, …) and so the
 // preview binding can safely restrict reads to a praimate-owned dir.
 func attachmentsRoot() (string, error) {
-	base, err := os.UserConfigDir()
+	base, err := appdata.Root()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(base, "praimate", "attachments"), nil
+	return filepath.Join(base, "attachments"), nil
 }
 
 func isImagePath(p string) bool {

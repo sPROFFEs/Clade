@@ -62,11 +62,7 @@ resolve_work_parent() {
     printf '%s\n' "$PRAIMATE_BUILD_DIR"
     return
   fi
-  if [ -n "${XDG_CACHE_HOME:-}" ]; then
-    printf '%s\n' "$XDG_CACHE_HOME/praimate/build"
-    return
-  fi
-  printf '%s\n' "$HOME/.cache/praimate/build"
+  printf '%s\n' "${XDG_CONFIG_HOME:-$HOME/.config}/praimate/build"
 }
 
 require_work_space() {

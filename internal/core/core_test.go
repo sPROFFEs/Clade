@@ -47,7 +47,7 @@ func TestListAgents_EmptyOnFreshDB(t *testing.T) {
 
 func openTempStore(t *testing.T) *store.Store {
 	t.Helper()
-	s, err := store.Open(filepath.Join(t.TempDir(), "db.sqlite"))
+	s, err := store.InitializeWithPassword(filepath.Join(t.TempDir(), "db.sqlite"), "correct horse battery staple")
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
