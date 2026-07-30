@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"git.jtsec.local/lab/PrAImate/internal/ollama"
 )
 
 func TestStartAndContinueChat_ResumesSession(t *testing.T) {
@@ -133,6 +135,40 @@ func TestContinueChatStream_PersistsCompactOpenCodeActivity(t *testing.T) {
 	}
 	if _, ok := assistant.Meta["opencode"]; ok {
 		t.Fatalf("raw opencode events should not be persisted: %#v", assistant.Meta)
+	}
+}
+
+func TestContinueChat_PrAImateCodeInjectsEncryptedLocalLLMKey(t *testing.T) {
+	mock := &mockAdapter{name: "praimate-code", replies: []string{"connected"}}
+	withMockAdapter(t, mock)
+
+	c, _ := New(Options{Store: openTempStore(t)})
+	ctx := context.Background()
+	if err := c.SetSetting(ctx, ScopeCLI, "local_llm.api_key", []byte(`"db-secret"`)); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	if _, err := ollama.ApplyOpenCode(ollama.Settings{
+		Endpoint: "https://llm.example", Model: "qwen3", APIKey: "db-secret",
+	}, true); err != nil {
+		t.Fatal(err)
+	}
+	chat, err := c.CreateChat(ctx, CreateChatRequest{
+		Title:    "local",
+		CLIAgent: "praimate-code",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := c.ContinueChat(ctx, chat.ID, "hello", t.TempDir(), ""); err != nil {
+		t.Fatal(err)
+	}
+	if len(mock.shots) != 1 {
+		t.Fatalf("shots = %d, want 1", len(mock.shots))
+	}
+	if got := mock.shots[0].Env["OPENAI_API_KEY"]; got != "db-secret" {
+		t.Fatalf("OPENAI_API_KEY = %q, want encrypted DB credential", got)
 	}
 }
 

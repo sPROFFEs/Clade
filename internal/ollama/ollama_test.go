@@ -273,6 +273,25 @@ func TestApplyOpenCode_ReferencesAPIKeyEnvironment(t *testing.T) {
 	}
 }
 
+func TestOpenCodeUsesManagedLocalRoute(t *testing.T) {
+	tmp := t.TempDir()
+	redirectHome(t, tmp)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmp, "xdg"))
+
+	if got, err := OpenCodeUsesManagedLocalRoute("ollama_remote/qwen3"); err != nil || !got {
+		t.Fatalf("explicit managed model: got %v, err %v", got, err)
+	}
+	if got, err := OpenCodeUsesManagedLocalRoute("openai/gpt-5"); err != nil || got {
+		t.Fatalf("explicit cloud model: got %v, err %v", got, err)
+	}
+	if _, err := ApplyOpenCode(Settings{Endpoint: "h:1", Model: "qwen3"}, true); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := OpenCodeUsesManagedLocalRoute(""); err != nil || !got {
+		t.Fatalf("configured managed default: got %v, err %v", got, err)
+	}
+}
+
 func TestApplyOpenCode_WritesModelTokenLimits(t *testing.T) {
 	tmp := t.TempDir()
 	redirectHome(t, tmp)

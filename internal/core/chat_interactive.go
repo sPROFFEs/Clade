@@ -256,6 +256,36 @@ func (c *Core) ContinueChatStream(ctx context.Context, chatID, userMessage, cwd,
 			Endpoint: l.Endpoint, APIKey: l.APIKey, Model: l.Model,
 		})
 	}
+	if isOpenCodeLikeAdapter(chat.CLIAgent) {
+		localRoute := chat.Settings.Local != nil && chat.Settings.Local.Endpoint != ""
+		if !localRoute {
+			localRoute, err = ollama.OpenCodeUsesManagedLocalRoute(model)
+			if err != nil {
+				return nil, fmt.Errorf("resolve OpenCode local route: %w", err)
+			}
+		}
+		if localRoute {
+			apiKey := ""
+			if chat.Settings.Local != nil {
+				apiKey = strings.TrimSpace(chat.Settings.Local.APIKey)
+			}
+			if apiKey == "" {
+				raw, getErr := c.GetSetting(ctx, ScopeCLI, "local_llm.api_key")
+				if getErr != nil {
+					return nil, fmt.Errorf("load local LLM credential: %w", getErr)
+				}
+				if len(raw) > 0 {
+					if decodeErr := json.Unmarshal(raw, &apiKey); decodeErr != nil {
+						return nil, fmt.Errorf("decode local LLM credential: %w", decodeErr)
+					}
+					apiKey = strings.TrimSpace(apiKey)
+				}
+			}
+			if apiKey != "" {
+				env = mergeStringMaps(env, map[string]string{"OPENAI_API_KEY": apiKey})
+			}
+		}
+	}
 	// MCP selection is per chat. Re-emit the project-scoped config on every
 	// turn so edits in the settings sheet (including clearing all MCPs) take
 	// effect without creating a new conversation.

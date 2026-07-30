@@ -512,6 +512,33 @@ type opencodeConfig map[string]any
 
 const openCodeProviderName = "ollama_remote"
 
+// OpenCodeUsesManagedLocalRoute reports whether an OpenCode-compatible
+// launch will use PrAImate's ollama_remote provider. An explicit model
+// wins; otherwise OpenCode's configured default model decides.
+func OpenCodeUsesManagedLocalRoute(model string) (bool, error) {
+	if model = strings.TrimSpace(model); model != "" {
+		return model == openCodeProviderName ||
+			strings.HasPrefix(model, openCodeProviderName+"/"), nil
+	}
+	configPath, err := OpenCodeConfigPath()
+	if err != nil {
+		return false, err
+	}
+	raw, err := os.ReadFile(configPath)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	cfg := opencodeConfig{}
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return false, fmt.Errorf("parse OpenCode config: %w", err)
+	}
+	defaultModel, _ := cfg["model"].(string)
+	return strings.HasPrefix(strings.TrimSpace(defaultModel), openCodeProviderName+"/"), nil
+}
+
 // ApplyOpenCode merges the Ollama provider into opencode.json. If the
 // file exists, only the provider entry is overwritten — other config is
 // preserved.
