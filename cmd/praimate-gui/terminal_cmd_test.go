@@ -2,6 +2,7 @@ package main
 
 import (
 	"reflect"
+	"slices"
 	"testing"
 )
 
@@ -28,5 +29,12 @@ func TestTerminalResumeCommand(t *testing.T) {
 				t.Fatalf("got name=%q args=%q supported=%v", name, args, supported)
 			}
 		})
+	}
+}
+
+func TestTerminalLocalEnvNormalizesClaudeEndpoint(t *testing.T) {
+	env := terminalLocalEnv("claude", "https:llm.example", "secret", "model")
+	if !slices.Contains(env, "ANTHROPIC_BASE_URL=https://llm.example") {
+		t.Fatalf("Claude terminal env did not normalize endpoint: %q", env)
 	}
 }

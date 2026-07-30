@@ -252,8 +252,15 @@ func (c *Core) ContinueChatStream(ctx context.Context, chatID, userMessage, cwd,
 		if model == "" {
 			model = l.Model
 		}
+		apiKey := strings.TrimSpace(l.APIKey)
+		if apiKey == "" {
+			apiKey, err = c.localLLMAPIKey(ctx)
+			if err != nil {
+				return nil, err
+			}
+		}
 		env = ollama.ClaudeEnv(ollama.Settings{
-			Endpoint: l.Endpoint, APIKey: l.APIKey, Model: l.Model,
+			Endpoint: l.Endpoint, APIKey: apiKey, Model: l.Model,
 		})
 	}
 	if isOpenCodeLikeAdapter(chat.CLIAgent) {
@@ -270,15 +277,9 @@ func (c *Core) ContinueChatStream(ctx context.Context, chatID, userMessage, cwd,
 				apiKey = strings.TrimSpace(chat.Settings.Local.APIKey)
 			}
 			if apiKey == "" {
-				raw, getErr := c.GetSetting(ctx, ScopeCLI, "local_llm.api_key")
-				if getErr != nil {
-					return nil, fmt.Errorf("load local LLM credential: %w", getErr)
-				}
-				if len(raw) > 0 {
-					if decodeErr := json.Unmarshal(raw, &apiKey); decodeErr != nil {
-						return nil, fmt.Errorf("decode local LLM credential: %w", decodeErr)
-					}
-					apiKey = strings.TrimSpace(apiKey)
+				apiKey, err = c.localLLMAPIKey(ctx)
+				if err != nil {
+					return nil, err
 				}
 			}
 			if apiKey != "" {
@@ -379,6 +380,21 @@ func (c *Core) ContinueChatStream(ctx context.Context, chatID, userMessage, cwd,
 		SessionID:   reply.SessionID,
 		DurationMs:  time.Since(start).Milliseconds(),
 	}, nil
+}
+
+func (c *Core) localLLMAPIKey(ctx context.Context) (string, error) {
+	raw, err := c.GetSetting(ctx, ScopeCLI, "local_llm.api_key")
+	if err != nil {
+		return "", fmt.Errorf("load local LLM credential: %w", err)
+	}
+	if len(raw) == 0 {
+		return "", nil
+	}
+	var apiKey string
+	if err := json.Unmarshal(raw, &apiKey); err != nil {
+		return "", fmt.Errorf("decode local LLM credential: %w", err)
+	}
+	return strings.TrimSpace(apiKey), nil
 }
 
 // privacyRedactPlain redacts text and discards the match set — used for

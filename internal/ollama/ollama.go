@@ -58,16 +58,17 @@ func NormalizeEndpoint(raw string) string {
 		return s
 	}
 	// Typo case: "http:host:port" or "https:host" — scheme present but
-	// missing the //. Strip the stray prefix; we'll re-add it cleanly.
-	for _, scheme := range []string{"https:", "http:"} {
-		if strings.HasPrefix(lower, scheme) {
-			s = s[len(scheme):]
-			break
-		}
+	// missing the //. Preserve the user's scheme while repairing it.
+	scheme := "http://"
+	if strings.HasPrefix(lower, "https:") {
+		scheme = "https://"
+		s = s[len("https:"):]
+	} else if strings.HasPrefix(lower, "http:") {
+		s = s[len("http:"):]
 	}
 	// Trim any stray slashes left over.
 	s = strings.TrimLeft(s, "/")
-	return "http://" + s
+	return scheme + s
 }
 
 // ListModels asks the endpoint what's loaded. Tries /api/tags first
@@ -208,205 +209,7 @@ func OpenCodeConfigPath() (string, error) {
 	return filepath.Join(home, ".config", "opencode", "opencode.json"), nil
 }
 
-const (
-	codexProviderName = "ollama_remote"
-	codexProfileName  = "ollama_remote"
-)
-
-// ProbeCodexCompat issues a stub POST to <endpoint>/v1/responses to
-// verify that the configured backend speaks codex 0.130+'s wire_api
-// ("responses"). The wizard calls this BEFORE ApplyCodex; the returned
-// (warning, error) pair has these semantics:
-//
-//   - error != nil → refuse the codex apply; show the message
-//   - error == nil && warning != "" → apply but surface the warning
-//   - both empty   → apply cleanly
-//
-// We split the result this way because "does the endpoint IMPLEMENT
-// /v1/responses?" and "is the endpoint HEALTHY right now?" are
-// independent questions, and confusing them produces false refusals
-// (a transient upstream 503 from GPUStack would block a config that
-// IS valid — the worker just isn't reachable). The probe distinguishes:
-//
-//	2xx                          → pass clean
-//	401 / 403                    → pass clean (route exists; auth's the
-//	                               only complaint, real launch handles
-//	                               via env_key)
-//	502 / 503 / 504              → pass + warn ("route exists but
-//	                               upstream returned X — backend may
-//	                               need to come up before codex works")
-//	404 / 405 / 501              → REFUSE: route doesn't exist
-//	400 + chat-completions hint  → REFUSE: server is chat-completions-only
-//	400 (other)                  → REFUSE: surface body
-//	500 / other 5xx              → REFUSE: surface body
-//	Network error                → REFUSE: endpoint unreachable
-//
-// Probe timeout is short (12s) — slow servers degrade UX but the
-// probe must not block the wizard indefinitely.
-func ProbeCodexCompat(ctx context.Context, endpoint, apiKey, model string) (warning string, err error) {
-	endpoint = NormalizeEndpoint(endpoint)
-	if endpoint == "" {
-		return "", errors.New("empty endpoint")
-	}
-	if model == "" {
-		// Codex won't omit `model` in a real request, but if we don't
-		// have one yet (wizard's probe-before-model-pick flow), pass
-		// a placeholder. Any /v1/responses server should still reject
-		// with a model-not-found error AFTER routing, telling us the
-		// route exists.
-		model = "probe-model"
-	}
-	bodyJSON := `{"model":"` + jsonEscape(model) + `","input":[{"role":"user","content":[{"type":"input_text","text":"ping"}]}],"max_output_tokens":1,"stream":false}`
-	req, err := http.NewRequestWithContext(ctx, "POST", endpoint+"/v1/responses", strings.NewReader(bodyJSON))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	addBearer(req, apiKey)
-	cli := &http.Client{Timeout: 12 * time.Second}
-	resp, err := cli.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("couldn't reach %s/v1/responses: %w", endpoint, err)
-	}
-	defer resp.Body.Close()
-
-	// Read a slice of body up front so every branch can include it
-	// in its message without duplicating the read logic.
-	buf := make([]byte, 2048)
-	n, _ := resp.Body.Read(buf)
-	bodyText := strings.TrimSpace(string(buf[:n]))
-
-	switch {
-	case resp.StatusCode/100 == 2:
-		return "", nil
-	case resp.StatusCode == 401 || resp.StatusCode == 403:
-		// Route exists; auth's the only complaint. Real codex launch
-		// will set the proper OPENAI_API_KEY via env_key and should
-		// succeed.
-		return "", nil
-	case resp.StatusCode == 502 || resp.StatusCode == 503 || resp.StatusCode == 504:
-		// Route exists, upstream isn't reachable / overloaded. Common
-		// case: GPUStack's API gateway returns 503 when its internal
-		// worker is down. The config IS valid — the user just has a
-		// backend health issue. Pass with a warning so the user sees
-		// it and can act, but don't block the apply.
-		hint := ""
-		if bodyText != "" {
-			hint = ": " + truncForMsg(bodyText, 200)
-		}
-		return fmt.Sprintf(
-			"endpoint speaks /v1/responses but currently returns HTTP %d (upstream unreachable%s). "+
-				"Config saved; check your backend worker before launching codex.",
-			resp.StatusCode, hint), nil
-	case resp.StatusCode == 404 || resp.StatusCode == 405 || resp.StatusCode == 501:
-		return "", fmt.Errorf(
-			"endpoint %s doesn't implement /v1/responses (HTTP %d). "+
-				"codex 0.130+ requires this endpoint. "+
-				"Use claude / opencode / deepseek (all work via /v1/chat/completions), "+
-				"or proxy this endpoint through LiteLLM",
-			endpoint, resp.StatusCode)
-	default:
-		body := bodyText
-		if body == "" {
-			body = "(empty body)"
-		}
-		// Some chat-completions-only servers return 400 with a hint
-		// pointing at the wrong endpoint. Detect a couple of common
-		// shapes so we can give a better message.
-		lower := strings.ToLower(body)
-		if strings.Contains(lower, "chat/completions") ||
-			strings.Contains(lower, "unknown endpoint") ||
-			strings.Contains(lower, "method not allowed") {
-			return "", fmt.Errorf(
-				"endpoint %s appears to only implement /v1/chat/completions (HTTP %d: %s). "+
-					"codex 0.130+ requires /v1/responses. "+
-					"Use claude / opencode / deepseek, or proxy through LiteLLM",
-				endpoint, resp.StatusCode, truncForMsg(body, 200))
-		}
-		return "", fmt.Errorf("endpoint %s returned HTTP %d for /v1/responses: %s",
-			endpoint, resp.StatusCode, truncForMsg(body, 400))
-	}
-}
-
-// truncForMsg cuts a string at max chars and appends "…" if cut, so
-// long server error bodies don't blow out the UI line.
-func truncForMsg(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max] + "…"
-}
-
-// jsonEscape escapes a string for safe inclusion as a JSON value. We
-// don't want to pull in encoding/json just for the probe's body, so
-// this minimal version covers the cases that can appear in model
-// names (backslash, quotes, control chars).
-func jsonEscape(s string) string {
-	var b strings.Builder
-	for _, r := range s {
-		switch r {
-		case '\\':
-			b.WriteString(`\\`)
-		case '"':
-			b.WriteString(`\"`)
-		case '\n':
-			b.WriteString(`\n`)
-		case '\r':
-			b.WriteString(`\r`)
-		case '\t':
-			b.WriteString(`\t`)
-		default:
-			if r < 0x20 {
-				fmt.Fprintf(&b, `\u%04x`, r)
-				continue
-			}
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
-}
-
-// ApplyCodex writes the [model_providers.ollama_remote] + [profiles.ollama_remote]
-// blocks to ~/.codex/config.toml. Existing matching blocks are replaced
-// (idempotent). Existing unrelated config is preserved.
-//
-// Use codex with: `codex -p ollama_remote`.
-func ApplyCodex(s Settings) (configPath string, err error) {
-	configPath, err = CodexConfigPath()
-	if err != nil {
-		return "", err
-	}
-	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
-		return configPath, err
-	}
-	existing, _ := os.ReadFile(configPath)
-	stripped := stripCodexBlocks(string(existing))
-	wireAPI := s.WireAPI
-	if wireAPI == "" {
-		// Codex CLI 0.40+ deprecated "chat" and requires "responses".
-		// Older Codex builds still want "chat" — pass s.WireAPI="chat"
-		// explicitly in those cases. We default to "responses" because
-		// new installs hit the deprecation error otherwise.
-		wireAPI = "responses"
-	}
-	var limitLines strings.Builder
-	if s.ContextTokens > 0 {
-		fmt.Fprintf(&limitLines, "model_context_window = %d\n", s.ContextTokens)
-	}
-	block := fmt.Sprintf(`
-[model_providers.%s]
-name = "Ollama Remote"
-base_url = "%s/v1"
-env_key = "OPENAI_API_KEY"
-wire_api = "%s"
-
-[profiles.%s]
-model_provider = "%s"
-model = "%s"
-%s`, codexProviderName, NormalizeEndpoint(s.Endpoint), wireAPI, codexProfileName, codexProviderName, s.Model, limitLines.String())
-	final := strings.TrimRight(stripped, "\n") + "\n" + block
-	return configPath, atomicWrite(configPath, []byte(final))
-}
+const codexProviderName = "ollama_remote"
 
 // DisableCodex strips the ollama_remote blocks from ~/.codex/config.toml.
 // No-op if the file doesn't exist.
@@ -422,53 +225,43 @@ func DisableCodex() (string, error) {
 	if err != nil {
 		return configPath, err
 	}
-	stripped := stripCodexBlocks(string(raw))
+	stripped := stripDeprecatedCodexRoute(string(raw))
+	if stripped == string(raw) {
+		return configPath, nil
+	}
 	return configPath, atomicWrite(configPath, []byte(stripped))
 }
 
-// MigrateCodexWireAPI rewrites wire_api = "chat" → wire_api = "responses"
-// inside our managed [model_providers.ollama_remote] block in
-// ~/.codex/config.toml. Codex 0.40+ deprecated "chat" and hard-errors at
-// startup when it sees it. Idempotent. No-op if the file or our block
-// is missing.
-//
-// Only touches lines inside the ollama_remote block — other providers
-// are left alone.
-func MigrateCodexWireAPI() (changed bool, err error) {
-	path, err := CodexConfigPath()
-	if err != nil {
-		return false, err
-	}
-	raw, err := os.ReadFile(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	lines := strings.Split(string(raw), "\n")
-	inOurBlock := false
-	for i, line := range lines {
+func stripDeprecatedCodexRoute(body string) string {
+	body = stripCodexBlocks(body)
+	lines := strings.Split(body, "\n")
+	rootUsesManagedProvider := false
+	for _, line := range lines {
 		trim := strings.TrimSpace(line)
-		if trim == "[model_providers."+codexProviderName+"]" {
-			inOurBlock = true
+		if strings.HasPrefix(trim, "[") {
+			break
+		}
+		if trim == `model_provider = "`+codexProviderName+`"` {
+			rootUsesManagedProvider = true
+			break
+		}
+	}
+	if !rootUsesManagedProvider {
+		return body
+	}
+	out := make([]string, 0, len(lines))
+	inRoot := true
+	for _, line := range lines {
+		trim := strings.TrimSpace(line)
+		if strings.HasPrefix(trim, "[") {
+			inRoot = false
+		}
+		if inRoot && (strings.HasPrefix(trim, "model_provider =") || strings.HasPrefix(trim, "model =")) {
 			continue
 		}
-		if inOurBlock && strings.HasPrefix(trim, "[") {
-			inOurBlock = false
-		}
-		if inOurBlock {
-			// Match wire_api = "chat" (with any spacing).
-			if strings.Contains(line, `wire_api`) && strings.Contains(line, `"chat"`) {
-				lines[i] = strings.Replace(line, `"chat"`, `"responses"`, 1)
-				changed = true
-			}
-		}
+		out = append(out, line)
 	}
-	if !changed {
-		return false, nil
-	}
-	return true, atomicWrite(path, []byte(strings.Join(lines, "\n")))
+	return strings.Join(out, "\n")
 }
 
 // stripCodexBlocks removes the [model_providers.ollama_remote] and
@@ -477,7 +270,7 @@ func MigrateCodexWireAPI() (changed bool, err error) {
 func stripCodexBlocks(body string) string {
 	headers := []string{
 		"[model_providers." + codexProviderName + "]",
-		"[profiles." + codexProfileName + "]",
+		"[profiles." + codexProviderName + "]",
 	}
 	out := body
 	for _, h := range headers {
@@ -604,23 +397,8 @@ func ApplyOpenCode(s Settings, makeDefault bool) (string, error) {
 	return configPath, atomicWrite(configPath, out)
 }
 
-// CodexConfigured reports whether ~/.codex/config.toml has the
-// [model_providers.ollama_remote] block we manage. The Ollama screen
-// uses this to pre-check the codex checkbox when reopened.
-func CodexConfigured() bool {
-	path, err := CodexConfigPath()
-	if err != nil {
-		return false
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return false
-	}
-	return strings.Contains(string(raw), "[model_providers."+codexProviderName+"]")
-}
-
 // OpenCodeConfigured reports whether opencode.json has our ollama_remote
-// provider entry. Same purpose as CodexConfigured.
+// provider entry.
 func OpenCodeConfigured() bool {
 	path, err := OpenCodeConfigPath()
 	if err != nil {

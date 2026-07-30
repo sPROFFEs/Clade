@@ -176,6 +176,10 @@ func (a *App) initializeUnlockedStore(ctx context.Context, st *store.Store) erro
 	if err := migrateLegacyLocalLLMAPIKey(c, launcherCfg); err != nil {
 		return err
 	}
+	// Codex local routing is no longer supported. Remove only the
+	// ollama_remote blocks previously owned by PrAImate; unrelated Codex
+	// configuration is preserved by DisableCodex.
+	_, _ = ollama.DisableCodex()
 	core.RegisterAllCLIAdapters()
 	// From here on, every backup commit snapshots the DB + shareable
 	// config, and every pull/merge/reset row-merges the remote's
@@ -258,7 +262,7 @@ func (a *App) PickProjectFolder() (string, error) {
 // context file (CLAUDE.md / AGENTS.md) so the CLI adopts the persona,
 // without us reimplementing its loop. Returns the terminal session id;
 // output streams over "term:data:<id>" events.
-func (a *App) StartTerminal(agentID, cli, model, cwd, localEndpoint, localAPIKey, localModel string, resume bool) (string, error) {
+func (a *App) StartTerminal(agentID, cli, model, cwd, localEndpoint, _ string, localModel string, resume bool) (string, error) {
 	c, err := a.requireCore()
 	if err != nil {
 		return "", err
@@ -271,12 +275,15 @@ func (a *App) StartTerminal(agentID, cli, model, cwd, localEndpoint, localAPIKey
 	var env []string
 	if strings.TrimSpace(localEndpoint) != "" {
 		if !terminalLocalRoutable(cli) {
-			return "", fmt.Errorf("%s can't be routed to a local endpoint from a terminal — start a Chat with this CLI instead (it supports local LLMs fully)", cli)
+			return "", fmt.Errorf("%s local-LLM routing is not supported by PrAImate", cli)
 		}
 		if localModel != "" {
 			model = localModel
 		}
-		env = terminalLocalEnv(cli, localEndpoint, localAPIKey, localModel)
+	}
+	env, err = a.terminalRoutingEnv(cli, model, localEndpoint, localModel)
+	if err != nil {
+		return "", err
 	}
 	name, args, err := terminalCommand(cli, model)
 	if err != nil {
@@ -312,6 +319,34 @@ func (a *App) StartTerminal(agentID, cli, model, cwd, localEndpoint, localAPIKey
 		env = appendEnvMap(env, mcpEnv)
 	}
 	return a.terms.start(a.ctx, name, args, cwd, env)
+}
+
+func (a *App) terminalRoutingEnv(cli, model, localEndpoint, localModel string) ([]string, error) {
+	if strings.TrimSpace(localEndpoint) != "" {
+		apiKey, err := loadLocalLLMAPIKey(a.core)
+		if err != nil {
+			return nil, fmt.Errorf("load local LLM credential: %w", err)
+		}
+		return terminalLocalEnv(cli, localEndpoint, apiKey, localModel), nil
+	}
+	if cli != "opencode" && cli != "praimate-code" {
+		return nil, nil
+	}
+	managed, err := ollama.OpenCodeUsesManagedLocalRoute(model)
+	if err != nil {
+		return nil, fmt.Errorf("resolve OpenCode local route: %w", err)
+	}
+	if !managed {
+		return nil, nil
+	}
+	apiKey, err := loadLocalLLMAPIKey(a.core)
+	if err != nil {
+		return nil, fmt.Errorf("load local LLM credential: %w", err)
+	}
+	if apiKey == "" {
+		return nil, nil
+	}
+	return []string{"OPENAI_API_KEY=" + apiKey}, nil
 }
 
 // WriteTerminal forwards a base64-encoded chunk of keystrokes to the
@@ -424,7 +459,11 @@ func (a *App) ListChats() ([]core.Chat, error) {
 	if err != nil {
 		return nil, err
 	}
-	return c.ListChats(a.ctx, 200)
+	chats, err := c.ListChats(a.ctx, 200)
+	if err != nil {
+		return nil, err
+	}
+	return redactChatCredentials(chats), nil
 }
 
 // StartChat creates an interactive chat bound to an agent + CLI and
@@ -442,7 +481,7 @@ func (a *App) StartChat(agentID, cli, cwd string) (*core.Chat, error) {
 		return nil, err
 	}
 	a.applyDefaultSkills(chat.ID)
-	return chat, nil
+	return redactChatCredential(chat), nil
 }
 
 // SendChat sends one message into an interactive chat and returns the
@@ -647,7 +686,7 @@ func (a *App) StartCleanChat(cli, model, cwd string) (*core.Chat, error) {
 		return nil, err
 	}
 	a.applyDefaultSkills(chat.ID)
-	return chat, nil
+	return redactChatCredential(chat), nil
 }
 
 // --- Legacy workspace chats ------------------------------------------------
@@ -880,7 +919,7 @@ type RunResult struct {
 // RunWorkflow executes one agent workflow synchronously (the JS
 // promise resolves when the run completes); per-turn progress streams
 // via the "praimate:turn" event.
-func (a *App) RunWorkflow(agentID, workflowName, cli, model, cwd string, inputs map[string]string, localEndpoint, localAPIKey, localModel string) (*RunResult, error) {
+func (a *App) RunWorkflow(agentID, workflowName, cli, model, cwd string, inputs map[string]string, localEndpoint, _ string, localModel string) (*RunResult, error) {
 	c, err := a.requireCore()
 	if err != nil {
 		return nil, err
@@ -893,8 +932,11 @@ func (a *App) RunWorkflow(agentID, workflowName, cli, model, cwd string, inputs 
 	if cwd == "" {
 		return nil, fmt.Errorf("a working folder is required")
 	}
-	model, env := workflowModelAndEnv(cli, model, localEndpoint, localAPIKey, localModel)
-	settings := workflowChatSettings(model, localEndpoint, localAPIKey, localModel)
+	model, env, err := a.workflowModelAndEnv(cli, model, localEndpoint, localModel)
+	if err != nil {
+		return nil, err
+	}
+	settings := workflowChatSettings(model, localEndpoint, localModel)
 
 	res := c.RunWorkflow(a.ctx, core.RunOptions{
 		Agent:        agent,
@@ -936,7 +978,7 @@ func (a *App) RunWorkflow(agentID, workflowName, cli, model, cwd string, inputs 
 
 // RunAllWorkflows executes every workflow on the agent in declaration
 // order, sharing one resumable CLI session across the sequence.
-func (a *App) RunAllWorkflows(agentID, cli, model, cwd string, inputsByWorkflow map[string]map[string]string, localEndpoint, localAPIKey, localModel string) (*RunResult, error) {
+func (a *App) RunAllWorkflows(agentID, cli, model, cwd string, inputsByWorkflow map[string]map[string]string, localEndpoint, _ string, localModel string) (*RunResult, error) {
 	c, err := a.requireCore()
 	if err != nil {
 		return nil, err
@@ -949,8 +991,11 @@ func (a *App) RunAllWorkflows(agentID, cli, model, cwd string, inputsByWorkflow 
 	if cwd == "" {
 		return nil, fmt.Errorf("a working folder is required")
 	}
-	model, env := workflowModelAndEnv(cli, model, localEndpoint, localAPIKey, localModel)
-	settings := workflowChatSettings(model, localEndpoint, localAPIKey, localModel)
+	model, env, err := a.workflowModelAndEnv(cli, model, localEndpoint, localModel)
+	if err != nil {
+		return nil, err
+	}
+	settings := workflowChatSettings(model, localEndpoint, localModel)
 
 	res := c.RunAllWorkflows(a.ctx, core.RunAllOptions{
 		Agent:            agent,
@@ -988,28 +1033,47 @@ func (a *App) RunAllWorkflows(agentID, cli, model, cwd string, inputsByWorkflow 
 	return out, nil
 }
 
-func workflowChatSettings(model, localEndpoint, localAPIKey, localModel string) core.ChatSettings {
+func workflowChatSettings(model, localEndpoint, localModel string) core.ChatSettings {
 	settings := core.ChatSettings{Surface: "workflow", Tools: "full", Model: model}
 	if strings.TrimSpace(localEndpoint) != "" {
-		settings.Local = &core.ChatLocalEndpoint{Endpoint: localEndpoint, APIKey: localAPIKey, Model: localModel}
+		settings.Local = &core.ChatLocalEndpoint{Endpoint: localEndpoint, Model: localModel}
 	}
 	return settings
 }
 
-func workflowModelAndEnv(cli, model, localEndpoint, localAPIKey, localModel string) (string, map[string]string) {
+func (a *App) workflowModelAndEnv(cli, model, localEndpoint, localModel string) (string, map[string]string, error) {
 	model = strings.TrimSpace(model)
-	if strings.TrimSpace(localEndpoint) == "" || (cli != "claude" && cli != "openclaude") {
-		return model, nil
+	if strings.TrimSpace(localEndpoint) != "" && (cli == "claude" || cli == "openclaude") {
+		localModel = strings.TrimSpace(localModel)
+		if model == "" {
+			model = localModel
+		}
+		apiKey, err := loadLocalLLMAPIKey(a.core)
+		if err != nil {
+			return "", nil, fmt.Errorf("load local LLM credential: %w", err)
+		}
+		return model, ollama.ClaudeEnv(ollama.Settings{
+			Endpoint: localEndpoint,
+			APIKey:   apiKey,
+			Model:    localModel,
+		}), nil
 	}
-	localModel = strings.TrimSpace(localModel)
-	if model == "" {
-		model = localModel
+	if cli == "opencode" || cli == "praimate-code" {
+		managed, err := ollama.OpenCodeUsesManagedLocalRoute(model)
+		if err != nil {
+			return "", nil, fmt.Errorf("resolve OpenCode local route: %w", err)
+		}
+		if managed {
+			apiKey, err := loadLocalLLMAPIKey(a.core)
+			if err != nil {
+				return "", nil, fmt.Errorf("load local LLM credential: %w", err)
+			}
+			if apiKey != "" {
+				return model, map[string]string{"OPENAI_API_KEY": apiKey}, nil
+			}
+		}
 	}
-	return model, ollama.ClaudeEnv(ollama.Settings{
-		Endpoint: localEndpoint,
-		APIKey:   localAPIKey,
-		Model:    localModel,
-	})
+	return model, nil, nil
 }
 
 func guiRunResult(res *core.RunResult) *RunResult {

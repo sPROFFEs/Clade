@@ -75,7 +75,7 @@
   //       cliOptions: [{id,label,available}], suggestions, folder, busy}
   let dlg = null
   let allClis = []
-  let localOpt = null // { configured, endpoint, apiKey, models[], error }
+  let localOpt = null // { configured, endpoint, hasApiKey, models[], error }
   // Terminals route a local endpoint by env (claude/openclaude/opencode/
   // praimate-code); chat + studio route per-chat, honoured for claude/
   // openclaude only (others read the global Local LLM config).
@@ -166,10 +166,10 @@
     const model = dlg.model.trim()
     const local = dlg.useLocal && localOpt?.configured
     const lEnd = local ? localOpt.endpoint : ''
-    const lKey = local ? localOpt.apiKey : ''
+    const lKey = ''
     const lModel = local ? dlg.localModel.trim() : ''
     if (local && surface === 'terminal' && !LOCAL_ROUTABLE_TERMINAL.includes(cli)) {
-      error = `${cli} can't route to a local endpoint from a terminal — use the Chat or Studio surface instead.`
+      error = `${cli} local-LLM routing is not supported on this surface.`
       dlg.busy = false
       return
     }

@@ -83,7 +83,7 @@ func (a *App) StartAgentHelperChat(cli, model, cwd, targetAgentID string) (*core
 	if err != nil {
 		return nil, err
 	}
-	return chat, nil
+	return redactChatCredential(chat), nil
 }
 
 // WriteAgentYAMLDraftToDisk mirrors the editor's current (possibly not yet

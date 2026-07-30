@@ -40,11 +40,11 @@
 
   // Local LLM (Settings → Local LLM). useLocal routes the session at the
   // configured endpoint; localModel picks from its live model list.
-  let localOpt = null // { configured, endpoint, apiKey, models[], error }
+  let localOpt = null // { configured, endpoint, hasApiKey, models[], error }
   let useLocal = false
   let localModel = ''
   // CLIs a terminal can route to a local endpoint by env (matches the
-  // Go terminalLocalRoutable). codex/gemini need a Chat instead.
+  // Go terminalLocalRoutable). Codex/Gemini local routing is unsupported.
   const LOCAL_ROUTABLE = ['claude', 'openclaude', 'opencode', 'praimate-code']
   $: localRoutable = LOCAL_ROUTABLE.includes(cli)
 
@@ -175,7 +175,7 @@
     if (!cli) { error = 'Pick a CLI first.'; return }
     const local = useLocal && localOpt?.configured
     if (local && !localRoutable) {
-      error = `${cli} can't route to a local endpoint from a terminal — start a Chat with this CLI instead.`
+      error = `${cli} local-LLM routing is not supported by PrAImate.`
       return
     }
     error = ''
@@ -188,7 +188,7 @@
         local ? '' : (modelSupported ? model.trim() : ''),
         cwd,
         local ? localOpt.endpoint : '',
-        local ? localOpt.apiKey : '',
+        '',
         local ? localModel.trim() : '',
       )
     } catch (e) {
@@ -204,7 +204,7 @@
         local ? '' : (modelSupported ? model.trim() : ''),
         cwd,
         local ? localOpt.endpoint : '',
-        local ? localOpt.apiKey : '',
+        '',
         local ? localModel.trim() : '',
       )
       sessionChatId = chatId || ''
@@ -450,7 +450,7 @@
           <span>Use the local LLM from Settings <span class="card-sub mono">{localOpt.endpoint}</span></span>
         </label>
         {#if useLocal && !localRoutable}
-          <div class="card-sub" style="color: var(--warn)">{cli} can't be routed to a local endpoint from a terminal — start a Chat with this CLI instead (Chats support local LLMs for every CLI).</div>
+          <div class="card-sub" style="color: var(--warn)">{cli} local-LLM routing is not supported by PrAImate.</div>
         {/if}
       {/if}
 

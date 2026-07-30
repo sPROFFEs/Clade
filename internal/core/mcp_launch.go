@@ -164,7 +164,7 @@ func writeClaudeMCPConfig(cwd string, servers []MCPServer, env map[string]string
 				entry["headers"] = headers
 			}
 			if s.Auth["type"] == string(MCPAuthOAuth) {
-				entry["oauth"] = oauthConfig(s)
+				entry["oauth"] = oauthConfig(s, env, "${%s}")
 			}
 		}
 		dst[s.ID] = entry
@@ -279,7 +279,7 @@ func writeOpenCodeMCPConfig(cwd string, servers []MCPServer, env map[string]stri
 				}
 			}
 			if s.Auth["type"] == string(MCPAuthOAuth) {
-				entry["oauth"] = oauthConfig(s)
+				entry["oauth"] = oauthConfig(s, env, "{env:%s}")
 			}
 		}
 		mcp[s.ID] = entry
@@ -370,7 +370,7 @@ func headerAndToken(s MCPServer) (string, string, bool) {
 	return header, token, true
 }
 
-func oauthConfig(s MCPServer) map[string]any {
+func oauthConfig(s MCPServer, launchEnv map[string]string, secretPattern string) map[string]any {
 	out := map[string]any{}
 	if s.Auth["issuer"] != "" {
 		out["issuer"] = s.Auth["issuer"]
@@ -383,7 +383,9 @@ func oauthConfig(s MCPServer) map[string]any {
 		out["clientId"] = s.Auth["client_id"]
 	}
 	if s.Auth["client_secret"] != "" {
-		out["clientSecret"] = s.Auth["client_secret"]
+		envName := mcpSecretEnvName(s.ID, "oauth_client_secret")
+		launchEnv[envName] = s.Auth["client_secret"]
+		out["clientSecret"] = fmt.Sprintf(secretPattern, envName)
 	}
 	return out
 }

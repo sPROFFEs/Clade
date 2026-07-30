@@ -28,6 +28,22 @@ func TestRAGContextHasNoDeadlineAndCancelsWithApp(t *testing.T) {
 	}
 }
 
+func TestOpenAIBaseURLRepairsMissingSchemeSlashes(t *testing.T) {
+	tests := map[string]string{
+		"http:192.168.1.50:11434":              "http://192.168.1.50:11434/v1",
+		"https:llm.example":                    "https://llm.example/v1",
+		"192.168.1.50:11434":                   "http://192.168.1.50:11434/v1",
+		"https://llm.example/openai/v1":        "https://llm.example/openai/v1",
+		"https://llm.example/openai/v1/":       "https://llm.example/openai/v1",
+		"  https://llm.example/openai/v1///  ": "https://llm.example/openai/v1",
+	}
+	for input, want := range tests {
+		if got := openAIBaseURL(input); got != want {
+			t.Errorf("openAIBaseURL(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
 func TestAgentRAGCanBeCancelled(t *testing.T) {
 	a := NewApp()
 	a.ctx = context.Background()

@@ -313,15 +313,8 @@ func Plan(ws Workspace, agent Agent) (LaunchPlan, error) {
 			}
 		}
 	case AgentCodex:
-		if ollamaConfigured && o.HasAgent(AgentCodex) {
-			// The Ollama screen wrote [profiles.ollama_remote] into
-			// ~/.codex/config.toml with env_key = "OPENAI_API_KEY".
-			// Inject that env so codex's lookup succeeds without the
-			// user having to export it in their shell. Falls back to
-			// the "ollama" placeholder when no real key is set.
-			plan.Env = map[string]string{"OPENAI_API_KEY": authToken}
-			plan.Args = []string{"-p", "ollama_remote"}
-		}
+		// PrAImate intentionally leaves Codex provider selection and
+		// authentication untouched.
 	case AgentOpenCode:
 		if ollamaConfigured && o.HasAgent(AgentOpenCode) {
 			// OpenCode picks up routing from opencode.json. The provider's

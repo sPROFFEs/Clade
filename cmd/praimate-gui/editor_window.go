@@ -314,7 +314,7 @@ func (a *App) startEditorWatcher() {
 // spawns the studio window as a second process of this binary. model,
 // when non-empty, pins the chat's model. Returns the chat id backing
 // the studio's chat pane.
-func (a *App) OpenEditorWindow(folder, agentID, cli, model, chatID, localEndpoint, localAPIKey, localModel string) (string, error) {
+func (a *App) OpenEditorWindow(folder, agentID, cli, model, chatID, localEndpoint, _ string, localModel string) (string, error) {
 	c, err := a.requireCore()
 	if err != nil {
 		return "", err
@@ -359,7 +359,7 @@ func (a *App) OpenEditorWindow(folder, agentID, cli, model, chatID, localEndpoin
 			s.Tools = "edits"
 			s.Surface = "studio"
 			if localEndpoint != "" {
-				s.Local = &core.ChatLocalEndpoint{Endpoint: localEndpoint, APIKey: localAPIKey, Model: localModel}
+				s.Local = &core.ChatLocalEndpoint{Endpoint: localEndpoint, Model: localModel}
 			} else if model != "" {
 				s.Model = model
 			}

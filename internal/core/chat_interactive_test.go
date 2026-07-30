@@ -172,6 +172,33 @@ func TestContinueChat_PrAImateCodeInjectsEncryptedLocalLLMKey(t *testing.T) {
 	}
 }
 
+func TestContinueChat_ClaudeResolvesLocalKeyFromEncryptedSetting(t *testing.T) {
+	mock := &mockAdapter{name: "claude", replies: []string{"connected"}}
+	withMockAdapter(t, mock)
+
+	c, _ := New(Options{Store: openTempStore(t)})
+	ctx := context.Background()
+	if err := c.SetSetting(ctx, ScopeCLI, "local_llm.api_key", []byte(`"db-secret"`)); err != nil {
+		t.Fatal(err)
+	}
+	chat, err := c.CreateChat(ctx, CreateChatRequest{
+		Title:    "local",
+		CLIAgent: "claude",
+		Settings: ChatSettings{Local: &ChatLocalEndpoint{
+			Endpoint: "https://llm.example", Model: "qwen3",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.ContinueChat(ctx, chat.ID, "hello", t.TempDir(), ""); err != nil {
+		t.Fatal(err)
+	}
+	if got := mock.shots[0].Env["ANTHROPIC_AUTH_TOKEN"]; got != "db-secret" {
+		t.Fatalf("ANTHROPIC_AUTH_TOKEN = %q, want encrypted DB credential", got)
+	}
+}
+
 // UpdateChatConfig is the GUI's per-chat settings sheet: switching the
 // CLI clears the session id (sessions belong to their CLI), and model +
 // tools persist into the settings JSON.

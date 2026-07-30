@@ -160,8 +160,10 @@ PrAImate can configure:
 
 - Claude/OpenClaude through per-launch environment variables;
 - OpenCode/PrAImate Code through their provider configuration plus
-  environment-based secrets;
-- Codex through an `ollama_remote` profile after probing `/v1/responses`.
+  environment-based secrets.
+
+PrAImate does not modify Codex provider configuration. Codex uses whatever
+provider and authentication the user configured directly in Codex.
 
 If an endpoint uses `http://`, the GUI warns that the underlying CLI will send
 model traffic over unencrypted HTTP. PrAImate cannot add HTTPS to a server that

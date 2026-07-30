@@ -78,7 +78,7 @@ func (a *App) SetChatMCPServers(chatID string, ids []string) error {
 // UpdateChatConfig reconfigures an existing chat (CLI / model / tools /
 // per-chat local endpoint). Switching CLI starts a fresh session on the next turn
 // (history stays). Empty localEndpoint clears the local route.
-func (a *App) UpdateChatConfig(chatID, cli, model, tools, localEndpoint, localAPIKey, localModel string) error {
+func (a *App) UpdateChatConfig(chatID, cli, model, tools, localEndpoint, _ string, localModel string) error {
 	switch tools {
 	case "", "ask", "edits", "plan", "full":
 	default:
@@ -96,7 +96,7 @@ func (a *App) UpdateChatConfig(chatID, cli, model, tools, localEndpoint, localAP
 			s.Local = nil
 			return
 		}
-		s.Local = &core.ChatLocalEndpoint{Endpoint: localEndpoint, APIKey: localAPIKey, Model: localModel}
+		s.Local = &core.ChatLocalEndpoint{Endpoint: localEndpoint, Model: localModel}
 	})
 }
 
@@ -106,7 +106,11 @@ func (a *App) SearchChats(query string) ([]core.Chat, error) {
 	if err != nil {
 		return nil, err
 	}
-	return c.SearchChats(a.ctx, query, 50)
+	chats, err := c.SearchChats(a.ctx, query, 50)
+	if err != nil {
+		return nil, err
+	}
+	return redactChatCredentials(chats), nil
 }
 
 // RunChatCommand executes a "!" composer command in the chat's working

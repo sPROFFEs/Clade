@@ -26,6 +26,7 @@ import (
 	"git.jtsec.local/lab/PrAImate/internal/core"
 	"git.jtsec.local/lab/PrAImate/internal/installer"
 	"git.jtsec.local/lab/PrAImate/internal/launcher"
+	"git.jtsec.local/lab/PrAImate/internal/ollama"
 )
 
 // RequirementsRunResult is the complete result of an explicitly requested
@@ -770,10 +771,7 @@ func lastLines(s string, n int) string {
 // servers such as GPUStack may expose compatibility under paths like
 // /v1-openai rather than /v1.
 func openAIBaseURL(endpoint string) string {
-	e := strings.TrimRight(strings.TrimSpace(endpoint), "/")
-	if !strings.HasPrefix(e, "http://") && !strings.HasPrefix(e, "https://") {
-		e = "http://" + e
-	}
+	e := strings.TrimRight(ollama.NormalizeEndpoint(endpoint), "/")
 
 	u, err := url.Parse(e)
 	if err != nil || u.Host == "" {

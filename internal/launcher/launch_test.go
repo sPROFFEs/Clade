@@ -140,14 +140,14 @@ func TestPlan_PerAgentGatingViaHasAgent(t *testing.T) {
 	loaded, _ := LoadChat(filepath.Dir(filepath.Dir(chat.Root)), chat.ID)
 	ws := loaded.AsWorkspace()
 
-	// Codex: should get the profile flag.
+	// Codex local routing is intentionally unsupported.
 	codex := Agent{ID: AgentCodex, Binary: "codex", WpcTarget: "codex", Available: true}
 	plan, err := Plan(ws, codex)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !equalStrings(plan.Args, []string{"-p", "ollama_remote"}) {
-		t.Errorf("codex Args = %v, want [-p ollama_remote]", plan.Args)
+	if len(plan.Args) != 0 || len(plan.Env) != 0 {
+		t.Errorf("codex local settings must not affect launch: %+v", plan)
 	}
 
 	// Claude: same chat, same Ollama block, but claude is NOT in
@@ -185,7 +185,7 @@ func TestOllamaSettings_HasAgentBackwardCompat(t *testing.T) {
 	}
 }
 
-func TestPlan_AppendsProfileArgForCodexWhenOllamaConfigured(t *testing.T) {
+func TestPlan_LeavesCodexProviderUntouchedWhenLocalEndpointConfigured(t *testing.T) {
 	chat := chatFromSeededReversing(t)
 	chat.Settings = WorkspaceSettings{
 		// Agents must include "codex" — Plan() gates per-agent
@@ -205,9 +205,8 @@ func TestPlan_AppendsProfileArgForCodexWhenOllamaConfigured(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"-p", "ollama_remote"}
-	if !equalStrings(plan.Args, want) {
-		t.Errorf("Args = %v, want %v", plan.Args, want)
+	if len(plan.Args) != 0 || len(plan.Env) != 0 {
+		t.Errorf("Codex local settings must not affect launch: %+v", plan)
 	}
 	// Codex routes via config.toml, not env — Plan should NOT inject ANTHROPIC_*.
 	if plan.Env["ANTHROPIC_BASE_URL"] != "" {

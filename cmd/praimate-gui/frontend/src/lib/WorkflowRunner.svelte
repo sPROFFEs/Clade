@@ -179,7 +179,7 @@
     return {
       model: local ? '' : runModel.trim(),
       endpoint: local ? runLocalOpt.endpoint : '',
-      apiKey: local ? runLocalOpt.apiKey : '',
+      apiKey: '',
       localModel: local ? runLocalModel.trim() : '',
     }
   }

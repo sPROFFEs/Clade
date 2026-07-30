@@ -35,6 +35,27 @@ func TestRun_RecordsExitCodeAndStderr(t *testing.T) {
 	}
 }
 
+func TestValidateRemoteURLRejectsEmbeddedHTTPCredentials(t *testing.T) {
+	for _, raw := range []string{
+		"https://user:token@example.test/repo.git",
+		"https://token@example.test/repo.git",
+		"http://user@example.test/repo.git",
+	} {
+		if err := ValidateRemoteURL(raw); err == nil {
+			t.Errorf("ValidateRemoteURL(%q) accepted plaintext userinfo", raw)
+		}
+	}
+	for _, raw := range []string{
+		"https://example.test/repo.git",
+		"ssh://git@example.test/repo.git",
+		"git@example.test:team/repo.git",
+	} {
+		if err := ValidateRemoteURL(raw); err != nil {
+			t.Errorf("ValidateRemoteURL(%q) = %v", raw, err)
+		}
+	}
+}
+
 func TestWriteManagedGitignore_FirstWrite(t *testing.T) {
 	dir := t.TempDir()
 	if err := WriteManagedGitignore(dir); err != nil {

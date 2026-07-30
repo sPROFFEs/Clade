@@ -69,7 +69,7 @@
   let starting = false
   // Local LLM (Settings → Local LLM) injected into a new chat. Chats
   // route local through the full launcher machinery, so every CLI works.
-  let localOpt = null // { configured, endpoint, apiKey, models[], error }
+  let localOpt = null // { configured, endpoint, hasApiKey, models[], error }
   let newUseLocal = false
   let newLocalModel = ''
   let mcpServers = []
@@ -285,7 +285,7 @@
       if (useLocalNow) {
         // Route the chat at the configured local endpoint — the launcher
         // applies the per-CLI env/config when the chat runs.
-        await api.updateChatConfig(chat.ID, newCli, '', tools, localOpt.endpoint, localOpt.apiKey, newLocalModel.trim())
+        await api.updateChatConfig(chat.ID, newCli, '', tools, localOpt.endpoint, '', newLocalModel.trim())
       } else if (tools) {
         await api.setChatTools(chat.ID, tools)
       }
@@ -580,11 +580,10 @@
       <label class="lbl" style="margin-top:10px">Local endpoint (optional — routes THIS chat through a self-hosted backend)</label>
       <div class="row">
         <input class="field grow mono" placeholder="http://localhost:11434 (blank = cloud)" bind:value={cfg.localEndpoint} />
-        <input class="field mono" style="max-width:180px" type="password" placeholder="API key" bind:value={cfg.localApiKey} />
         <input class="field mono" style="max-width:180px" placeholder="backend model" bind:value={cfg.localModel} />
       </div>
     {:else if cfg.localEndpoint}
-      <div class="card-sub" style="margin-top:8px">Per-chat local routing applies to claude/openclaude only — {cfg.cli} reads its global config (Local LLM tab).</div>
+      <div class="card-sub" style="margin-top:8px">Per-chat local routing applies to claude/openclaude only. OpenCode-compatible CLIs use the managed route from Local LLM settings; Codex is not modified.</div>
     {/if}
 
     <label class="lbl" style="margin-top:10px">Skills <span class="card-sub" style="font-weight:400">— prepended to the chat's system prompt. Designed per-CLI; mixing across CLIs may produce odd output.</span></label>
@@ -827,7 +826,7 @@
           <span>Use the local LLM from Settings <span class="card-sub mono">{localOpt.endpoint}</span></span>
         </label>
       {:else if localOpt?.configured}
-        <div class="card-sub" style="margin-top:10px">Local LLM routing in a chat applies to claude/openclaude — {newCli} uses its global config (Local LLM tab).</div>
+        <div class="card-sub" style="margin-top:10px">Per-chat local routing applies to claude/openclaude. OpenCode and PrAImate Code use the managed route from Local LLM settings; Codex is not modified.</div>
       {/if}
 
       {#if newUseLocal && localOpt?.configured && newLocalRoutable}

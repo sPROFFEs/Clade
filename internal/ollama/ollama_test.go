@@ -24,7 +24,7 @@ func TestNormalizeEndpoint(t *testing.T) {
 		// Without the fix, the value would later be prepended with
 		// another "http://" downstream, producing "http://http:host:port".
 		"http:192.168.1.42:11434":  "http://192.168.1.42:11434",
-		"https:example.com":        "http://example.com",
+		"https:example.com":        "https://example.com",
 		"HTTP:192.168.1.10:11434":  "http://192.168.1.10:11434",
 		"http:/lonely.slash:11434": "http://lonely.slash:11434",
 	}
@@ -138,118 +138,6 @@ func TestListModels_SendsBearerWhenKeySet(t *testing.T) {
 
 // TestApplyOpenCode_ReferencesAPIKeyEnvironment: the plaintext config
 // contains only an environment reference, never the credential itself.
-// TestProbeCodexCompat_PassesWhenServerImplementsResponses: 2xx from
-// /v1/responses → probe passes, no error, no warning.
-func TestProbeCodexCompat_PassesWhenServerImplementsResponses(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/v1/responses" {
-			w.WriteHeader(200)
-			_, _ = w.Write([]byte(`{"id":"resp_x","output":[{"type":"output_text","text":"ok"}]}`))
-			return
-		}
-		http.NotFound(w, r)
-	}))
-	defer srv.Close()
-	warn, err := ProbeCodexCompat(context.Background(), srv.URL, "", "any")
-	if err != nil || warn != "" {
-		t.Errorf("expected (nil, \"\") on 2xx; got (%q, %v)", warn, err)
-	}
-}
-
-// TestProbeCodexCompat_AuthFailureCountsAsRouteExists: 401/403 means
-// the path matched, only auth's missing. Real codex launch will pass
-// the right key via env_key, so treat as success for compat detection.
-func TestProbeCodexCompat_AuthFailureCountsAsRouteExists(t *testing.T) {
-	for _, code := range []int{401, 403} {
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(code)
-		}))
-		warn, err := ProbeCodexCompat(context.Background(), srv.URL, "", "any")
-		if err != nil || warn != "" {
-			t.Errorf("%d should count as clean pass; got warn=%q err=%v", code, warn, err)
-		}
-		srv.Close()
-	}
-}
-
-// TestProbeCodexCompat_502_503_504_PassWithWarning: GPUStack's API
-// gateway routes /v1/responses fine but its internal worker can be
-// unreachable → 503 with a body explaining the upstream failure. The
-// route IS implemented, so the probe should NOT refuse the apply.
-// Pass with a warning so the user sees the backend health issue.
-func TestProbeCodexCompat_502_503_504_PassWithWarning(t *testing.T) {
-	for _, code := range []int{502, 503, 504} {
-		body := `{"error":{"message":"Cannot connect to host 192.168.155.150:40047 ssl:default [Connect call failed]"}}`
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(code)
-			_, _ = w.Write([]byte(body))
-		}))
-		warn, err := ProbeCodexCompat(context.Background(), srv.URL, "", "any")
-		if err != nil {
-			t.Errorf("%d should pass (route exists, upstream unhealthy); got err=%v", code, err)
-		}
-		if warn == "" {
-			t.Errorf("%d should produce a warning so user sees the upstream issue", code)
-		}
-		for _, want := range []string{"speaks /v1/responses", "upstream"} {
-			if !strings.Contains(warn, want) {
-				t.Errorf("%d warning should mention %q; got: %s", code, want, warn)
-			}
-		}
-		srv.Close()
-	}
-}
-
-// TestProbeCodexCompat_404IsRefused: server only implements
-// /v1/chat/completions, /v1/responses returns 404. Error must be
-// user-facing and mention LiteLLM as the workaround.
-func TestProbeCodexCompat_404IsRefused(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.NotFound(w, r)
-	}))
-	defer srv.Close()
-	_, err := ProbeCodexCompat(context.Background(), srv.URL, "", "any")
-	if err == nil {
-		t.Fatal("404 should produce an error")
-	}
-	for _, want := range []string{"/v1/responses", "0.130", "LiteLLM"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error should mention %q for the user; got: %v", want, err)
-		}
-	}
-}
-
-// TestProbeCodexCompat_400ChatCompletionsHintIsRecognised: some
-// chat-completions-only servers (LocalAI etc.) return 400 with a
-// hint about /v1/chat/completions instead of 404. Catch that shape.
-func TestProbeCodexCompat_400ChatCompletionsHintIsRecognised(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(400)
-		_, _ = w.Write([]byte(`{"error":"unknown endpoint, try /v1/chat/completions"}`))
-	}))
-	defer srv.Close()
-	_, err := ProbeCodexCompat(context.Background(), srv.URL, "", "any")
-	if err == nil {
-		t.Fatal("400 + chat/completions hint should produce an error")
-	}
-	if !strings.Contains(err.Error(), "chat/completions") {
-		t.Errorf("error should explain it's a chat/completions-only server; got: %v", err)
-	}
-}
-
-// TestProbeCodexCompat_UnreachableEndpointReportsClearly: network
-// error → user-readable message naming the endpoint.
-func TestProbeCodexCompat_UnreachableEndpointReportsClearly(t *testing.T) {
-	// 127.0.0.1:1 is reliably refused on every OS we ship to.
-	_, err := ProbeCodexCompat(context.Background(), "http://127.0.0.1:1", "", "any")
-	if err == nil {
-		t.Fatal("unreachable endpoint should error")
-	}
-	if !strings.Contains(err.Error(), "127.0.0.1:1") {
-		t.Errorf("error should name the endpoint; got: %v", err)
-	}
-}
-
 func TestApplyOpenCode_ReferencesAPIKeyEnvironment(t *testing.T) {
 	tmp := t.TempDir()
 	redirectHome(t, tmp)
@@ -367,157 +255,44 @@ func redirectHome(t *testing.T, dir string) {
 	}
 }
 
-func TestApplyCodex_RoundTripAndIdempotent(t *testing.T) {
-	tmp := t.TempDir()
-	redirectHome(t, tmp)
-	t.Setenv("XDG_CONFIG_HOME", tmp) // belt and braces
-
-	path, err := ApplyCodex(Settings{Endpoint: "192.168.1.10:11434", Model: "qwen3"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw, _ := os.ReadFile(path)
-	body := string(raw)
-	for _, want := range []string{
-		"[model_providers.ollama_remote]",
-		`base_url = "http://192.168.1.10:11434/v1"`,
-		"[profiles.ollama_remote]",
-		`model = "qwen3"`,
-		`wire_api = "responses"`,
-	} {
-		if !strings.Contains(body, want) {
-			t.Errorf("config missing %q\n%s", want, body)
-		}
-	}
-
-	// Apply again — should be idempotent, not duplicate blocks.
-	if _, err := ApplyCodex(Settings{Endpoint: "192.168.1.10:11434", Model: "qwen3"}); err != nil {
-		t.Fatal(err)
-	}
-	raw2, _ := os.ReadFile(path)
-	if strings.Count(string(raw2), "[model_providers.ollama_remote]") != 1 {
-		t.Errorf("expected exactly 1 model_providers block after re-apply, got\n%s", raw2)
-	}
-}
-
-func TestApplyCodex_WritesContextTokenLimit(t *testing.T) {
-	tmp := t.TempDir()
-	redirectHome(t, tmp)
-
-	path, err := ApplyCodex(Settings{
-		Endpoint:      "192.168.1.10:11434",
-		Model:         "qwen3",
-		ContextTokens: 4096,
-		OutputTokens:  1024,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw, _ := os.ReadFile(path)
-	body := string(raw)
-	if !strings.Contains(body, `model_context_window = 4096`) {
-		t.Errorf("config missing model_context_window\n%s", body)
-	}
-	if strings.Contains(body, `model_max_output_tokens`) {
-		t.Errorf("Codex no longer exposes model_max_output_tokens; should not write it\n%s", body)
-	}
-}
-
-func TestApplyCodex_PreservesUnrelatedConfig(t *testing.T) {
-	tmp := t.TempDir()
-	redirectHome(t, tmp)
-	codexDir := filepath.Join(tmp, ".codex")
-	_ = os.MkdirAll(codexDir, 0o755)
-	preexisting := "default_profile = \"my_profile\"\n\n[profiles.my_profile]\nmodel = \"gpt-5\"\nmodel_provider = \"openai\"\n"
-	if err := os.WriteFile(filepath.Join(codexDir, "config.toml"), []byte(preexisting), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := ApplyCodex(Settings{Endpoint: "10.0.0.1:11434", Model: "phi3"}); err != nil {
-		t.Fatal(err)
-	}
-	raw, _ := os.ReadFile(filepath.Join(codexDir, "config.toml"))
-	if !strings.Contains(string(raw), "[profiles.my_profile]") {
-		t.Errorf("preexisting profile lost:\n%s", raw)
-	}
-	if !strings.Contains(string(raw), "[profiles.ollama_remote]") {
-		t.Errorf("new profile not added:\n%s", raw)
-	}
-}
-
-func TestMigrateCodexWireAPI_RewritesChatToResponses(t *testing.T) {
-	tmp := t.TempDir()
-	redirectHome(t, tmp)
-	// Pre-existing config.toml with our managed block using the old "chat".
-	pre := `model_provider = "ollama_remote"
-model = "qwen3"
-
-[model_providers.ollama_remote]
-name = "Ollama Remote"
-base_url = "http://x/v1"
-env_key = "OPENAI_API_KEY"
-wire_api = "chat"
-
-[profiles.ollama_remote]
-model_provider = "ollama_remote"
-model = "qwen3"
-
-[other_provider]
-wire_api = "chat"
-`
-	codexDir := filepath.Join(tmp, ".codex")
-	_ = os.MkdirAll(codexDir, 0o755)
-	if err := os.WriteFile(filepath.Join(codexDir, "config.toml"), []byte(pre), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	changed, err := MigrateCodexWireAPI()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !changed {
-		t.Error("expected changed=true")
-	}
-	raw, _ := os.ReadFile(filepath.Join(codexDir, "config.toml"))
-	body := string(raw)
-	// Our block was rewritten.
-	if !strings.Contains(body, `wire_api = "responses"`) {
-		t.Errorf("ollama_remote wire_api not rewritten:\n%s", body)
-	}
-	// The OTHER provider's wire_api was NOT touched (we only own ollama_remote).
-	if !strings.Contains(body, "[other_provider]\nwire_api = \"chat\"") {
-		t.Errorf("other_provider wire_api was incorrectly touched:\n%s", body)
-	}
-
-	// Idempotent.
-	changed, err = MigrateCodexWireAPI()
-	if err != nil || changed {
-		t.Errorf("idempotent re-run: changed=%v err=%v", changed, err)
-	}
-}
-
-func TestMigrateCodexWireAPI_NoopWhenAbsent(t *testing.T) {
-	tmp := t.TempDir()
-	redirectHome(t, tmp)
-	changed, err := MigrateCodexWireAPI()
-	if err != nil || changed {
-		t.Errorf("no-file: changed=%v err=%v", changed, err)
-	}
-}
-
 func TestDisableCodex_RemovesBlocks(t *testing.T) {
 	tmp := t.TempDir()
 	redirectHome(t, tmp)
-	if _, err := ApplyCodex(Settings{Endpoint: "x:1", Model: "m"}); err != nil {
+	path, _ := CodexConfigPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `model_provider = "ollama_remote"
+model = "qwen3"
+approval_policy = "on-request"
+
+[model_providers.ollama_remote]
+base_url = "http://x/v1"
+
+[profiles.ollama_remote]
+model_provider = "ollama_remote"
+
+[profiles.keep]
+model = "gpt-5"
+`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := DisableCodex(); err != nil {
 		t.Fatal(err)
 	}
-	path, _ := CodexConfigPath()
 	raw, _ := os.ReadFile(path)
 	if strings.Contains(string(raw), "ollama_remote") {
 		t.Errorf("disable left ollama_remote:\n%s", raw)
+	}
+	if strings.Contains(string(raw), `model = "qwen3"`) {
+		t.Errorf("disable left managed top-level model:\n%s", raw)
+	}
+	if !strings.Contains(string(raw), `approval_policy = "on-request"`) {
+		t.Errorf("disable removed unrelated top-level config:\n%s", raw)
+	}
+	if !strings.Contains(string(raw), "[profiles.keep]") {
+		t.Errorf("disable removed unrelated config:\n%s", raw)
 	}
 }
 
@@ -578,26 +353,6 @@ func TestApplyOpenCode_PreservesOtherProviders(t *testing.T) {
 	// makeDefault=false → existing model untouched.
 	if cfg["model"] != "openai/gpt-5" {
 		t.Errorf("model overwritten: %v", cfg["model"])
-	}
-}
-
-func TestCodexConfigured_ReflectsDiskState(t *testing.T) {
-	tmp := t.TempDir()
-	redirectHome(t, tmp)
-	if CodexConfigured() {
-		t.Fatal("fresh dir: CodexConfigured should be false")
-	}
-	if _, err := ApplyCodex(Settings{Endpoint: "x:1", Model: "m"}); err != nil {
-		t.Fatal(err)
-	}
-	if !CodexConfigured() {
-		t.Error("after ApplyCodex: CodexConfigured should be true")
-	}
-	if _, err := DisableCodex(); err != nil {
-		t.Fatal(err)
-	}
-	if CodexConfigured() {
-		t.Error("after DisableCodex: CodexConfigured should be false")
 	}
 }
 

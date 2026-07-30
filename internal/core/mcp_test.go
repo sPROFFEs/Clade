@@ -272,6 +272,53 @@ func TestPrepareMCPForRun_WritesCodexAndOpenCodeConfigs(t *testing.T) {
 	}
 }
 
+func TestPrepareMCPForRun_OAuthClientSecretStaysInLaunchEnv(t *testing.T) {
+	s := openTempStore(t)
+	defer s.Close()
+	c, _ := New(Options{Store: s})
+	ctx := context.Background()
+	_, err := c.ConnectMCP(ctx, ConnectMCPRequest{
+		ID:        "oauth-remote",
+		Name:      "OAuth Remote",
+		Transport: MCPTransportHTTP,
+		URL:       "https://mcp.example.test/mcp",
+		Auth: map[string]string{
+			"type": "oauth", "client_id": "public-client",
+			"client_secret": "private-client-secret",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &Agent{ID: "a", Name: "A", Instructions: "x", MCPServers: []string{"oauth-remote"}}
+
+	for _, cli := range []string{"claude", "opencode"} {
+		dir := t.TempDir()
+		env, err := c.prepareMCPForRun(ctx, a, cli, dir)
+		if err != nil {
+			t.Fatalf("%s prepare: %v", cli, err)
+		}
+		const envName = "PRAIMATE_MCP_OAUTH_REMOTE_OAUTH_CLIENT_SECRET"
+		if env[envName] != "private-client-secret" {
+			t.Fatalf("%s OAuth secret env = %q", cli, env[envName])
+		}
+		path := filepath.Join(dir, ".mcp.json")
+		if cli == "opencode" {
+			path = filepath.Join(dir, "opencode.json")
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(raw), "private-client-secret") {
+			t.Fatalf("%s config leaked OAuth client secret:\n%s", cli, raw)
+		}
+		if !strings.Contains(string(raw), envName) {
+			t.Fatalf("%s config does not reference OAuth secret env:\n%s", cli, raw)
+		}
+	}
+}
+
 func TestPrepareMCPForRun_MissingDeclaredServerErrors(t *testing.T) {
 	s := openTempStore(t)
 	defer s.Close()

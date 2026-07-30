@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"git.jtsec.local/lab/PrAImate/internal/core"
@@ -19,7 +20,9 @@ const localLLMAPIKeySetting = "local_llm.api_key"
 // LocalLLMDefaults mirrors launcher.Config's DefaultLocal* slice.
 type LocalLLMDefaults struct {
 	Endpoint      string `json:"endpoint"`
-	APIKey        string `json:"apiKey"`
+	APIKey        string `json:"apiKey,omitempty"`
+	HasAPIKey     bool   `json:"hasApiKey"`
+	RemoveAPIKey  bool   `json:"removeApiKey,omitempty"`
 	WireAPI       string `json:"wireApi"` // "", "responses", "chat"
 	ContextTokens int    `json:"contextTokens"`
 	OutputTokens  int    `json:"outputTokens"`
@@ -48,7 +51,7 @@ func (a *App) GetLocalLLM() (*LocalLLMDefaults, error) {
 	}
 	return &LocalLLMDefaults{
 		Endpoint:      cfg.DefaultLocalEndpoint,
-		APIKey:        apiKey,
+		HasAPIKey:     apiKey != "",
 		WireAPI:       cfg.DefaultLocalWireAPI,
 		ContextTokens: cfg.DefaultLocalContextTokens,
 		OutputTokens:  cfg.DefaultLocalOutputTokens,
@@ -74,8 +77,15 @@ func (a *App) SetLocalLLM(d LocalLLMDefaults) error {
 	cfg.DefaultLocalWireAPI = d.WireAPI
 	cfg.DefaultLocalContextTokens = d.ContextTokens
 	cfg.DefaultLocalOutputTokens = d.OutputTokens
-	if err := saveLocalLLMAPIKey(c, d.APIKey); err != nil {
-		return err
+	switch {
+	case d.RemoveAPIKey:
+		if err := saveLocalLLMAPIKey(c, ""); err != nil {
+			return err
+		}
+	case d.APIKey != "":
+		if err := saveLocalLLMAPIKey(c, d.APIKey); err != nil {
+			return err
+		}
 	}
 	return launcher.SaveConfig(cfg)
 }
@@ -106,6 +116,25 @@ func saveLocalLLMAPIKey(c *core.Core, key string) error {
 	return c.SetSetting(context.Background(), core.ScopeCLI, localLLMAPIKeySetting, raw)
 }
 
+// redactChatCredential keeps DB-backed local credentials out of Wails JSON.
+// Launch paths resolve the saved key inside Go immediately before spawning a
+// child process.
+func redactChatCredential(chat *core.Chat) *core.Chat {
+	if chat != nil && chat.Settings.Local != nil {
+		local := *chat.Settings.Local
+		local.APIKey = ""
+		chat.Settings.Local = &local
+	}
+	return chat
+}
+
+func redactChatCredentials(chats []core.Chat) []core.Chat {
+	for i := range chats {
+		redactChatCredential(&chats[i])
+	}
+	return chats
+}
+
 // migrateLegacyLocalLLMAPIKey moves the pre-1.1 plaintext config field into
 // the encrypted database. Saving config last makes the migration retry-safe.
 func migrateLegacyLocalLLMAPIKey(c *core.Core, cfg *launcher.Config) error {
@@ -129,6 +158,13 @@ func migrateLegacyLocalLLMAPIKey(c *core.Core, cfg *launcher.Config) error {
 // (Ollama /api/tags or OpenAI-compatible /v1/models — ollama.ListModels
 // tries both).
 func (a *App) TestLocalLLM(endpoint, apiKey string) ([]string, error) {
+	if strings.TrimSpace(apiKey) == "" {
+		var err error
+		apiKey, err = loadLocalLLMAPIKey(a.core)
+		if err != nil {
+			return nil, err
+		}
+	}
 	ctx, cancel := context.WithTimeout(a.ctx, 15*time.Second)
 	defer cancel()
 	return ollama.ListModels(ctx, ollama.NormalizeEndpoint(endpoint), apiKey)
@@ -141,7 +177,7 @@ func (a *App) TestLocalLLM(endpoint, apiKey string) ([]string, error) {
 type LocalLLMOption struct {
 	Configured bool     `json:"configured"`
 	Endpoint   string   `json:"endpoint"`
-	APIKey     string   `json:"apiKey"`
+	HasAPIKey  bool     `json:"hasApiKey"`
 	WireAPI    string   `json:"wireApi"`
 	Models     []string `json:"models"`
 	Error      string   `json:"error,omitempty"`
@@ -158,7 +194,7 @@ func (a *App) LocalLLMModels() (*LocalLLMOption, error) {
 	opt := &LocalLLMOption{
 		Configured: d.Endpoint != "",
 		Endpoint:   d.Endpoint,
-		APIKey:     d.APIKey,
+		HasAPIKey:  d.HasAPIKey,
 		WireAPI:    d.WireAPI,
 	}
 	if !opt.Configured {
@@ -166,7 +202,11 @@ func (a *App) LocalLLMModels() (*LocalLLMOption, error) {
 	}
 	ctx, cancel := context.WithTimeout(a.ctx, 15*time.Second)
 	defer cancel()
-	models, err := ollama.ListModels(ctx, ollama.NormalizeEndpoint(d.Endpoint), d.APIKey)
+	apiKey, err := loadLocalLLMAPIKey(a.core)
+	if err != nil {
+		return nil, err
+	}
+	models, err := ollama.ListModels(ctx, ollama.NormalizeEndpoint(d.Endpoint), apiKey)
 	if err != nil {
 		opt.Error = err.Error()
 		return opt, nil

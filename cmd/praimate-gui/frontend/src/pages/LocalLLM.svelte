@@ -6,7 +6,7 @@
   import { api } from '../lib/api.js'
   import { endpointTransport } from '../lib/endpointSecurity.js'
 
-  let d = { endpoint: '', apiKey: '', wireApi: '', contextTokens: 0, outputTokens: 0 }
+  let d = { endpoint: '', apiKey: '', hasApiKey: false, removeApiKey: false, contextTokens: 0, outputTokens: 0 }
   let error = ''
   let notice = ''
   let testing = false
@@ -42,6 +42,9 @@
       d.contextTokens = Number(d.contextTokens) || 0
       d.outputTokens = Number(d.outputTokens) || 0
       await api.setLocalLLM(d)
+      d.apiKey = ''
+      d.removeApiKey = false
+      await load()
       notice = 'Saved — chats and other machines (via backup) will see it.'
     } catch (e) {
       error = String(e)
@@ -51,15 +54,14 @@
   }
 
   async function clearAll() {
-    d = { endpoint: '', apiKey: '', wireApi: '', contextTokens: 0, outputTokens: 0 }
+    d = { endpoint: '', apiKey: '', hasApiKey: false, removeApiKey: true, contextTokens: 0, outputTokens: 0 }
     await save()
     notice = 'Cleared the saved endpoint.'
   }
 
-  // --- route the config-file CLIs (opencode / codex) to the endpoint ---
-  // claude/openclaude route by env (the per-chat toggle); opencode/codex
-  // read a provider block from their own config files, which this writes.
-  let cliStatus = { codex: false, opencode: false }
+  // Claude/OpenClaude route per launch. OpenCode and PrAImate Code share
+  // one managed provider block in opencode.json.
+  let cliStatus = { opencode: false }
   let applyModel = ''
   let applyBusy = ''
 
@@ -123,14 +125,13 @@
   {/if}
 
   <label class="lbl" for="local-llm-api-key">API key (optional)</label>
-  <input id="local-llm-api-key" class="field mono" type="password" bind:value={d.apiKey} placeholder="empty for plain Ollama" />
-
-  <label class="lbl" for="local-llm-wire-api">Codex wire API</label>
-  <select id="local-llm-wire-api" class="field" style="max-width:260px" bind:value={d.wireApi}>
-    <option value="">auto</option>
-    <option value="responses">responses (codex ≥0.130)</option>
-    <option value="chat">chat completions</option>
-  </select>
+  <input id="local-llm-api-key" class="field mono" type="password" bind:value={d.apiKey} placeholder={d.hasApiKey ? 'saved securely — enter a new key to replace it' : 'empty for plain Ollama'} />
+  {#if d.hasApiKey}
+    <label class="row" style="margin-top:7px; gap:8px">
+      <input type="checkbox" bind:checked={d.removeApiKey} />
+      <span class="card-sub">Remove the saved API key</span>
+    </label>
+  {/if}
 
   <div class="row">
     <div class="grow">
@@ -192,7 +193,7 @@
 <h1 style="font-size:16px; margin-top:24px">Route CLIs to the local model</h1>
 <p class="subtitle" style="margin-top:-6px">
   <strong>claude</strong> and <strong>openclaude</strong> route by environment — just tick “Use the local LLM” when you start a chat/code/studio session, no setup here.
-  <strong>opencode / praimate-code</strong> and <strong>codex</strong> read their endpoint from their own config files, so apply it once here and every session (chat, code, studio) uses the local model.
+  <strong>opencode / praimate-code</strong> share a managed provider in their config file. Codex keeps its own normal provider configuration and is not modified by PrAImate.
 </p>
 <div class="card">
   <label class="lbl" for="local-llm-route-model">Model to route to</label>
@@ -209,15 +210,4 @@
     <button class="btn primary" on:click={() => applyCLI('opencode')} disabled={!!applyBusy || !d.endpoint}>{applyBusy === 'opencode' ? 'Applying…' : 'Apply'}</button>
     <button class="btn" on:click={() => disableCLI('opencode')} disabled={!!applyBusy || !cliStatus.opencode}>Disable</button>
   </div>
-
-  <div class="row" style="margin-top:10px; flex-wrap:wrap; gap:8px">
-    <div class="grow">
-      <strong>codex</strong>
-      {#if cliStatus.codex}<span class="pill ok">routed to local</span>{:else}<span class="pill">cloud default</span>{/if}
-      <span class="card-sub">(needs an OpenAI /v1/responses-compatible endpoint)</span>
-    </div>
-    <button class="btn primary" on:click={() => applyCLI('codex')} disabled={!!applyBusy || !d.endpoint}>{applyBusy === 'codex' ? 'Applying…' : 'Apply'}</button>
-    <button class="btn" on:click={() => disableCLI('codex')} disabled={!!applyBusy || !cliStatus.codex}>Disable</button>
-  </div>
-
 </div>

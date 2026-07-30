@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"git.jtsec.local/lab/PrAImate/internal/core"
+	"git.jtsec.local/lab/PrAImate/internal/ollama"
 )
 
 // terminalCommand maps a PrAImate CLI id to the binary + interactive
@@ -89,7 +90,7 @@ func terminalLocalEnv(cli, endpoint, apiKey, model string) []string {
 	switch cli {
 	case "claude":
 		return []string{
-			"ANTHROPIC_BASE_URL=" + strings.TrimRight(endpoint, "/"),
+			"ANTHROPIC_BASE_URL=" + strings.TrimRight(ollama.NormalizeEndpoint(endpoint), "/"),
 			"ANTHROPIC_AUTH_TOKEN=" + token,
 			"ANTHROPIC_API_KEY=",
 			"OPENAI_API_KEY=" + token,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -115,6 +116,9 @@ func Init(ctx context.Context, dir string) (Status, error) {
 // the remote already. If the remote DOESN'T have them, the next
 // Sync() call will add them.
 func Clone(ctx context.Context, url, dir string) error {
+	if err := ValidateRemoteURL(url); err != nil {
+		return err
+	}
 	r := Run(ctx, "", "clone", url, dir)
 	if r.Failed() {
 		return fmt.Errorf("git clone failed: %s", UserError(r))
@@ -141,6 +145,9 @@ func Clone(ctx context.Context, url, dir string) error {
 // protocol over the URL's transport (https / ssh / git://), which is
 // exactly what `git clone` would use.
 func LsRemote(ctx context.Context, url string) (defaultBranch string, err error) {
+	if err := ValidateRemoteURL(url); err != nil {
+		return "", err
+	}
 	// Short timeout — network hangs shouldn't lock the wizard.
 	cctx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
@@ -189,11 +196,33 @@ func classifyLsRemoteError(r Result) error {
 // AddRemote sets origin to url. Replaces any existing origin so a
 // user can re-link a different remote without manual git ops.
 func AddRemote(ctx context.Context, dir, url string) error {
+	if err := ValidateRemoteURL(url); err != nil {
+		return err
+	}
 	// Remove any existing origin first (don't care if it didn't exist).
 	_ = Run(ctx, dir, "remote", "remove", "origin")
 	r := Run(ctx, dir, "remote", "add", "origin", url)
 	if r.Failed() {
 		return fmt.Errorf("git remote add origin: %s", UserError(r))
+	}
+	return nil
+}
+
+// ValidateRemoteURL rejects HTTP(S) userinfo because Git persists remote URLs
+// verbatim in .git/config and PrAImate also remembers the URL in config.json.
+// Authentication must come from a credential helper, SSH agent, or key file.
+func ValidateRemoteURL(raw string) error {
+	raw = strings.TrimSpace(raw)
+	lower := strings.ToLower(raw)
+	if !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
+		return nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("invalid git remote URL: %w", err)
+	}
+	if u.User != nil {
+		return errors.New("git remote URLs must not contain a username, password, or token — use Git Credential Manager, a credential helper, or SSH instead")
 	}
 	return nil
 }

@@ -18,7 +18,7 @@ import (
 // RecordCodeSession persists a surface="code" chat pointer for a freshly
 // launched terminal session and returns its id. localEndpoint, when set,
 // is stored so reopening restores the local route.
-func (a *App) RecordCodeSession(cli, model, cwd, localEndpoint, localAPIKey, localModel string) (string, error) {
+func (a *App) RecordCodeSession(cli, model, cwd, localEndpoint, _ string, localModel string) (string, error) {
 	c, err := a.requireCore()
 	if err != nil {
 		return "", err
@@ -40,7 +40,7 @@ func (a *App) RecordCodeSession(cli, model, cwd, localEndpoint, localAPIKey, loc
 	_ = c.UpdateChatSettings(a.ctx, chat.ID, func(s *core.ChatSettings) {
 		s.Surface = "code"
 		if localEndpoint != "" {
-			s.Local = &core.ChatLocalEndpoint{Endpoint: localEndpoint, APIKey: localAPIKey, Model: localModel}
+			s.Local = &core.ChatLocalEndpoint{Endpoint: localEndpoint, Model: localModel}
 		} else if model != "" {
 			s.Model = model
 		}

@@ -309,15 +309,11 @@ obtain HTTPS.
 |---|---|
 | Claude/OpenClaude | Per-launch environment variables and selected model. |
 | OpenCode/PrAImate Code | Provider configuration references `OPENAI_API_KEY`; PrAImate supplies the secret at launch. |
-| Codex | `ollama_remote` profile, only after `/v1/responses` compatibility probing. |
-
-Codex 0.130+ requires the Responses API. A server that only provides
-`/v1/chat/completions` is not enough for Codex even if it works with other
-CLIs. PrAImate accepts success/auth responses, warns on an unhealthy upstream
-route, and refuses clear unsupported-route responses.
+| Codex | Not routed by PrAImate; Codex retains its own provider and authentication configuration. |
 
 The Local LLM key is migrated out of older plaintext configuration into the
-encrypted database.
+encrypted database and is resolved in Go only when a supported child process
+is launched. It is not returned to the GUI renderer.
 
 ## MCP
 
