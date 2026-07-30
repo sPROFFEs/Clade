@@ -1,5 +1,8 @@
 # Workpath source format
 
+This schema belongs to the standalone `wpc` compiler. It is not the
+`praimate.agent/v1` YAML schema used by agents created in the desktop GUI.
+
 A workpath is a **directory** named after the workpath itself. The directory
 name is the canonical workpath name unless overridden in `workpath.json`.
 
@@ -101,17 +104,17 @@ surprised.
 }
 ```
 
-Event vocabulary (portable Clade names → per-target mapping):
+Event vocabulary (portable workpath names → per-target mapping):
 
-| Clade event       | Claude Code      | Codex / OpenCode / Gemini / Mika |
-|-------------------|------------------|----------------------------------|
-| `pre_tool`        | `PreToolUse`     | not yet wired                    |
-| `post_tool`       | `PostToolUse`    | not yet wired                    |
-| `user_input`      | `UserPromptSubmit` | not yet wired                  |
-| `session_start`   | `SessionStart`   | not yet wired                    |
-| `session_stop`    | `Stop`           | not yet wired                    |
-| `subagent_stop`   | `SubagentStop`   | not yet wired                    |
-| `notification`    | `Notification`   | not yet wired                    |
+| Workpath event    | Claude Code        | Other `wpc` targets |
+|-------------------|--------------------|---------------------|
+| `pre_tool`        | `PreToolUse`       | not yet wired       |
+| `post_tool`       | `PostToolUse`      | not yet wired       |
+| `user_input`      | `UserPromptSubmit` | not yet wired       |
+| `session_start`   | `SessionStart`     | not yet wired       |
+| `session_stop`    | `Stop`             | not yet wired       |
+| `subagent_stop`   | `SubagentStop`     | not yet wired       |
+| `notification`    | `Notification`     | not yet wired       |
 
 Per-hook fields:
 

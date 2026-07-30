@@ -5,13 +5,16 @@ CLI picks the files up on its own terms. This page documents the **exact
 out-dir, scope (project vs user), and reload behavior** for each supported
 target.
 
+This is standalone compiler documentation. A compiled target is not
+automatically added to the PrAImate GUI's CLI list.
+
 ## Quick reference
 
 | Target    | Out-dir to pass `--out`        | Scope                    | Reload         |
 |-----------|--------------------------------|--------------------------|----------------|
 | `claude`  | `<project>` or `~`             | project or user          | next session   |
 | `cursor`  | `<project>`                    | project only             | next prompt    |
-| `mika`    | `<project>` or `~/.mika`       | project or user          | next session   |
+| `mika`    | `<project>` or `~/.mika`       | legacy project or user   | next session   |
 | `codex`   | `<project>` or `~/.codex`      | project or user          | next prompt    |
 | `generic` | anywhere                       | depends on host          | manual         |
 
@@ -82,7 +85,7 @@ compile to `generic` or `mika` alongside.
 
 ---
 
-## mika-code (`mika`)
+## Legacy mika-code (`mika`)
 
 ```sh
 # Per-project
@@ -146,19 +149,18 @@ existing `AGENTS.md` manually.
 
 ---
 
-## OpenCode (`generic`, for now)
+## OpenCode and PrAImate Code
 
-OpenCode reads `AGENTS.md` like Codex does, so the `codex` target works
-for it too:
+For project-scoped instructions, the `codex` target emits an `AGENTS.md`
+layout that OpenCode and PrAImate Code can consume:
 
 ```sh
 wpc compile my-workpath --target codex --out .
 ```
 
-Activation: next `opencode` invocation. No restart.
-
-A dedicated `opencode` target with native subagent support is on the
-roadmap.
+Activation: launch the CLI from that project after compiling. User-global
+instruction paths are host-specific, so do not compile to `~/.codex` for
+OpenCode unless that host is explicitly configured to read it.
 
 ---
 

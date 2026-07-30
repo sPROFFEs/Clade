@@ -1,51 +1,38 @@
-# References — OpenCode (sst/opencode)
+# OpenCode source and attribution
 
-PrAImate does **not** fork OpenCode. We treat it as an MIT-licensed
-reference implementation and study specific subsystems for inspiration
-when designing equivalent Go components.
+PrAImate integrates an installed upstream OpenCode CLI and also publishes
+**PrAImate Code**, a version-pinned and rebranded build produced from the
+vendored MIT-licensed OpenCode source.
 
-The full rationale for not forking is in `knowledge/1.0-plan.md` § 10.
+The desktop harness remains Go/Svelte and delegates model communication to the
+selected CLI. PrAImate Code is a managed CLI dependency, not a replacement for
+the harness core.
 
-## Upstream
+## Integration boundary
 
-- Repo: <https://github.com/sst/opencode>
-- License: MIT
-- Stack: TypeScript (~69%) + Bun runtime, with a Go bubbletea TUI in
-  `packages/tui/`. Server-side agent loop in TypeScript.
+| Component | Responsibility |
+|---|---|
+| PrAImate desktop | GUI, local encrypted state, agents, skills, MCP preparation, and process launch. |
+| PrAImate Code/OpenCode | Agent loop, provider request, native authentication, and native session behavior. |
+| Model provider | Inference and provider-side data handling. |
 
-## What we study (read-only)
+PrAImate prepares configuration and launch-time environment variables. It
+cannot add HTTPS when the configured model endpoint exposes only HTTP.
 
-| OpenCode area | Relevance to PrAImate | Where we apply it |
-|---|---|---|
-| `packages/tui/` bubbletea patterns | Chat-stream rendering, multi-pane layouts, keybinding affordances | `cmd/praimate/` TUI (Phase 2+) |
-| Web UI source (visual layout) | Component hierarchy, colour choices, sidebar shell | `cmd/praimate-gui` SvelteKit frontend (Phase 5) |
-| `opencode.json` agent schema | Field naming, defaults, what to require vs. infer | `agent` YAML schema (Phase 2) |
-| MCP integration code | OAuth 2.1 + DCR flow patterns | MCP catalogue (Phase 4a) |
-| Provider abstraction | How a single agent loop fans out to multiple LLM providers | Background research only — PrAImate routes through CLI agents instead |
+## Branding and distribution
 
-## What we do NOT take
+The build script applies the PrAImate Code name and version pins while keeping
+the upstream licensing record. Managed binaries are published separately for
+Linux and Windows so the GUI can install or update the CLI without showing
+duplicate product entries.
 
-- Source code (we reimplement in Go).
-- Brand assets (logo, colours, fonts).
-- Telemetry / analytics hooks.
-- TypeScript runtime / Bun toolchain.
-- Their agent loop — PrAImate is a harness, not its own coding agent.
+Do not remove upstream copyright or license files when refreshing the vendored
+source. Review the patch set after every upstream update; branding changes and
+security fixes must remain reproducible from the build script.
 
-## Attribution
+## Source
 
-This file is the paper trail. When a PrAImate component is materially
-inspired by an OpenCode file, add an entry here:
-
-```
-- internal/core/mcp.go — OAuth flow modeled on opencode/packages/server/src/mcp/oauth.ts
-```
-
-This satisfies the spirit of MIT attribution without copying code.
-
-## Re-evaluation trigger
-
-If PrAImate 1.0 ships and the harness model proves to have a ceiling we
-cannot break through (e.g. third-party CLIs lack a feature we need that
-forking would unblock), revisit the fork question in a 2.0 conversation.
-The relevant constraint then is the cost-vs-benefit math in
-`knowledge/1.0-plan.md` § 10.3 (divergence tax).
+- Upstream repository: <https://github.com/sst/opencode>
+- Upstream license: MIT
+- Vendored source: `third_party/opencode/`
+- Build entry point: `scripts/build-praimate-code.sh`

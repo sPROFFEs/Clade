@@ -4,6 +4,9 @@ Each target is an output format for one CLI agent. Targets read the same
 parsed `Workpath` and write files under an output directory. All targets
 are **idempotent**: re-running into the same out-dir produces the same tree.
 
+These are compiler formats, not the list of CLIs selectable in the PrAImate
+GUI. Run `wpc targets` for the authoritative installed list.
+
 ## `claude` — Claude Code skill
 
 ```
@@ -38,7 +41,7 @@ subagent without colliding.
 - The `tools` allowlist on an agent is emitted as a YAML inline list. If
   your tool names contain special YAML characters, override them.
 
-## `mika` — mika-code workpath
+## `mika` — legacy mika-code workpath
 
 ```
 <out>/modules/<name>/module.md
@@ -78,7 +81,7 @@ are inlined into the body as markdown bullet lists, so the agent at least
 *knows* they exist. Scripts are NOT copied — if you need them on disk,
 also compile to `generic` or `mika`, or keep the source dir alongside.
 
-## `codex` — Codex CLI / OpenCode AGENTS.md
+## `codex` — Codex CLI / AGENTS.md-compatible hosts
 
 ```
 <out>/AGENTS.md
@@ -86,10 +89,11 @@ also compile to `generic` or `mika`, or keep the source dir alongside.
 <out>/AGENTS.assets/agents/<agent>.md
 ```
 
-Codex CLI and OpenCode both scan for `AGENTS.md` in the project root and
-in `~/.codex/`. The markdown file inlines mission/playbook/rules and lists
-tools/agents; the actual scripts and subagent prompts live in
-`AGENTS.assets/` so the model can shell out to them by relative path.
+The markdown file inlines mission/playbook/rules and lists tools/agents; the
+actual scripts and subagent prompts live in `AGENTS.assets/` so a capable host
+can read or invoke them by relative path. Codex CLI loads project and user
+`AGENTS.md` instructions. Other hosts may support the project file but use
+different user-level paths.
 
 ### Limitations
 

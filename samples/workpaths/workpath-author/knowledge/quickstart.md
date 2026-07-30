@@ -1,7 +1,14 @@
-# Quickstart
+# Workpath compiler quickstart
 
-Five-minute walk-through. Assumes you've already built `wpc` (see top-level
-README).
+This is a five-minute walkthrough for the standalone `wpc` compiler bundled
+with PrAImate. Workpaths are portable instruction packages; they are separate
+from the database-backed YAML agents created on the GUI's **Agents** page.
+
+Build or install PrAImate first, then confirm that `wpc` is available:
+
+```sh
+wpc targets
+```
 
 ## 1. Scaffold
 
@@ -71,20 +78,23 @@ wpc validate code-review
 Should print `ok: code-review (N tools, M agents)`. Fix any errors before
 compiling.
 
-## 6. Compile to your CLI of choice
+## 6. Compile to a target
 
 ```sh
 # Claude Code:
 wpc compile code-review --target claude --out .
 
-# mika-code:
-wpc compile code-review --target mika --out .
-
 # Cursor:
 wpc compile code-review --target cursor --out .
 
+# Codex CLI or an AGENTS.md-compatible host:
+wpc compile code-review --target codex --out .
+
 # Generic AGENTS.md-style:
 wpc compile code-review --target generic --out .
+
+# Legacy mika-code module layout:
+wpc compile code-review --target mika --out .
 ```
 
 Or all at once for a multi-tool team:
@@ -97,4 +107,5 @@ wpc compile code-review --target all --out dist/
 
 Re-running compile is idempotent — it overwrites the same files. The
 authoritative source is your workpath directory; the compiled outputs are
-disposable.
+disposable. See [TARGETS.md](TARGETS.md) for the exact files each target emits
+and [ACTIVATION.md](ACTIVATION.md) for host-specific placement.

@@ -1,5 +1,8 @@
 # Workpath source format
 
+This schema belongs to the standalone `wpc` compiler. It is not the
+`praimate.agent/v1` YAML schema used by agents created in the desktop GUI.
+
 A workpath is a **directory** named after the workpath itself. The directory
 name is the canonical workpath name unless overridden in `workpath.json`.
 
@@ -23,6 +26,7 @@ Metadata and overrides. All fields optional.
   "description": "One-line summary of what this workpath does",
   "version": "1",
   "license": "MIT",
+  "imports": ["_common/graphify"],
   "tools": [
     {
       "name": "file_summary",
@@ -47,8 +51,29 @@ Metadata and overrides. All fields optional.
 | `description` | string    | first paragraph of `mission.md`  | Required for compilation; one line             |
 | `version`     | string    | `"1"`                            | Free-form                                      |
 | `license`     | string    | `""`                             | Free-form; passed to `generic` target          |
+| `imports`     | string[]  | `[]`                             | Capability bundles to merge in (see below)     |
 | `tools`       | array     | auto-discovered from `tools/`    | When set, replaces auto-discovery entirely     |
 | `agents`      | array     | auto-discovered from `agents/`   | When set, replaces auto-discovery entirely     |
+
+#### `imports` — shared capability bundles
+
+Pull `knowledge/`, `tools/`, `agents/`, `hooks.json`,
+`playbook-fragment.md`, and `rules-fragment.md` from sibling bundles
+under `templates/_common/` into this workpath at compile time. Saves
+duplicating wrappers across every template that needs the same
+capability.
+
+- Each entry is resolved **relative to the parent of this workpath's
+  source directory** (the "templates root"), so `_common/graphify`
+  resolves to `<templates-root>/_common/graphify/`.
+- Nested templates (e.g. `templates/praimate-dev/workpath/`) need an
+  extra `..`: use `["../_common/graphify"]`.
+- On name/path/event-collision: **the consumer wins**. A template
+  tool / agent / knowledge file / hook (keyed by `event+matcher`)
+  with the same key as an imported one overrides the import. Fragment
+  text is always appended under `## Imported capabilities: <bundle>`
+  and `## Imported rules: <bundle>` headings.
+- A missing import is a **hard compile error** — typos fail loud.
 
 ### `playbook.md` — optional
 
@@ -58,6 +83,52 @@ Included verbatim in target output.
 ### `rules.md` — optional
 
 Hard constraints, written as a bullet list. Included verbatim.
+
+### `hooks.json` — optional
+
+Chat-lifecycle triggers the agent runs as events fire. Cross-harness:
+one source schema, each wpc target compiles to its native hook format.
+Today only the `claude` target has a real emitter (writes
+`.claude/settings.json`); other targets append a "hooks declared but
+not wired" note to the compiled instructions so authors aren't
+surprised.
+
+```json
+{
+  "hooks": [
+    {"event": "pre_tool",      "matcher": "Bash",  "command": "scripts/audit.sh"},
+    {"event": "post_tool",     "matcher": "Edit",  "command": "scripts/lint.sh"},
+    {"event": "session_start",                      "command": "scripts/setup.sh"},
+    {"event": "session_stop",                       "command": "scripts/teardown.sh"}
+  ]
+}
+```
+
+Event vocabulary (portable workpath names → per-target mapping):
+
+| Workpath event    | Claude Code        | Other `wpc` targets |
+|-------------------|--------------------|---------------------|
+| `pre_tool`        | `PreToolUse`       | not yet wired       |
+| `post_tool`       | `PostToolUse`      | not yet wired       |
+| `user_input`      | `UserPromptSubmit` | not yet wired       |
+| `session_start`   | `SessionStart`     | not yet wired       |
+| `session_stop`    | `Stop`             | not yet wired       |
+| `subagent_stop`   | `SubagentStop`     | not yet wired       |
+| `notification`    | `Notification`     | not yet wired       |
+
+Per-hook fields:
+
+| Field         | Required | Notes                                                  |
+|---------------|----------|--------------------------------------------------------|
+| `event`       | yes      | One of the seven above; loader errors on unknown.      |
+| `matcher`     | no       | For `pre_tool`/`post_tool`: tool-name pattern (claude accepts regex). Empty = match every occurrence. Ignored for non-tool events. |
+| `command`     | yes      | Shell command. Runs with the sandbox as CWD, so `scripts/<name>.sh` finds the wpc-staged tool dir. Empty / whitespace-only commands fail validation. |
+| `description` | no       | One-line note; surfaced in the compiled instruction body. |
+
+When merged from imports, collisions key on `event + matcher` and
+**the consumer wins**. Different matchers on the same event coexist —
+the import's `pre_tool/Bash` and the consumer's `pre_tool/Edit` both
+fire.
 
 ### `tools/` — optional
 

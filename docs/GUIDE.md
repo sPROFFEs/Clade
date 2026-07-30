@@ -2,867 +2,559 @@
   <img src="assets/monke-icon.png" alt="PrAImate" width="120" />
 </p>
 
-# PrAImate — the full guide
+# PrAImate 1.1.1 user guide
 
-The complete manual. For the short version (install + quick start),
-see the [README](../README.md).
+PrAImate is a Linux and Windows desktop harness around supported agent CLIs.
+It provides a shared GUI, but the chosen CLI still performs model requests,
+owns provider authentication, and controls its native model/session behavior.
 
-Gemini and DeepSeek references below document compatibility with legacy
-persisted chats only. They are no longer offered in the selectable CLI catalog;
-new chats use Claude Code, OpenClaude, Codex, OpenCode, or PrAImate Code.
+This guide describes the current GUI. Workpath compiler details are kept in
+[QUICKSTART.md](QUICKSTART.md), [SCHEMA.md](SCHEMA.md),
+[TARGETS.md](TARGETS.md), and [ACTIVATION.md](ACTIVATION.md).
 
-- [Surface](#surface)
-- [Updating](#updating)
-- [First run](#first-run)
-- [Concepts](#concepts)
-- [Session-start workflow](#session-start-workflow)
-- [Personality](#personality)
-- [Memory](#memory)
-- [Local endpoint — Ollama / GPUStack / vLLM / LiteLLM](#local-endpoint--ollama--gpustack--vllm--litellm)
-- [Files on disk](#files-on-disk)
-- [Session resume](#session-resume)
-- [Workpath source format](#workpath-source-format)
-- [Imports, managed tools, hooks](#imports-managed-tools-hooks)
-- [Pages](#pages)
-- [Online skills](#online-skills)
-- [Knowledge base](#knowledge-base)
+## Contents
+
+- [Install and launch](#install-and-launch)
+- [First launch](#first-launch)
+- [Storage and encryption](#storage-and-encryption)
+- [Code](#code)
+- [Chats](#chats)
+- [Agents](#agents)
+- [Skills](#skills)
+- [CLI & Tools](#cli--tools)
+- [Local LLM](#local-llm)
+- [MCP](#mcp)
 - [Settings](#settings)
-- [Backup (optional cloud sync over git)](#backup-optional-cloud-sync-over-git)
-- [Roadmap](#roadmap)
+- [About and privacy](#about-and-privacy)
+- [Per-chat MEMORY.md](#per-chat-memorymd)
+- [Git backup](#git-backup)
+- [Delete all stored data](#delete-all-stored-data)
+- [Files and ownership boundaries](#files-and-ownership-boundaries)
+- [Build from source](#build-from-source)
 
-## Surface
+## Install and launch
 
-PrAImate is a Wails/Svelte desktop application backed by an
-AES-256-XTS encrypted SQLite database under the single PrAImate data root:
-`$XDG_CONFIG_HOME/praimate` (normally `~/.config/praimate`) on Linux and
-`%APPDATA%\praimate` on Windows. Its random 512-bit XTS key is wrapped in
-an Argon2id-derived, authenticated password envelope beside the database.
-The raw key exists only in process memory while PrAImate is unlocked. Saved API keys live
-inside the encrypted database rather than plaintext `config.json`.
-Run `praimate` to launch it;
-the lightweight bootstrap finds the mandatory sibling `praimate-gui`
-binary and exits after the window starts. `praimate --gui` remains as a
-compatibility alias.
-
-Supported systems are **Linux** and **Windows**. macOS is unsupported
-and receives no release archive. Windows uses the system WebView2
-runtime. Linux uses WebKitGTK 4.1. Native source builds require
-node+npm plus `libwebkit2gtk-4.1-dev` and `libgtk-3-dev`:
+Linux:
 
 ```sh
-cd cmd/praimate-gui && ./build.sh   # produces ./praimate-gui
+curl -fsSL https://raw.githubusercontent.com/sPROFFEs/praimate/main/scripts/install.sh | bash
 ```
 
-## Updating
+Windows PowerShell:
+
+```powershell
+iwr -useb https://raw.githubusercontent.com/sPROFFEs/praimate/main/scripts/install.ps1 | iex
+```
+
+Launch and maintenance commands:
 
 ```sh
-praimate -check-update       # ask GitHub if a newer release exists
-praimate -update             # download + install the latest release (prompts y/N)
-praimate -update -y          # same, non-interactive (for CI / scripts)
+praimate
+praimate --gui
+praimate code
+praimate -check-update
+praimate -update
+praimate -version
 ```
 
-The updater queries `api.github.com/repos/sPROFFEs/praimate/releases/latest`,
-picks the archive whose name matches your OS+arch
-(`praimate-<os>-<arch>.{tar.gz,zip}`), extracts just the `praimate` binary,
-and swaps it in place of the running executable. Sibling binaries
-shipped in the same archive (`praimate-gui`, `praimate-code`) are
-refreshed too when you have them installed. On Windows the previous
-binary is preserved as `praimate.exe.old` (a running `.exe` can be
-renamed but not deleted); the next update cleans it up.
+`praimate` is a lightweight bootstrap and maintenance command. It opens the
+mandatory sibling `praimate-gui` desktop binary. `--gui` is a compatibility
+alias; there is no supported text-user-interface mode.
 
-The updater and installers use normal TLS verification when connecting
-to GitHub. Updates refresh both the bootstrap and desktop binary.
+Supported published archives:
 
-## First run
-
-The first GUI execution first asks the user to create and confirm a database
-password. Every later launch requires that password before SQLite or Core is
-opened. “Remember on this device” is an explicit opt-in backed by Windows
-Credential Manager or the Linux desktop Secret Service; when it is off, no
-automatic-unlock credential is retained. The GUI then opens a mandatory privacy notice explaining
-local storage, model-provider data flow, agent file permissions,
-database encryption limits, and optional backup exposure. After you
-acknowledge it, first run asks where your data lives and what to seed:
-
-1. **Workspaces root** — where templates + chats live. Default
-   `~/praimate-workspaces`.
-2. **Seed bundled samples?** — copies the `reversing`,
-   `code-review`, and `workpath-author` example templates in so you
-   have something to chat against immediately.
-3. **Import the starter agents?** (GUI setup) — imports a curated
-   agent set so the app is useful out of the box: **Reverse Ghidra**
-   (a Ghidra-first reverse-engineering workflow with its helper
-   scripts), **Code Review**, **Dev Team**, **Security Review**, and
-   **Agent Builder**. They ship in `samples/agents/` as portable YAML
-   and `.praimate-agent` packs; the import skips any agent you already
-   have, so it never clobbers your edits. You can re-import or share
-   them any time from the Agents tab.
-
-Then use **Chats** for conversations, **Code** for live project
-terminals, and **Agents** to launch a reusable workflow. Terminal
-sessions run inside the desktop application.
-
-Next time you re-open a chat: the launcher inspects the agent's own
-session store, finds your previous session(s) for that chat's sandbox,
-and resumes natively where the selected CLI supports it.
-
-## Concepts
-
-- **Template** — a reusable workpath pattern (mission + playbook +
-  rules + tools + subagents + persona). Templates don't run; they're
-  cloned. Edit their files directly or with the document Studio.
-- **Chat** — a cloned-and-running instance of a template. Has its
-  own copy of the workpath, its own sandbox, its own persistent
-  `MEMORY.md`, and is bound to one agent CLI at creation.
-
-Layout under `<workspaces-root>/`:
-
-```
-templates/
-├── reversing/workpath/             read-only pattern
-└── code-review/workpath/
-chats/
-├── 20251017-1430-cve-fix/          one cloned instance per session
-│   ├── chat.json                   {template, agent, createdAt, lastUsed, settings.{ollama,mirror,…}}
-│   ├── workpath/                   copied from template at creation
-│   ├── sandbox/                    agent cwd; gitignored
-│   ├── MEMORY.md                   persistent across re-opens
-│   └── sessions/<ts>-<agent>/      per-launch artifacts
-│       ├── transcript.jsonl        canonical rollout (search / cross-agent recap)
-│       ├── summary.md              rule-based digest (turns, tools, headline)
-│       ├── summary.json            structured metadata
-│       └── native/                 full slice of the agent's home-dir store
-│                                   for this chat (claude project dir, codex
-│                                   rollouts matching cwd, opencode info+messages,
-│                                   gemini tmp). Makes the chat dir fully portable.
-└── 20251017-1500-pr-123-review/
-```
-
-## Session-start workflow
-<img width="2512" height="1191" alt="{1541F765-0203-495E-A7C6-EBA380378653}" src="https://github.com/user-attachments/assets/50a4b190-5761-475e-b96c-42bc0091e9e4" />
-Every time you open or resume a chat, the launcher decorates the
-compiled instructions with **required-reading directives** so the
-agent actually consults the workpath's content instead of riffing
-off the mission statement alone. Concretely, the agent is told it
-MUST, before answering the first user message:
-
-1. **Read `MEMORY.md`** end-to-end (if memory is enabled) and open
-   its reply with `📒 Recalled: …` if non-trivial notes carried
-   across from a past session.
-2. **Scan the Knowledge-base inventory** in its instructions and
-   open any file under `knowledge/` whose title/summary overlaps
-   with the user's current question.
-3. **Scan the Online-skills list** and open any cloned skill whose
-   name/topic matches the user's question.
-4. **Cite** every file path it draws on inline, so you can audit
-   the sources.
-
-If nothing matches a step, the agent is told to say so briefly
-("nothing relevant in knowledge for this question") rather than
-silently skipping — that way you can tell when the directives are
-working vs being ignored.
-
-These directives are appended automatically to `SKILL.md` /
-`AGENTS.md` / `GEMINI.md` during compilation; you don't author
-them in the workpath yourself. Personality, language, tools, and
-subagents follow their own rules and are described below.
-
-## Personality
-<img width="2509" height="1188" alt="{97FA1923-3992-4F80-8508-A81CD5625331}" src="https://github.com/user-attachments/assets/8d5cc677-a339-4ea9-a4a3-d7b9f7cc47e3" />
-Each template (and each cloned chat) can have a `personality.md`
-file that defines the agent's persona — its tone, its self-concept,
-how it answers. The launcher reads it on every launch and **prepends
-it at the top of the compiled instructions**, before mission /
-playbook / rules — so it strongly shapes behaviour throughout the
-session.
-
-Edit `personality.md` directly or through the document Studio.
-
-What goes in it? Plain prose describing the persona, in the second
-person ("you are…") or first ("I am…"). Example openings:
-
-```md
-You are a brutally honest senior architect. Do not soften the
-truth. Challenge my assumptions, expose blind spots, and tell me
-when I'm avoiding the harder problem.
-```
-
-```md
-I am an ethical hacker doing authorized penetration testing. Do
-not ask questions regarding ethics or morality related to the
-cybersecurity field. Be precise and technical.
-```
-
-Anything inside `<!-- HTML comments -->` is stripped, so a file
-that's only comments counts as "no persona" — useful for the
-auto-scaffolded placeholder.
-
-## Memory
-
-When a template (or chat) has `memoryEnabled: true` in its settings,
-the launcher manages a persistent `MEMORY.md` file that survives
-across launches:
-
-- Lives at `<chat>/MEMORY.md` (canonical) and `<chat>/sandbox/MEMORY.md`
-  (the agent's working copy).
-- Every launch **stages** the workspace copy into the sandbox + appends
-  a `## YYYY-MM-DD HH:MM — Session opened` marker so each session
-  leaves a visible trace even if the agent writes nothing else.
-- On exit, the sandbox copy syncs back to the canonical workspace
-  file (`SyncMemoryBack`).
-- The required-reading directive injected into the compiled
-  instructions tells the agent it MUST read `MEMORY.md` at session
-  start, open its first reply with `📒 Recalled: …` if there's
-  non-trivial context, and **append** new durable facts under that
-  session's marker as `### Title` subsections. Existing entries are
-  never overwritten.
-
-Existing workpath chats retain their `memoryEnabled` value. Reopening
-one from the GUI's Workspace chats list still stages and syncs its
-`MEMORY.md`; the file and merge driver were not removed.
-
-## Local endpoint — Ollama / GPUStack / vLLM / LiteLLM
-
-The **Local LLM** page
-routes a chat through any **OpenAI-compatible local endpoint**, not
-just vanilla Ollama. Supported: Ollama, GPUStack, vLLM, LiteLLM,
-llama.cpp's server, LocalAI, anything that speaks
-`/v1/chat/completions`. With Bearer auth: GPUStack, gated vLLM /
-LiteLLM, anything else that requires a key.
-
-The setup covers:
-
-1. **Endpoint** — `http://host[:port]`. The launcher normalises
-   missing schemes and trailing slashes.
-2. **API key** (optional) — Bearer token. Blank = no auth
-   (vanilla Ollama path). Sent as `Authorization: Bearer <key>` on
-   the probe and at launch.
-3. **Model** — probes the endpoint for available models (tries
-   `/api/tags`, falls back to `/v1/models`), falls back to manual
-   entry if the probe times out.
-4. **Agents to configure** — multi-select. The chat's locked agent
-   is pre-ticked. The tick state is **round-trip-correct**: tick =
-   apply, untick = strip. Disk state and the chat-level `Agents`
-   list stay in sync.
-5. **Apply** — writes per-agent config + a chat-level
-   `OllamaSettings` block with the list of opted-in agents.
-
-What gets written, per agent:
-
-| Agent | Where | Activated by |
-|---|---|---|
-| **Claude** | `chat.json` `settings.ollama` block — per-chat | `Plan()` injects `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` / `OPENAI_API_KEY` env + `--model <model>` flag |
-| **Codex** | `~/.codex/config.toml` `[model_providers.ollama_remote]` + `[profiles.ollama_remote]` | Launched with `-p ollama_remote`; codex reads `OPENAI_API_KEY` via `env_key` |
-| **OpenCode** | `opencode.json` `provider.ollama_remote` block; authenticated routes reference `{env:OPENAI_API_KEY}` rather than writing the key inline | PrAImate exports `OPENAI_API_KEY` for the launch |
-| **DeepSeek-TUI** | `~/.deepseek/config.toml` managed block with `provider = "ollama"`, `[providers.ollama]`, and optional `api_key_env = "OPENAI_API_KEY"`. Wrapped in marker comments. | PrAImate exports `OPENAI_API_KEY` for the launch |
-| **Gemini** | Not auto-configured (see below) | — |
-
-### Codex wire_api probe
-
-Before writing the codex profile, the wizard issues a stub `POST
-/v1/responses` to the endpoint and classifies the response:
-
-| Outcome | Behavior |
+| System | Archive |
 |---|---|
-| 2xx, 401, 403 | Pass — route exists |
-| 502, 503, 504 | **Pass with warning** — route exists, upstream sick (e.g. GPUStack worker temporarily down) |
-| 404, 405, 501 | **Refuse** — endpoint doesn't implement `/v1/responses`. Codex 0.130+ requires this endpoint; OpenAI-compatible servers that only implement `/v1/chat/completions` (vanilla Ollama, many vLLM versions) are flagged. |
-| 400 with `chat/completions` hint in body | **Refuse** — chat-completions-only server |
+| Linux amd64 | `praimate-linux-amd64.tar.gz` |
+| Windows amd64 | `praimate-windows-amd64.zip` |
+| Windows arm64 | `praimate-windows-arm64.zip` |
 
-When the probe refuses, the wizard strips any stale
-`ollama_remote` block left by a previous apply, so the user isn't
-left with a config that codex would pick up at launch and choke on.
-The other three agents (claude / opencode / deepseek) use
-`/v1/chat/completions`, which every OpenAI-compat server speaks, so
-they work against the same endpoint without the probe.
+Linux arm64 can be built on a native arm64 host with the GUI dependencies.
+macOS is not supported and receives no release archive.
 
-### Codex + GPUStack
+## First launch
 
-GPUStack's API gateway often routes `/v1/responses` to an internal
-worker chain that may not be fully implemented. If the probe
-returns 503 with a body like `Cannot connect to host …`, the route
-exists but your worker is unreachable — the wizard applies the
-config with a warning and you fix the worker side. If the probe
-returns 404, GPUStack's `/v1/responses` isn't implemented at all on
-your version; route through [LiteLLM](https://github.com/BerriAI/litellm)
-or switch the chat to claude / opencode / deepseek.
+Startup is intentionally locked until the database is available.
 
-### Gemini + Local endpoint
+1. **Create a database password.** It must contain at least 12 characters.
+   PrAImate asks for confirmation before creating the database.
+2. **Choose whether to remember it.** This is optional. Windows uses
+   Credential Manager; Linux uses the desktop Secret Service. If the
+   credential service is unavailable, the database can still open, but the
+   password is not remembered.
+3. **Read and accept the privacy notice.** It explains local storage,
+   provider/CLI data flow, agent file access, encryption limits, and backup.
+4. **Choose a projects/workspaces folder.** This is separate from the
+   PrAImate application-data folder.
+5. **Choose how to start.** Create a fresh folder, seed bundled samples, or
+   connect an existing Git-backed workspace.
 
-The wizard leaves Gemini untouched. Gemini CLI 0.42+ ignores the
-`OPENAI_*` env vars that work for Codex / OpenCode and keeps
-hitting Google's API via cached OAuth, then fails with `Model "..."
-was not found or is invalid`. Routing it through a local endpoint
-needs `~/.gemini/settings.json` (`selectedAuthType` + provider
-section), whose schema has shifted across CLI versions — the
-launcher doesn't auto-write it because the wrong schema breaks
-your config worse than no config.
+Later launches require the database password unless the explicit remember
+option succeeded. A wrong password does not open Core or SQLite.
 
-Paths that work today:
+## Storage and encryption
 
-1. **[litellm](https://github.com/BerriAI/litellm) proxy** in front
-   of your endpoint; point Gemini at it via its own config (exact
-   lines depend on your installed Gemini version).
-2. **Hand-edit `~/.gemini/settings.json`** to your CLI version's
-   OpenAI provider section.
+PrAImate centralizes app-owned data:
 
-Gemini still launches fine **without** local-endpoint routing — it
-just uses its native Google auth, which is the default.
-
-## Files on disk
-
-| Path                                                | Holds                                                   |
-|-----------------------------------------------------|---------------------------------------------------------|
-| `<config>/praimate/` (Linux XDG / Windows AppData)     | encrypted DB + password envelope, settings, agents, skills, managed tools |
-| `<config>/praimate/config.json`                        | non-secret bootstrap settings such as `workspacesRoot` |
-| `<root>/templates/<name>/workpath/`                 | wpc source: `mission.md`, `playbook.md`, `rules.md`, `personality.md`, `tools/`, `agents/`, `knowledge/` |
-| `<root>/templates/<name>/template.json`             | defaults inherited by new chats (memory, language, skills) |
-| `<root>/chats/<chat-id>/workpath/`                  | cloned from template at chat creation                   |
-| `<root>/chats/<chat-id>/sandbox/`                   | agent's cwd; compiled artifacts; gitignored             |
-| `<root>/chats/<chat-id>/chat.json`                  | `label`, `template`, `agent`, `lastUsed`, `settings`    |
-| `<root>/chats/<chat-id>/MEMORY.md`                  | persistent memory; synced from sandbox after exit       |
-| `<root>/chats/<chat-id>/sessions/<ts>-<agent>/`     | per-launch artifacts: `transcript.jsonl` (canonical rollout), `summary.md` / `summary.json` (rule-based digest), `native/` (full per-chat slice of the agent's home-dir store — see Session resume below) |
-
-## Session resume
-
-When you reopen an existing workspace chat from the GUI, PrAImate inspects the
-agent's own session store, picks the right resume flag, and stays
-out of the way:
-
-| Native sessions for this chat | Args passed to the agent |
+| System | Application-data root |
 |---|---|
-| 2 or more | `claude --resume` / `codex resume` — opens the **agent's native picker** scoped to this chat |
-| Exactly 1 | `claude --continue` / `codex resume <UUID>` — direct resume, no picker |
-| 0, but a captured transcript exists (e.g. chat dir copied from another machine) | Restore the captured rollout into the agent's store with the correct UUID-named file, then `--continue` / `resume` it |
-| 0 and nothing captured | Fresh launch |
+| Linux | `$XDG_CONFIG_HOME/praimate`, normally `~/.config/praimate` |
+| Windows | `%APPDATA%\praimate` |
 
-Per-session artifacts the launcher captures on every exit:
+The root contains:
 
-```
-<chat>/sessions/<ts>-<agent>/
-├── transcript.jsonl          # the agent's native rollout, canonical copy
-├── summary.md                # rule-based digest (turns, tools, headline)
-├── summary.json              # structured metadata for diagnostics + search
-└── native/                   # full per-chat slice of the agent's store
-    └── <agent-subdir>/...    # claude project dir, codex rollouts matching
-                              # cwd, opencode info+messages, gemini tmp...
-```
+- `db.sqlite`, encrypted with AES-256-XTS;
+- `db.sqlite.key`, an authenticated password envelope rather than a raw key;
+- `config.json`, restricted to non-secret bootstrap configuration;
+- agents, skills, managed tools, and source-built bundled binaries.
 
-The `native/` snapshot runs in a background goroutine. The slice makes the chat dir fully
-self-contained: copy it to another machine and the next launch
-restores the conversation state into the agent's home dir on the
-new machine.
+Encryption flow:
 
-The slice **restore** at launch honors the existing chat's
-`mirrorAgentState` setting. It is SIGKILL-safe: if PrAImate was force-killed mid-session,
-mirror-in compares per-file mtimes and preserves the agent's
-home-dir copy when it's newer than the slice. You don't lose
-turns to a partial snapshot.
+1. PrAImate generates a random 512-bit database key.
+2. Argon2id derives a key from the user's password.
+3. XChaCha20-Poly1305 wraps and authenticates the database key.
+4. The raw key exists only in the unlocked process and is cleared on close.
 
-## Workpath source format
+This protects a copied database from direct inspection without the password.
+It does not protect against an attacker controlling the same OS account or
+reading the unlocked process. AES-XTS encrypts database pages but does not
+provide database-page authentication. Back up the password separately; there
+is no recovery bypass.
 
-A workpath is a directory. Minimum:
+Saved Local LLM keys, MCP environment/authentication data, and chat-local API
+keys live in the encrypted database. They are not written back to
+`config.json`.
 
-```
-my-workpath/
-└── mission.md         required, non-empty
-```
+## Code
 
-Full shape:
+The Code page opens a live terminal-backed CLI in a selected project folder.
 
-```
-my-workpath/
-├── workpath.json      optional metadata + tool/agent overrides + imports
-├── mission.md         required
-├── playbook.md        optional staged process
-├── rules.md           optional hard constraints
-├── personality.md     optional persona / system-prompt block
-├── hooks.json         optional chat-lifecycle hooks (see docs/SCHEMA.md)
-├── tools/             auto-registered shell scripts
-│   ├── file_summary.sh
-│   └── count_lines.ps1
-├── agents/            named subagent prompts
-│   └── triage.md
-└── knowledge/         optional background-reading library (see below)
-    ├── papers/
-    ├── tools/
-    └── references/
-```
+You can:
 
-A workpath.json can also declare `"imports": ["_common/<bundle>"]` to
-pull a shared capability bundle (knowledge + tools + agents + hooks +
-playbook/rules fragments) from `templates/_common/` at compile time.
-Today's canonical bundle is `_common/graphify` — a graph-based
-impact-analysis capability used by every relationship-heavy template.
-See [SCHEMA.md](SCHEMA.md) for the full imports + hooks reference.
+- choose an installed supported CLI;
+- choose or enter a model where that CLI supports a model flag;
+- use the saved Local LLM route where supported;
+- start a clean session;
+- launch an agent in the selected folder so its instructions and knowledge
+  are available;
+- reopen recorded Code sessions from Chats.
 
-The launcher compiles a chat's workpath into its sandbox using the
-matching wpc target:
+Terminal scrollback exists only in GUI memory and disappears when the process
+closes. PrAImate does not write terminal-output logs. The child CLI can still
+create its own native session files.
 
-| Agent        | Target  | Output                                                                                |
-|--------------|---------|---------------------------------------------------------------------------------------|
-| Claude       | `claude`| `.claude/skills/<template>/SKILL.md` + `scripts/` + `.claude/agents/<template>__<agent>.md` + `.claude/settings.json` (hooks) |
-| OpenClaude   | `claude`| Same `.claude/skills/` layout — OpenClaude is a Claude Code fork and reads the same files |
-| Codex        | `codex` | `AGENTS.md` + `AGENTS.assets/`                                                        |
-| OpenCode     | `codex` | `AGENTS.md` + `AGENTS.assets/` (OpenCode reads `AGENTS.md` too)                       |
-| Gemini       | `gemini`| `GEMINI.md` (single-file digest the Gemini CLI reads on every prompt)                 |
-| DeepSeek-TUI | `codex` | `AGENTS.md` at the sandbox root — DeepSeek auto-loads it via its `init` subcommand convention |
+When no agent is selected, enabled MCP servers can still be prepared for the
+clean Code session. With an agent, the agent's MCP references and current
+configuration are used.
 
-Two extra targets are useful when authoring templates for tools the
-launcher doesn't directly drive:
+## Chats
 
-| Target   | Output                                                |
-|----------|-------------------------------------------------------|
-| `mika`   | `modules/<name>/{module,playbook,rules}.md` + assets  |
-| `cursor` | `.cursor/rules/<name>.mdc` (tools/agents inlined)     |
+Chats provides four saved-session groups:
 
-Full schema + per-target reference: [SCHEMA.md](SCHEMA.md),
-[TARGETS.md](TARGETS.md), [ACTIVATION.md](ACTIVATION.md),
-[QUICKSTART.md](QUICKSTART.md).
+- normal clean chats;
+- Agent Studio sessions;
+- Code sessions;
+- legacy workspace chats.
 
-## Imports, managed tools, hooks
+For a clean chat, choose the CLI, optional model, tool level, per-chat skills,
+and MCP servers. If a compatible Local LLM default exists, the new-chat form
+can route the chat through that endpoint.
 
-Three features that extend the wpc compile-once-for-N-agents model.
-The GUI's **CLI & Tools** page hosts the install/update UX for graphify
-and other managed tools.
+Opening a chat shows rendered Markdown rather than raw Markdown delimiters.
+Code blocks, headings, tables, lists, and links are presented as formatted
+content.
 
-### Shared capability bundles via `imports:`
+Chat settings remain per-chat truth. Changing the CLI starts a new native CLI
+session while preserving the PrAImate conversation record.
 
-Workpath templates can pull in shared knowledge / tools / agents / hooks
-from sibling bundles under `templates/_common/`. The six shipped
-analysis templates (`code-review`, `reversing`, `reverse-ghidra`,
-`cve-analysis`, `cc-evidence-dossier`, `praimate-dev`) already import
-`_common/graphify` — no extra work to use them; just launch:
+The selected CLI performs the actual provider communication. PrAImate cannot
+force HTTPS when a configured model endpoint only exposes HTTP.
 
-```
-praimate                       # pick code-review (or any analysis template)
-# the agent's sandbox now contains graphify_impact.sh, graphify_query.sh,
-# and a graphify-usage.md cheat-sheet — all merged from _common/graphify.
+## Agents
+
+The Agents page manages reusable YAML agents. The old legacy-template import
+button is not part of the current UI.
+
+An agent can define:
+
+```yaml
+schema: praimate.agent/v1
+id: example
+name: Example
+description: Example agent
+instructions: |
+  You are an example agent.
+supports: [claude, codex, opencode, praimate-code]
+tools: [edits]
+mcp_servers: [local-filesystem]
+surfaces: [chat, code, workflow]
+knowledge: raw
 ```
 
-To add the import to a new template you author:
+Optional fields include:
 
-```json
-{
-  "description": "...",
-  "imports": ["_common/graphify"]
-}
+- workflows and a default workflow;
+- workflow inputs and ordered steps;
+- MCP server IDs;
+- raw or `rag` knowledge mode;
+- a requirements script.
+
+Requirements scripts can install software and modify the computer. PrAImate
+shows an explicit confirmation before running one.
+
+### Agent Studio
+
+Agent Studio edits the YAML and associated files. It can use an installed CLI
+as a helper, then lets the user review/apply the helper's changes.
+
+### Knowledge
+
+Each agent can keep files under:
+
+```text
+<application-data>/agents/<agent-id>/knowledge/
 ```
 
-For nested templates (e.g. the `templates/<name>/workpath/` shape that
-`praimate-dev` uses), or for adding the import directly to an existing
-chat's workpath, use the relative form that escapes the extra depth:
+Modes:
 
-```json
-{ "imports": ["../_common/graphify"] }              // nested template
-{ "imports": ["../../templates/_common/graphify"] } // chat workpath
+- **raw**: the agent is instructed to read relevant files directly;
+- **rag**: Graphify indexes the folder and the agent queries that index.
+
+The GUI can add files or folders, edit supported text files, remove entries,
+choose a Graphify indexing backend, and rebuild the index.
+
+### Agent packs
+
+Exporting an agent produces either YAML or a `.praimate-agent` pack. Packs can
+contain:
+
+```text
+agent.yaml
+knowledge/**
+requirements/**
 ```
 
-The bundle's playbook + rules fragments append to the consumer's own
-sections under `## Imported capabilities: <bundle>` headings; tool /
-agent / knowledge / hook collisions are resolved in the consumer's
-favor. Missing imports are a hard compile error.
+Import validates a staged copy before replacing live agent data. Graphify
+output may travel with the pack, so an indexed agent can arrive pre-indexed.
 
-See [SCHEMA.md](SCHEMA.md) for the full reference and
-`templates/_common/README.md` for the bundle inventory.
+Skills are not embedded in agent packs in 1.1.1. Skills remain separate,
+CLI-specific resources selected on Chats.
 
-### PrAImate-managed tools (the graphify case)
+## Skills
 
-Templates that import `_common/<bundle>` assume the wrapped binary is
-on PATH. PrAImate installs its known tools into an isolated managed prefix
-so they don't touch your global Python / pnpm state.
+Skills are reusable prompt/instruction resources. The Skills page can:
 
-The shipped tool today is **graphify** (a tree-sitter-AST + LLM
-knowledge-graph builder for code). Two ways to install:
+- browse built-in and user-added entries;
+- filter by supported CLI;
+- enable or disable a skill;
+- add from a Git/HTTP URL;
+- import a local ZIP;
+- define a skill manually;
+- remove user-added entries;
+- assign skills to existing chats.
 
-```
-# In the GUI: CLI & Tools → Managed tools → graphify
+Skills are CLI-specific. A skill designed for one host may refer to tools or
+loading conventions another CLI does not have.
 
-# Or from the CLI:
-praimate -install-tool graphify
-```
+URL/ZIP extraction rejects path traversal. Downloaded resources are cached so
+reopening the same chat does not needlessly download them again.
 
-This calls `uv tool install graphifyy` with `UV_TOOL_DIR` and
-`UV_TOOL_BIN_DIR` pointed at `<config>/praimate/tools/graphify/`, and the
-PyPI index pinned to `https://pypi.org/simple/`. The bin dir is
-prepended to `PATH` on every PrAImate startup, so the graphify-wrapper
-scripts in the imported bundle find the binary by name without you
-editing your shell rc.
+## CLI & Tools
 
-If `uv` isn't installed, PrAImate refuses to auto-install it (single-Go-
-binary policy — you opt into the uv install yourself) and prints the
-official one-liner:
+This page detects installed CLIs and managed tools, shows the resolved binary
+path/version, and exposes the supported install/update/repair action.
 
-```
-curl -LsSf https://astral.sh/uv/install.sh | sh    # Linux
-irm https://astral.sh/uv/install.ps1 | iex         # Windows
-winget install --id=astral-sh.uv -e                # Windows (winget)
-```
+Selectable CLI families are:
 
-### Building bundled tools from source (GUI)
+- Claude Code;
+- OpenClaude;
+- Codex CLI;
+- OpenCode;
+- PrAImate Code.
 
-Some bundled binaries can't be cross-compiled, so a release only ships
-prebuilt **PrAImate Code** and **graphify** for the platforms we build
-them on (graphify standalone is currently Linux/amd64; PrAImate Code is
-the native target of each release host). On any other platform you can
-build them locally instead of downloading:
+PrAImate Code is one product entry: the managed, rebranded OpenCode binary.
+The UI no longer shows a second duplicate item for a source-built copy.
+Detection resolves the installed binary regardless of whether it came from a
+release asset or a local source build.
 
-**GUI → Settings → Build bundled tools from source.** Each tool shows
-the toolchain it needs (`git` always; `bun` for PrAImate Code, `uv` for
-graphify; plus `bash` on Windows, which ships with Git for Windows) and
-a ✓/✗ for each. When everything's present, **Build from source**:
+Managed tools include PrAImate Code and Graphify. Other optional integrations
+appear only when their supported installer/detection entry exists.
 
-1. clones the PrAImate repo (shallow) into a temp directory,
-2. runs the matching build script (`scripts/build-praimate-code.sh` /
-   `scripts/build-graphify.sh`), streaming the output live,
-3. installs the finished binary into `<config>/praimate/bin/` — exactly
-   where the resolver looks for the bundled copy,
-4. deletes the temporary checkout so nothing lingers on disk.
+## Local LLM
 
-The PrAImate Code build downloads OpenCode's full dependency tree (~2 GB)
-and takes a few minutes; graphify freezes a PyInstaller standalone. Both
-are one-and-done — the result resolves on the next launch with no PATH
-edits.
+The Local LLM page stores a default OpenAI-compatible endpoint, optional
+Bearer key, and model. It probes common model-list routes and permits manual
+model entry if probing fails.
 
-After uv lands, re-run `praimate -install-tool graphify`. The bin ends up
-at `<config>/praimate/tools/graphify/bin/graphify`.
+Typical compatible servers include:
 
-**Friction signal on launch.** If a chat's workpath imports a `_common/
-<bundle>` whose underlying tool isn't reachable yet, the launching
-screen surfaces a one-line note with the exact install command. No
-silent failure — the agent would just hit "graphify: command not
-found" inside the chat otherwise.
+- Ollama;
+- GPUStack;
+- vLLM;
+- LiteLLM;
+- llama.cpp server;
+- LocalAI.
 
-### Cross-harness hooks (`hooks.json`)
+### HTTP warning
 
-Drop a `hooks.json` next to `mission.md` to register chat-lifecycle
-triggers. Source schema is target-agnostic; each wpc target compiles
-the hooks into its native format.
+If the endpoint begins with `http://`, the page warns that the underlying CLI
+will communicate with the model server over unencrypted HTTP. This may be
+reasonable for loopback or a trusted private network, but it is unsafe across
+untrusted networks. Configure TLS on the server or a trusted reverse proxy to
+obtain HTTPS.
 
-```json
-{
-  "hooks": [
-    {
-      "event": "pre_tool",
-      "matcher": "Bash",
-      "command": "scripts/check-bash-policy.sh",
-      "description": "Validate bash calls against the project policy"
-    },
-    {
-      "event": "session_start",
-      "command": "git fetch --quiet origin main"
-    }
-  ]
-}
-```
+### Per-CLI behavior
 
-Today the `claude` target emits a real `.claude/settings.json` that
-Claude Code reads on every turn. Other targets (codex / opencode /
-gemini / mika) append a `## Hooks (declared, NOT wired for <target>)`
-section to the compiled instructions listing each declared hook, so
-the agent can see what was intended even though PrAImate can't fire them
-automatically yet. Real emitters land per target when each upstream
-agent grows a stable hook spec.
+| CLI | Configuration |
+|---|---|
+| Claude/OpenClaude | Per-launch environment variables and selected model. |
+| OpenCode/PrAImate Code | Provider configuration references `OPENAI_API_KEY`; PrAImate supplies the secret at launch. |
+| Codex | `ollama_remote` profile, only after `/v1/responses` compatibility probing. |
 
-Portable events (PrAImate name → Claude Code name):
+Codex 0.130+ requires the Responses API. A server that only provides
+`/v1/chat/completions` is not enough for Codex even if it works with other
+CLIs. PrAImate accepts success/auth responses, warns on an unhealthy upstream
+route, and refuses clear unsupported-route responses.
 
-| PrAImate            | Claude Code         |
-|------------------|---------------------|
-| `pre_tool`       | `PreToolUse`        |
-| `post_tool`      | `PostToolUse`       |
-| `user_input`     | `UserPromptSubmit`  |
-| `session_start`  | `SessionStart`      |
-| `session_stop`   | `Stop`              |
-| `subagent_stop`  | `SubagentStop`      |
-| `notification`   | `Notification`      |
+The Local LLM key is migrated out of older plaintext configuration into the
+encrypted database.
 
-Hooks can also live in a `_common/<bundle>/hooks.json` and travel with
-imports. Collisions resolve in the consumer's favor, keyed on
-`event + matcher` — your `pre_tool/Bash` overrides an imported one,
-but an imported `pre_tool/Edit` still fires alongside.
+## MCP
 
-See [SCHEMA.md](SCHEMA.md) for per-field semantics and validation rules.
+The MCP page is limited to servers the user configures or runs locally. It
+does not present a catalogue of third-party hosted services.
 
-### Verify end-to-end
+Supported transports:
 
-```
-# 1. confirm the import merged into an analysis template:
-wpc compile templates/code-review --target claude --out /tmp/cr-test
-ls /tmp/cr-test/.claude/skills/code-review/scripts/
-#  → graphify_impact.sh, graphify_query.sh
+- **stdio**: a local executable, script, package runner, or container command;
+- **HTTP**: an endpoint hosted on infrastructure the user controls.
 
-# 2. confirm a hooks.json compiled into settings.json:
-ls /tmp/cr-test/.claude/settings.json   # exists when the template has hooks
+The add/edit form supports:
 
-# 3. confirm graphify is reachable:
-graphify --version
-```
+- name;
+- transport;
+- quoted stdio command and arguments;
+- HTTP URL;
+- environment variables.
 
-## Pages
+Stdio commands expand `~/`, `$VAR`, and `${VAR}` before launch. MCP secrets
+are stored in the encrypted database. Every saved server can be enabled,
+disabled, edited, or removed.
 
-- **Code** — live CLI terminals in a selected project folder.
-- **Chats** — clean conversations and existing workspace-chat resume.
-- **Agents** — import, edit, and run reusable agents and workflows.
-- **Skills** — manage reusable prompt skills.
-- **CLI & Tools** — detect, install, and repair supported CLIs and tools.
-- **Local LLM** — configure an OpenAI-compatible local endpoint.
-- **MCP** — connect and manage MCP servers.
-- **Settings** — privacy, automation, backup, appearance, and updates.
-- **About** — version/platform details, encryption status and paths,
-  privacy boundaries, backup disclosure, and supported systems.
+The Local catalogue contains optional utilities PrAImate launches as local
+processes. Catalogue entries can be configured and edited like other local
+servers.
 
-## Online skills
-
-Each template (or chat) can declare a list of "online skills" — small
-repos / archives the launcher pulls down into the agent's expected
-load location on every launch. Two transports are auto-detected from
-the URL:
-
-- **git** — any URL `git clone` understands (https, ssh,
-  `git@host:path`, `file://`, local paths).
-- **zip** — any `http(s)://…/something.zip` URL. Downloaded with the
-  stdlib HTTP client, extracted in-process. GitHub archive downloads
-  (everything nested under a single top-level dir) get flattened so
-  the skill files land at the root of the target directory. Path-
-  escaping entries (e.g. `../foo`) are rejected.
-
-Both transports cache by directory name, so reopening the same
-workspace chat does not re-download them.
-
-Once cloned, the launcher injects a required-reading directive into
-the compiled instructions: the agent is told the skills exist
-(listed by relative path), and that it MUST scan the list at the
-start of every user turn and open the primary `SKILL.md` /
-`README.md` of any skill whose topic matches the current question.
-On the Claude target, skills also land under `.claude/skills/`
-which Claude Code auto-loads; the directive reinforces the
-auto-load and applies the same workflow to Codex / OpenCode /
-Gemini, which don't auto-load anything.
-
-## Knowledge base
-
-Each template (and each cloned chat) can ship a `knowledge/`
-directory full of background reading the agent can pull on
-demand — docs, papers, tool descriptions, schema cheat-sheets,
-anything that helps it reason but doesn't belong in the
-mission/playbook/rules trio.
-
-```
-my-workpath/
-└── knowledge/
-    ├── papers/
-    │   └── secure-boot.md
-    ├── tools/
-    │   └── binwalk.md
-    └── datasheets/
-        └── stm32f4.pdf
-```
-
-On every launch, the compiler:
-
-1. **Stages the whole tree** into the chat's sandbox at the same
-   relative path (`<sandbox>/knowledge/...`). The agent's file-
-   reading tools (Claude's `Read`, Codex's `view`, etc.) find it
-   immediately under the working directory.
-2. **Auto-generates a required-reading manifest** in the compiled
-   instructions (`SKILL.md` / `AGENTS.md` / `GEMINI.md`) listing
-   every file with title + short summary. The instructions tell the
-   agent it MUST scan that list at the start of every user turn,
-   open any file whose title/summary overlaps with the current
-   question, and cite the file path when it draws on the contents.
-   Contents are **not** pre-loaded into context — the agent opens
-   them on demand via its own file-reading tool.
-
-Preferred format is **markdown**; the launcher also extracts
-summaries from `.txt`, `.rst`, `.org`, `.json`, `.yaml`, `.toml`,
-and `.csv` files. Anything else (PDFs, images, archives) gets
-listed by name + size with a `(binary)` marker so the agent knows
-it's there but isn't expected to parse it directly.
-
-Hidden files / dirs (anything starting with `.`) are skipped.
-Symlinks and entries containing `..` are rejected for safety.
-
-The bundled samples ship a `knowledge/` directory you can read
-to see the manifest format in action:
-[`samples/workpaths/reversing/knowledge/`](../samples/workpaths/reversing/knowledge),
-[`samples/workpaths/code-review/knowledge/`](../samples/workpaths/code-review/knowledge).
-
-### Meta-template: `workpath-author`
-
-The bundled `workpath-author` template is a chat that already
-knows the workpath system cold — the schema, the per-target
-outputs, the decoration pipeline. Start a chat from it and you
-can say *"make me a template for X"* and the agent will scaffold
-the directory, write `mission.md` / `playbook.md` / `rules.md`,
-ask whether you want memory / persona / knowledge, and validate
-the result against the schema before reporting done.
-
-It ships with the canonical docs in
-[`samples/workpaths/workpath-author/knowledge/`](../samples/workpaths/workpath-author/knowledge)
-(schema, targets, activation, quickstart, decoration pipeline)
-plus a `new-workpath.{sh,ps1}` scaffolding tool for authoring a new
-template from the shell.
+Chats select enabled MCP servers per chat. Agents can reference server IDs in
+their YAML `mcp_servers` field. A requirements script can install an MCP
+implementation, but installation alone does not create its PrAImate server
+record; the server must still be configured or referenced by a known ID.
 
 ## Settings
 
-The GUI Settings page contains privacy rules, folder watchers, schedules,
-git backup, appearance, and update controls. Chat-specific CLI, model,
-tool level, skills, and MCP selections are edited from the Chats page.
-Local endpoint defaults live on the Local LLM page.
+### Updates
 
-The first-run privacy notice is versioned and appears once. A future
-material change to telemetry, storage, or encryption can increment the
-notice version and require a fresh acknowledgement. PrAImate itself
-does not send product analytics or write application diagnostics,
-Graphify queries, or Code-terminal output to log files. Live terminal
-scrollback exists only in memory and disappears when the terminal
-process closes. External agent CLIs can still maintain their own native
-session data for resume. The About page keeps the same disclosure
-available after first run.
+**Check for updates** compares the running version with the latest published
+GitHub release. `praimate -update` performs the actual self-update and refreshes
+the sibling GUI binary.
 
-The local database is encrypted with AES-256-XTS. Its random database key is
-wrapped with XChaCha20-Poly1305 under an Argon2id-derived password key. The raw
-database key is held only in process memory while PrAImate is unlocked. This
-does not protect against an attacker controlling the same OS account or
-reading the unlocked process, and XTS provides confidentiality rather than
-database-page tamper authentication. Losing the password means losing access
-to the local database and its encrypted backup snapshots.
+### Build bundled tools from source
 
-## Backup (optional cloud sync over git)
+PrAImate can build PrAImate Code or Graphify from source when prerequisites
+are present. The GUI shows each required program, streams build output, installs
+the finished binary under the application-data root, and deletes the temporary
+checkout.
 
-Optional, off by default. When enabled, the workspaces root becomes a
-git repository whose history mirrors your chats and templates across
-machines. No GitHub / Gitea REST API calls — pure git protocol over
-HTTPS or SSH, using the credentials your `git` client already has.
+PrAImate Code requires Git, Bash, and Bun. Graphify requires Git and `uv`.
 
-### Three ways to start
+### Appearance
 
-The first-run wizard offers three options after the workspaces-root
-prompt:
+Choose light, dark, or system theme and an accent color.
 
-1. **Empty folder** — just `chats/` + `templates/`. Backup stays off.
-2. **Empty folder + bundled samples** — same plus the bundled
-   starter templates. Backup stays off.
-3. **Clone from a git remote** — pulls existing chats and templates
-   from a remote you already pushed to from another machine. The
-   wizard runs a connection probe (`git ls-remote`) before cloning;
-   on failure it falls back to option 1 but preserves the URL in
-   your config so the Backup tab opens pre-filled for retry.
-   Successful clone implicitly enables backup.
+### Data and privacy
 
-### Master switch
+The page shows the exact application-data and projects-folder paths. It offers:
 
-The Backup settings open with the feature OFF. Flipping the master switch
-is the single explicit action that turns backup on. It initialises
-the workspaces root as a git repository, writes a managed
-`.gitignore` + `.gitattributes`, and unlocks the rest of the tab.
-Flipping it back off clears the remote URL and disables auto-sync;
-the local `.git` directory stays so re-enabling later is cheap.
+- **Require password next launch**, which removes the remembered OS credential;
+- **Delete all stored data**, described below.
 
-### What gets tracked
+## About and privacy
 
-PrAImate's managed `.gitignore` excludes every file at the workspaces
-root **except** `chats/`, `templates/` and `.praimate-state/`. Inside
-the first two, **everything is tracked** — sandbox, captured
-transcripts, native session slices, the full per-chat
-`MEMORY.md` — so a fresh clone on another machine restores not just
-the workpaths but the actual conversation state. Stray files at the
-root (scratch notes, environment overrides, etc.) never propagate.
+About shows:
 
-`.praimate-state/` is how the **database travels too**: before every
-backup commit, PrAImate snapshots its SQLite DB (DB chats, messages,
-agents, MCP servers, and settings) plus the shareable slice of
-your config (local-LLM endpoint defaults) into that directory. After
-every pull / merge / reset / first clone, the remote machine's
-snapshot is **row-merged** into the live local DB — newer edits win on
-keyed rows, messages dedupe on content, and local-only rows are never
-lost. That's what lets multiple hosts share the same chats: git moves
-the snapshot, PrAImate merges it. (Deletions don't propagate yet — a
-chat deleted on one host can reappear after syncing with a host that
-still has it.)
+- PrAImate version and build platform;
+- database encryption state;
+- database/key/config/workspace paths;
+- supported systems;
+- the same complete privacy disclosure shown on first launch.
 
-The `.praimate-state/db.sqlite` snapshot is encrypted and travels with
-`.praimate-state/db.sqlite.key`, a copy of its authenticated password
-envelope. Another Windows or Linux installation can open and row-merge it
-using the same database password; the raw key and password are never committed.
-Because the snapshot is encrypted, structured credentials remain part of the
-recoverable database backup. Anyone who copies the repository can attempt
-offline password guesses against the envelope, so use a strong password unique
-to PrAImate.
+PrAImate itself:
 
-The rest of the backup repository is not an encrypted vault: workspace files,
-captured transcripts, native session slices, and per-chat `MEMORY.md` files are
-normal Git objects and may contain sensitive text. Use a private remote you
-trust and do not enable backup for projects that must never leave the device.
+- sends no product analytics;
+- writes no application diagnostics log;
+- writes no Graphify query log;
+- writes no Code-terminal output log.
 
-If you hand-edit `.gitignore`, the absence of the PrAImate-managed
-marker line tells the launcher to leave it alone on the next sync.
+The selected CLI/model provider receives prompts and context necessary to
+perform the user's request. Agent instructions can authorize filesystem or
+tool access. Review the CLI's own permissions and provider policy.
 
-### Sync flow
+## Per-chat MEMORY.md
 
-Once enabled, the Backup tab exposes:
+The removed cross-chat Memory GUI/database section is not part of the current
+tool. There is no episodes/facts/identity profile accumulated across unrelated
+chats.
 
-- **Remote URL** — edit at any time.
-- **Test connection** — lightweight `git ls-remote` probe.
-- **Sync now** — commits local changes, fetches, then decides:
-  in-sync → no-op; local-ahead-only → push; remote-ahead-only →
-  fast-forward pull; diverged → resolution popup.
-- **Reset from remote** — discards local; two confirmations.
-- **Force push** — overwrites remote; one confirmation.
-- **Disconnect** — clears the remote URL and disables auto-sync;
-  local files untouched.
-- **Auto-sync** — optional sync on every PrAImate startup and exit.
-- **Force always local** — sub-option of auto-sync. Forces local
-  state to win on divergence. Guarded by a per-commit Machine-ID
-  trailer and a 24-hour window: PrAImate refuses to overwrite when
-  another machine pushed recently.
+Legacy workpath chats can still use per-chat `MEMORY.md`:
 
-### Divergence resolution
+```text
+<projects-root>/chats/<chat-id>/MEMORY.md
+```
 
-When both sides have unique commits, the launcher shows the
-local and remote commit lists with timestamps and offers four
-reconciliations:
+When enabled for that workpath, the file is staged into the sandbox before
+launch and synchronized back after exit. It is normal workspace content and
+can be included in Git backup. This file-based, on-chat behavior is separate
+from the deleted cross-chat memory functions.
 
-- **[m] Merge** — keep both sides via a merge commit.
-- **[r] Rebase** — replay local on top of remote.
-- **[p] Force push** — discard remote, keep local.
-- **[R] Reset** — discard local, keep remote.
+## Git backup
 
-Merge or rebase conflicts surface a panel naming the conflicting
-files and pointing the user at the workspaces root for manual
-resolution.
+Git backup is optional. It uses the installed `git` executable and the user's
+existing HTTPS credential helper or SSH agent.
 
-### MEMORY.md custom merge
+### Initial configuration
 
-`MEMORY.md` in any chat or template uses a custom merge driver
-registered automatically when backup is enabled. Concurrent edits
-across machines concatenate under a
-`## --- merged from another machine at <ts> ---` separator instead
-of producing `<<<<<<<` conflict markers — so the agent's running
-notes are preserved on both sides rather than turning into a Git
-merge artefact the next session has to parse.
+When no backup repository exists, Settings requires an explicit choice:
 
-### Credentials
+1. **Start a new backup**: initialize local history; a remote is optional.
+2. **Connect an existing backup**: test/fetch the remote and compare histories
+   before any reconciliation.
 
-The launcher never prompts for credentials. Whatever auth your
-local `git` client uses (HTTPS credential helper, SSH agent,
-git-credentials file, …) is what backup uses. For a private repo:
-configure credentials on the command line first (`git clone <url>`
-in a terminal once is enough to confirm) before pointing PrAImate at
-it.
+This avoids treating an enable switch as permission to create or overwrite a
+remote repository. PrAImate-owned backup commits use the repository-local
+`PrAImate <praimate@local>` identity, so a global Git identity is neither
+required nor modified.
 
-## Roadmap
+### Normal controls
 
-Not yet implemented; PRs welcome:
+After initialization:
 
-- **OpenCode native session resume.** Slice snapshot is wired, but
-  the resume branch in `internal/launcher/resume.go` falls back to
-  the markdown-summary inject.
-- **Codex shape-aware probe.** The current probe checks status
-  codes; an endpoint that returns 200 with a non-responses-shaped
-  body (some Ollama versions) sneaks through.
-- **Auto-spawn LiteLLM as a sidecar** for codex+GPUStack-style
-  setups.
-- **Per-chat conversation tagging / saved searches.** The Chats page
-  searches titles and messages; structured tagging would add a durable
-  organization layer.
+- enable or pause backup without deleting local history;
+- edit and test the remote URL;
+- sync now;
+- enable startup/exit auto-sync;
+- optionally prefer recent local state;
+- merge or rebase diverged histories;
+- force-push local state after confirmation;
+- reset from remote after two confirmations;
+- disconnect the remote.
+
+### Encrypted database snapshot
+
+Before a backup commit, PrAImate writes:
+
+```text
+.praimate-state/db.sqlite
+.praimate-state/db.sqlite.key
+```
+
+The snapshot remains encrypted and the adjacent file remains a
+password-protected envelope. A second Windows or Linux installation can merge
+the snapshot only when its local database is unlocked with the same password.
+The password and raw key are not committed.
+
+The encrypted snapshot preserves structured credentials so a restore is
+complete. Anyone with the repository can attempt offline password guessing,
+so use a strong unique password and a private remote.
+
+### What Git does not encrypt
+
+Workspace files are normal Git objects, including:
+
+- workpaths and project content;
+- captured transcripts;
+- mirrored native session slices;
+- per-chat `MEMORY.md`.
+
+Do not treat the repository as an encrypted vault.
+
+### Upgrade warning
+
+Backups created by older releases may contain plaintext SQLite snapshots in
+Git history. Publishing a new encrypted snapshot does not remove old Git
+objects. Recreate the backup repository or deliberately rewrite its history if
+those old objects must be eliminated.
+
+## Delete all stored data
+
+Open **Settings → Data and privacy → Delete all stored data**.
+
+The dialog:
+
+1. lists the types of application data that will be removed;
+2. lets the user keep the projects folder or select it for deletion;
+3. requires an acknowledgement checkbox;
+4. requires typing the displayed confirmation phrase;
+5. shows a final OS confirmation dialog.
+
+Deletion removes:
+
+- the encrypted database and password envelope;
+- non-secret bootstrap configuration;
+- agents, skills, MCP credentials, and managed tools;
+- remembered database credential;
+- PrAImate-managed routing blocks from supported CLI configuration without
+  deleting unrelated CLI data.
+
+If projects-folder deletion is selected, the entered folder must match the
+configured projects root. The application closes after deletion. The next
+launch starts clean.
+
+## Files and ownership boundaries
+
+| Path | Owner and contents |
+|---|---|
+| `<config>/praimate/` | PrAImate application data. |
+| `<config>/praimate/db.sqlite` | Encrypted SQLite state. |
+| `<config>/praimate/db.sqlite.key` | Password-protected key envelope. |
+| `<config>/praimate/config.json` | Non-secret bootstrap settings. |
+| `<config>/praimate/agents/` | Agent YAML, knowledge, requirements. |
+| `<config>/praimate/skills/` | User skill definitions/content. |
+| `<config>/praimate/bin/`, `tools/` | Managed or source-built binaries. |
+| `<projects-root>/` | User-selected chats/templates/projects and optional Git repository. |
+| CLI-specific home directories | Native CLI authentication, configuration, and sessions; not wholly owned by PrAImate. |
+
+`PRAIMATE_HOME` can override the application-data root for portable installs
+and tests.
+
+## Build from source
+
+Linux GUI dependencies:
+
+```sh
+sudo apt-get install -y npm pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev
+```
+
+Build the release bundles:
+
+```sh
+scripts/build.sh --version=1.1.1
+scripts/build.sh --version=1.1.1 --with-code --with-graphify
+```
+
+Build only the GUI:
+
+```sh
+cd cmd/praimate-gui
+./build.sh
+```
+
+Build PrAImate Code:
+
+```sh
+PATH="$HOME/.bun/bin:$PATH" \
+  OUT="dist/$(go env GOOS)-$(go env GOARCH)" \
+  scripts/build-praimate-code.sh
+```
+
+See [RELEASE-GITHUB.md](RELEASE-GITHUB.md) for every required release asset,
+baseline/no-AVX2 variants, and checksum publication.
