@@ -147,7 +147,14 @@
         <div class="card-title">{s.name} <span class="pill">{s.transport}</span></div>
         <div class="card-sub mono">{s.url || s.command}</div>
       </div>
-      <button class="btn" class:primary={s.enabled} on:click={() => toggle(s)}>{s.enabled ? 'Enabled' : 'Disabled'}</button>
+      <span class="pill" class:ok={s.enabled}>{s.enabled ? 'Enabled' : 'Disabled'}</span>
+      <button
+        class="btn"
+        class:primary={!s.enabled}
+        aria-label={`${s.enabled ? 'Disable' : 'Enable'} ${s.name}`}
+        on:click={() => toggle(s)}>
+        {s.enabled ? 'Disable' : 'Enable'}
+      </button>
       <button class="btn" on:click={() => edit(s)}>Edit</button>
       <button class="btn danger" on:click={() => remove(s)}>Remove</button>
     </div>

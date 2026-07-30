@@ -585,8 +585,15 @@
     color: var(--text);
   }
   .danger-panel {
-    border: 1px solid color-mix(in srgb, var(--danger) 55%, var(--border));
-    background: color-mix(in srgb, var(--danger) 7%, var(--bg-raised));
+    border: 1px solid color-mix(in srgb, var(--err) 55%, var(--border));
+    background: var(--bg-panel);
+    box-shadow:
+      0 24px 80px rgba(0, 0, 0, .58),
+      0 0 0 1px color-mix(in srgb, var(--err) 12%, transparent);
+  }
+  .destructive-backdrop {
+    background: rgba(0, 0, 0, .72);
+    backdrop-filter: blur(4px);
   }
   .danger-copy {
     line-height: 1.55;
@@ -606,13 +613,13 @@
 {#if deleteModal}
   <!-- svelte-ignore a11y-click-events-have-key-events -->
   <!-- svelte-ignore a11y-no-static-element-interactions -->
-  <div class="modal-backdrop" on:click={() => !deletingData && (deleteModal = false)}>
-    <div class="modal-content danger-panel" on:click|stopPropagation>
-      <h2>Delete all PrAImate data</h2>
+  <div class="modal-backdrop destructive-backdrop" on:click|self={() => !deletingData && (deleteModal = false)}>
+    <div class="modal-content danger-panel" role="dialog" aria-modal="true" aria-labelledby="delete-data-title">
+      <h2 id="delete-data-title">Delete all PrAImate data</h2>
       <p class="danger-copy">
         This permanently deletes the encrypted database, its password-protected key envelope, settings, agents,
         skills, MCP credentials, and PrAImate-managed tools. Managed PrAImate routing is removed
-        from Codex, OpenCode, and DeepSeek config without deleting their unrelated data.
+        from supported CLI configuration without deleting unrelated CLI data.
       </p>
 
       <label class="confirm-line">
