@@ -2,7 +2,7 @@
   <img src="assets/monke-icon.png" alt="PrAImate" width="120" />
 </p>
 
-# PrAImate 1.1.1 user guide
+# PrAImate 1.2.0 user guide
 
 PrAImate is a Linux and Windows desktop harness around supported agent CLIs.
 It provides a shared GUI, but the chosen CLI still performs model requests,
@@ -204,8 +204,37 @@ shows an explicit confirmation before running one.
 
 ### Agent Studio
 
-Agent Studio edits the YAML and associated files. It can use an installed CLI
-as a helper, then lets the user review/apply the helper's changes.
+Agent Studio offers three entry paths:
+
+- **Guided** asks for the agent's purpose, knowledge mode, capabilities, and a
+  preset, then previews the exact generated files before creation.
+- **Manual** creates the familiar YAML agent and leaves every field editable.
+- **Import** accepts a bare YAML definition or a portable agent pack.
+
+The four guided presets are deterministic. Simple and Tool-enabled use the
+existing native CLI runtime. Autonomous uses the managed single-agent runtime
+in Chats, document Studio, and Workflows. Team remains fail-closed until the
+coordinator/delegation phase. Older manifests that explicitly request sandbox
+or checkpoints also remain blocked until those modules exist.
+
+Managed Autonomous execution provides explicit lifecycle completion, bounded
+context/output, per-run working memory, artifacts, and live events. It pins the
+underlying CLI to safe permissions: host commands, file changes, network
+policy, approvals, and isolation are intentionally not available yet. Agent
+Studio lists recent managed runs and lets the user inspect their memory and
+text artifacts. Its authoring helper stays native so it can edit `agent.yaml`.
+An Autonomous agent that references MCP servers is rejected before launch;
+passing those servers directly to the CLI would bypass the managed broker, and
+the policy-aware MCP broker belongs to the next runtime phase.
+Managed Autonomous agents with Graphify RAG are rejected for the same reason:
+Graphify currently requires a host command. Use Raw documents for an
+Autonomous agent, or a native preset when Graphify retrieval is required.
+
+The editor exposes advanced configuration as a separate, strictly validated
+`runtime.json` tab. Closing and reopening that tab reloads the saved manifest.
+
+Agent Studio can also use an installed CLI as a helper, then lets the user
+review/apply the helper's changes.
 
 See the [Agent creation manual](AGENT_GUIDE.md) for a step-by-step tutorial,
 the complete `praimate.agent/v1` field reference, workflow templates,
@@ -235,14 +264,19 @@ contain:
 
 ```text
 agent.yaml
+runtime.json
 knowledge/**
 requirements/**
 ```
 
+`runtime.json` is optional. A pack without it replaces the recipient agent
+with native-runtime behavior, so a stale advanced configuration cannot survive
+an import invisibly.
+
 Import validates a staged copy before replacing live agent data. Graphify
 output may travel with the pack, so an indexed agent can arrive pre-indexed.
 
-Skills are not embedded in agent packs in 1.1.1. Skills remain separate,
+Skills are not embedded in agent packs in 1.2.0. Skills remain separate,
 CLI-specific resources selected on Chats.
 
 ## Skills
@@ -319,6 +353,26 @@ obtain HTTPS.
 The Local LLM key is migrated out of older plaintext configuration into the
 encrypted database and is resolved in Go only when a supported child process
 is launched. It is not returned to the GUI renderer.
+
+### Execution preflight
+
+Chat, Studio, workflow, and Code-terminal launches share one backend resolver.
+It computes the effective model, local route, credential environment, MCP
+selection, and permission level before invoking the CLI. The launch preflight
+checks:
+
+- the selected CLI is installed and supported by the agent;
+- the agent permits the requested GUI surface;
+- the working folder exists and is a directory;
+- referenced MCP servers exist, with disabled servers reported;
+- the CLI can enforce the requested permission level;
+- local routing is supported and has a model;
+- remote plaintext HTTP endpoints are explicitly warned about.
+
+Preflight errors block launch. Warnings are shown for confirmation. Unsupported
+permission levels degrade to safe mode; they are never silently upgraded.
+Workflow execution also defaults to safe mode rather than granting full tool
+access.
 
 ## MCP
 
@@ -467,6 +521,11 @@ The encrypted snapshot preserves structured credentials so a restore is
 complete. Anyone with the repository can attempt offline password guessing,
 so use a strong unique password and a private remote.
 
+Managed-run state under `runs/` is not included in Git backup. Its JSON memory
+and text artifacts are permission-restricted ordinary files outside the
+encrypted database; protect access to the operating-system account and the
+PrAImate data folder.
+
 ### What Git does not encrypt
 
 Workspace files are normal Git objects, including:
@@ -501,7 +560,8 @@ Deletion removes:
 
 - the encrypted database and password envelope;
 - non-secret bootstrap configuration;
-- agents, skills, MCP credentials, and managed tools;
+- agents, skills, MCP credentials, managed tools, and managed-run memory and
+  artifacts;
 - remembered database credential;
 - PrAImate-managed routing blocks from supported CLI configuration without
   deleting unrelated CLI data.
@@ -538,8 +598,8 @@ sudo apt-get install -y npm pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev
 Build the release bundles:
 
 ```sh
-scripts/build.sh --version=1.1.1
-scripts/build.sh --version=1.1.1 --with-code --with-graphify
+scripts/build.sh --version=1.2.0
+scripts/build.sh --version=1.2.0 --with-code --with-graphify
 ```
 
 Build only the GUI:

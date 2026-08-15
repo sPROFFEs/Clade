@@ -73,6 +73,10 @@ func (a *ClaudeAdapter) Name() string {
 	return "claude"
 }
 
+// ManagedSafeMode is true because Claude's non-interactive default denies
+// tools that require approval when PrAImate supplies no elevated mode.
+func (a *ClaudeAdapter) ManagedSafeMode() bool { return true }
+
 func (a *ClaudeAdapter) binName() string {
 	if a.binary != "" {
 		return a.binary

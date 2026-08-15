@@ -7,7 +7,7 @@
 > Official source and releases:
 > [sPROFFEs/PrAImate](https://github.com/sPROFFEs/PrAImate)
 
-PrAImate 1.1.1 is a GUI-only desktop harness for Claude Code,
+PrAImate 1.2.0 is a GUI-only desktop harness for Claude Code,
 OpenClaude, Codex CLI, OpenCode, and the bundled **PrAImate Code** build.
 It gives those CLIs one place for coding terminals, chats, reusable agents,
 workflows, skills, locally configured MCP servers, local-model routing,
@@ -97,8 +97,14 @@ All PrAImate-owned persistent data is centralized under:
 | Windows | `%APPDATA%\praimate` |
 
 This root contains the encrypted database and key envelope, non-secret
-bootstrap configuration, agents, skills, managed tools, and other app-owned
-state. A user-selected projects/workspaces folder remains separate.
+bootstrap configuration, agents, skills, managed tools, and managed-run state
+(`runs/<run-id>/run.json`, per-run memory, and artifacts). A user-selected
+projects/workspaces folder remains separate.
+
+Managed-run JSON and artifacts are permission-restricted ordinary files, not
+records inside the encrypted database. They are not included in Git backup.
+Anyone who can read the operating-system account's PrAImate data folder can
+read them.
 
 Saved Local LLM and MCP credentials live in the encrypted database. PrAImate
 does not create application, Graphify-query, or terminal-output log files.
@@ -130,9 +136,35 @@ Agents are portable YAML definitions. They can contain:
 - raw or Graphify/RAG knowledge mode;
 - an optional, explicitly confirmed requirements installation script.
 
-Agents with knowledge or requirements are exported as `.praimate-agent` packs.
-The pack contains `agent.yaml`, `knowledge/**`, and `requirements/**`.
-Import validates and stages the pack before replacing live data.
+Agent Studio starts with **Guided**, **Manual**, and **Import** paths. Guided
+creation turns a purpose, knowledge choice, and explicit capability checklist
+into a deterministic Simple, Tool-enabled, Autonomous, or Team preset. The
+result is always reviewable as `agent.yaml` plus an optional `runtime.json`.
+
+Agents with knowledge, requirements, or runtime capabilities are exported as
+`.praimate-agent` packs. The pack contains `agent.yaml`, optional
+`runtime.json`, `knowledge/**`, and `requirements/**`. Import validates and
+stages the complete pack before replacing live data. Agents without a runtime
+manifest keep the existing native CLI behavior.
+
+Simple and Tool-enabled presets run through the current native CLI path.
+Autonomous runs use a managed single-agent lifecycle in Chats, document Studio,
+and Workflows: explicit completion, structured per-run working memory,
+artifacts, bounded context/output, and live events. The underlying CLI is pinned
+to safe permissions. Host commands, file changes, network policy, approvals,
+sandbox isolation, checkpoints, and delegation are not part of this phase.
+Only adapters that explicitly declare an enforceable safe mode can use this
+path; other CLIs are blocked before process creation.
+
+Graphify RAG remains available to native agents. Managed Autonomous agents
+must use Raw documents until the policy-aware knowledge broker is implemented;
+that combination is rejected before process creation instead of attempting an
+unbrokered `graphify query` host command.
+
+Team agents—and older Autonomous manifests that explicitly claim sandbox or
+checkpoint support—fail closed. PrAImate never silently weakens those claims.
+Agent Studio's authoring helper remains native so it can continue editing the
+agent definition.
 
 Skills are not currently embedded in agent packs. They remain independently
 managed, CLI-tagged resources selected per chat.
@@ -169,11 +201,36 @@ If an endpoint uses `http://`, the GUI warns that the underlying CLI will send
 model traffic over unencrypted HTTP. PrAImate cannot add HTTPS to a server that
 does not provide it.
 
+## Execution reliability
+
+Chat, Studio, workflows, and live Code terminals use the same backend launch
+resolver. Before a run starts, PrAImate validates the CLI, agent surface,
+working folder, local route, permission level, and referenced MCP servers.
+Launch dialogs show the selected CLI's effective capabilities and block invalid
+configurations before any child process starts.
+
+Permission levels are capability-based. Unsupported levels are visibly reduced
+to safe mode instead of being silently promoted. Workflow runs default to safe
+mode and never force full tool access.
+
+Agentic runs use a separate managed path rather than replacing the workflow
+runner. The initial broker exposes working-memory and artifact actions only.
+Agents that reference MCP servers remain blocked until the policy-aware MCP
+broker can mediate them; MCP configuration is never silently passed through to
+the underlying CLI.
+Plain model prose cannot finish a managed run: completion requires the runtime's
+explicit `finish` action. Large continuation or final output is shortened in
+the model/UI context and preserved as a text artifact.
+
 ## Memory and sessions
 
-The removed cross-chat Memory GUI/database feature is not part of 1.1.1.
+The removed cross-chat Memory GUI/database feature is not part of PrAImate.
 PrAImate does not build an episodes/facts/identity memory profile across
 unrelated conversations.
+
+Autonomous working memory is scoped to one managed run. It persists only so the
+user can inspect that run in Agent Studio; it is not injected into other chats
+or later runs and does not recreate the removed cross-chat memory feature.
 
 Existing workpath chats may still use their own per-chat `MEMORY.md`. That file
 is ordinary workspace content staged into the chat sandbox and synchronized
@@ -233,8 +290,8 @@ sudo apt-get install -y npm pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev
 Build the supported release bundles:
 
 ```sh
-scripts/build.sh --version=1.1.1
-scripts/build.sh --version=1.1.1 --with-code --with-graphify
+scripts/build.sh --version=1.2.0
+scripts/build.sh --version=1.2.0 --with-code --with-graphify
 ```
 
 Build PrAImate Code from the vendored OpenCode source:

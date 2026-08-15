@@ -1,8 +1,8 @@
 package main
 
 import (
+	"context"
 	"path/filepath"
-	"slices"
 	"testing"
 
 	"git.jtsec.local/lab/PrAImate/internal/core"
@@ -11,7 +11,7 @@ import (
 	"git.jtsec.local/lab/PrAImate/internal/store"
 )
 
-func TestWorkflowModelAndEnvInjectsEncryptedKeyForManagedOpenCode(t *testing.T) {
+func TestWorkflowResolverInjectsEncryptedKeyForManagedOpenCode(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "praimate")
 	t.Setenv("PRAIMATE_HOME", root)
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
@@ -33,20 +33,21 @@ func TestWorkflowModelAndEnvInjectsEncryptedKeyForManagedOpenCode(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	a := &App{core: c}
-	model, env, err := a.workflowModelAndEnv("praimate-code", "", "", "")
+	effective, err := c.ResolveExecutionConfig(context.Background(), core.ExecutionRequest{
+		Surface: core.SurfaceWorkflow, CLI: "praimate-code", Cwd: t.TempDir(),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if model != "" {
-		t.Fatalf("model = %q, want CLI configured default", model)
+	if effective.Model != "" {
+		t.Fatalf("model = %q, want CLI configured default", effective.Model)
 	}
-	if got := env["OPENAI_API_KEY"]; got != "db-secret" {
+	if got := effective.Env["OPENAI_API_KEY"]; got != "db-secret" {
 		t.Fatalf("OPENAI_API_KEY = %q, want encrypted DB credential", got)
 	}
 }
 
-func TestTerminalRoutingEnvInjectsEncryptedKeyForManagedOpenCode(t *testing.T) {
+func TestTerminalResolverInjectsEncryptedKeyForManagedOpenCode(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "praimate")
 	t.Setenv("PRAIMATE_HOME", root)
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
@@ -68,12 +69,14 @@ func TestTerminalRoutingEnvInjectsEncryptedKeyForManagedOpenCode(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	env, err := (&App{core: c}).terminalRoutingEnv("opencode", "", "", "")
+	effective, err := c.ResolveExecutionConfig(context.Background(), core.ExecutionRequest{
+		Surface: core.SurfaceTerminal, CLI: "opencode", Cwd: t.TempDir(),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Contains(env, "OPENAI_API_KEY=terminal-secret") {
-		t.Fatalf("managed OpenCode terminal env = %q", env)
+	if got := effective.Env["OPENAI_API_KEY"]; got != "terminal-secret" {
+		t.Fatalf("managed OpenCode terminal key = %q", got)
 	}
 }
 

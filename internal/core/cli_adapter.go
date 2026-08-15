@@ -134,6 +134,18 @@ type CLIAdapter interface {
 	Resume(ctx context.Context, sessionID string, opts ResumeOpts) (*Reply, error)
 }
 
+// managedSafeAdapter is an explicit security capability, not an inference
+// from a CLI name. The managed runtime may only use adapters that can force a
+// non-interactive invocation into read-only / permission-denying behavior.
+type managedSafeAdapter interface {
+	ManagedSafeMode() bool
+}
+
+func supportsManagedSafeMode(adapter CLIAdapter) bool {
+	safe, ok := adapter.(managedSafeAdapter)
+	return ok && safe.ManagedSafeMode()
+}
+
 // adapterRegistry holds the live set of adapters keyed by Name(). Use
 // RegisterCLIAdapter / GetCLIAdapter to mutate it.
 var (

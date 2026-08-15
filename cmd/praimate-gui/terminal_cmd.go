@@ -13,7 +13,6 @@ import (
 	"strings"
 
 	"git.jtsec.local/lab/PrAImate/internal/core"
-	"git.jtsec.local/lab/PrAImate/internal/ollama"
 )
 
 // terminalCommand maps a PrAImate CLI id to the binary + interactive
@@ -65,68 +64,6 @@ func terminalResumeCommand(cli, model string) (name string, args []string, suppo
 	default:
 		return name, args, false, nil
 	}
-}
-
-// terminalLocalEnv builds the environment that points a terminal CLI at
-// a local LLM endpoint (Ollama / vLLM / GPUStack / LiteLLM). Mirrors the
-// launcher's per-CLI env for the agent-launch path, scoped to the CLIs
-// that route by env alone:
-//
-//	claude                 → ANTHROPIC_BASE_URL + auth token (Anthropic-compat proxy)
-//	openclaude             → CLAUDE_CODE_USE_OPENAI + OPENAI_* (OpenAI-compat proxy)
-//	opencode/praimate-code → OPENAI_BASE_URL + key (its openai provider)
-//
-// codex needs config-file rewrites the terminal path doesn't do —
-// callers should steer those to a Chat (which goes through the full
-// launcher machinery). Returns nil when cli isn't env-routable.
-func terminalLocalEnv(cli, endpoint, apiKey, model string) []string {
-	if strings.TrimSpace(endpoint) == "" {
-		return nil
-	}
-	token := apiKey
-	if token == "" {
-		token = "ollama" // vanilla Ollama ignores the key; proxies want a non-empty bearer
-	}
-	switch cli {
-	case "claude":
-		return []string{
-			"ANTHROPIC_BASE_URL=" + strings.TrimRight(ollama.NormalizeEndpoint(endpoint), "/"),
-			"ANTHROPIC_AUTH_TOKEN=" + token,
-			"ANTHROPIC_API_KEY=",
-			"OPENAI_API_KEY=" + token,
-		}
-	case "openclaude":
-		base := openAIBaseURL(endpoint)
-		env := []string{
-			"CLAUDE_CODE_USE_OPENAI=1",
-			"OPENAI_API_KEY=" + token,
-			"OPENAI_BASE_URL=" + base,
-			"OPENAI_API_BASE=" + base,
-		}
-		if model != "" {
-			env = append(env, "OPENAI_MODEL="+model)
-		}
-		return env
-	case "opencode", "praimate-code":
-		base := openAIBaseURL(endpoint)
-		return []string{
-			"OPENAI_API_KEY=" + token,
-			"OPENAI_BASE_URL=" + base,
-			"OPENAI_API_BASE=" + base,
-		}
-	default:
-		return nil
-	}
-}
-
-// terminalLocalRoutable reports whether a terminal session can route cli
-// to a local endpoint via env alone (see terminalLocalEnv).
-func terminalLocalRoutable(cli string) bool {
-	switch cli {
-	case "claude", "openclaude", "opencode", "praimate-code":
-		return true
-	}
-	return false
 }
 
 // appendEnvMap folds generated launch secrets into an env overlay,

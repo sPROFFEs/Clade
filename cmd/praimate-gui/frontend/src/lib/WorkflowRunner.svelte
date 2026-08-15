@@ -31,10 +31,11 @@
   let runChatSending = false
   let runChatStream = null
   let cleanedWorkflowChatID = ''
+  let preflight = null
   let unsubscribe = () => {}
   let unsubscribeWorkflow = () => {}
   let unsubscribeRunChat = () => {}
-  $: runLocalRoutable = cli === 'claude' || cli === 'openclaude'
+  $: runLocalRoutable = ['claude', 'openclaude', 'opencode', 'praimate-code'].includes(cli)
 
   onMount(() => {
     init(agent)
@@ -59,6 +60,7 @@
     runDraft = ''
     runChatSending = false
     runChatStream = null
+    preflight = null
     runLocalOpt = localOpt
     if (workflow) for (const inp of workflow.inputs || []) inputs[inp.name] = inp.default || ''
     initAllWorkflowInputs(a)
@@ -86,6 +88,7 @@
 
   async function runCliChanged() {
     if (runUseLocal && !runLocalRoutable) runUseLocal = false
+    preflight = null
     await loadRunModels()
   }
 
@@ -104,7 +107,7 @@
   }
 
   async function chooseFolder() {
-    try { const p = await api.pickFolder(); if (p) cwd = p } catch (e) { error = String(e) }
+    try { const p = await api.pickFolder(); if (p) { cwd = p; preflight = null } } catch (e) { error = String(e) }
   }
 
   async function review() {
@@ -190,6 +193,15 @@
       privacyCounts = null
       return
     }
+    const local = runLocalParams()
+    preflight = await api.preflightExecution(agent.id, 'workflow', cli, local.model, '', cwd.trim(), local.endpoint, local.localModel)
+      .catch((e) => ({ ok: false, issues: [{ severity: 'error', message: String(e) }] }))
+    if (!preflight?.ok) {
+      error = (preflight?.issues || []).filter((i) => i.severity === 'error').map((i) => i.message).join('\n') || 'Execution preflight failed.'
+      return
+    }
+    const warnings = (preflight.issues || []).filter((i) => i.severity === 'warning')
+    if (warnings.length && !window.confirm(`${warnings.map((i) => i.message).join('\n\n')}\n\nContinue with this workflow run?`)) return
     running = true
     turns = []
     result = null
@@ -201,7 +213,6 @@
     error = ''
     unsubscribe = onTurn((t) => { turns = [...turns, t] })
     unsubscribeWorkflow = onWorkflowStream(handleWorkflowStream)
-    const local = runLocalParams()
     const runCwd = cwd.trim()
     try {
       result = runMode === 'all'
@@ -426,7 +437,12 @@
           <span>Use the local LLM from Settings <span class="card-sub mono">{runLocalOpt.endpoint}</span></span>
         </label>
       {:else if runLocalOpt?.configured}
-        <div class="card-sub" style="margin-top:10px">{cli} uses its global config for local routing here.</div>
+        <div class="card-sub" style="margin-top:10px">{cli} cannot use a PrAImate-managed local route.</div>
+      {/if}
+      {#if preflight?.issues?.length}
+        {#each preflight.issues as issue}
+          <div class="banner" class:ok={issue.severity !== 'error'}>{issue.severity === 'error' ? 'Blocked' : 'Warning'}: {issue.message}</div>
+        {/each}
       {/if}
       {#if runUseLocal && runLocalOpt?.configured && runLocalRoutable}
         <label class="lbl">Local model</label>

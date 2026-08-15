@@ -268,10 +268,8 @@
   $: modelSupported = !!selectedCliInfo?.modelHint
   $: newToolLevels = toolLevelsForCli(newCli)
   $: if (newTools !== normalizeToolsForCli(newCli, newTools)) newTools = normalizeToolsForCli(newCli, newTools)
-  // Per-chat local routing is honoured for claude/openclaude only (other
-  // CLIs read the global Local LLM config). Hide the toggle otherwise so
-  // it never silently no-ops.
-  $: newLocalRoutable = newCli === 'claude' || newCli === 'openclaude'
+  // Per-chat local routing is resolved by the shared execution backend.
+  $: newLocalRoutable = ['claude', 'openclaude', 'opencode', 'praimate-code'].includes(newCli)
   $: if (!newLocalRoutable && newUseLocal) newUseLocal = false
 
   async function startClean() {
@@ -576,14 +574,14 @@
           <button class="btn sm" class:primary={cfg.tools === lvl.id} title={lvl.hint} on:click={() => (cfg.tools = lvl.id)}>{lvl.label}</button>
         {/each}
     </div>
-    {#if cfg.cli === 'claude' || cfg.cli === 'openclaude'}
+    {#if ['claude', 'openclaude', 'opencode', 'praimate-code'].includes(cfg.cli)}
       <label class="lbl" style="margin-top:10px">Local endpoint (optional — routes THIS chat through a self-hosted backend)</label>
       <div class="row">
         <input class="field grow mono" placeholder="http://localhost:11434 (blank = cloud)" bind:value={cfg.localEndpoint} />
         <input class="field mono" style="max-width:180px" placeholder="backend model" bind:value={cfg.localModel} />
       </div>
     {:else if cfg.localEndpoint}
-      <div class="card-sub" style="margin-top:8px">Per-chat local routing applies to claude/openclaude only. OpenCode-compatible CLIs use the managed route from Local LLM settings; Codex is not modified.</div>
+      <div class="card-sub" style="margin-top:8px">This CLI cannot use a PrAImate-managed local route. Codex is not modified.</div>
     {/if}
 
     <label class="lbl" style="margin-top:10px">Skills <span class="card-sub" style="font-weight:400">— prepended to the chat's system prompt. Designed per-CLI; mixing across CLIs may produce odd output.</span></label>
@@ -826,7 +824,7 @@
           <span>Use the local LLM from Settings <span class="card-sub mono">{localOpt.endpoint}</span></span>
         </label>
       {:else if localOpt?.configured}
-        <div class="card-sub" style="margin-top:10px">Per-chat local routing applies to claude/openclaude. OpenCode and PrAImate Code use the managed route from Local LLM settings; Codex is not modified.</div>
+        <div class="card-sub" style="margin-top:10px">This CLI cannot use a PrAImate-managed local route. Codex is not modified.</div>
       {/if}
 
       {#if newUseLocal && localOpt?.configured && newLocalRoutable}

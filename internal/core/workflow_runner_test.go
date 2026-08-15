@@ -15,6 +15,7 @@ type mockAdapter struct {
 	replies   []string // queue; consumed in order
 	resumable bool
 	avail     error
+	unsafe    bool
 
 	// Recorded calls — inspect in assertions.
 	shots   []SingleShotOpts
@@ -30,6 +31,7 @@ type mockAdapter struct {
 func (m *mockAdapter) Name() string                      { return m.name }
 func (m *mockAdapter) Available(_ context.Context) error { return m.avail }
 func (m *mockAdapter) SupportsResume() bool              { return m.resumable }
+func (m *mockAdapter) ManagedSafeMode() bool             { return !m.unsafe }
 
 func (m *mockAdapter) SingleShot(_ context.Context, opts SingleShotOpts) (*Reply, error) {
 	m.shots = append(m.shots, opts)
@@ -117,11 +119,33 @@ func TestRunWorkflow_SingleStep_UsesSingleShot(t *testing.T) {
 	if mock.shots[0].Message != "x=1" {
 		t.Fatalf("unexpected rendered body: %q", mock.shots[0].Message)
 	}
+	if mock.shots[0].Tools != "" {
+		t.Fatalf("workflow silently elevated permissions: tools=%q", mock.shots[0].Tools)
+	}
 	prompt := mock.shots[0].SystemPrompt
 	for _, want := range []string{"be terse", "Workflow execution policy", `Working directory: "/tmp"`} {
 		if !strings.Contains(prompt, want) {
 			t.Fatalf("system prompt missing %q: %q", want, prompt)
 		}
+	}
+}
+
+func TestRunWorkflow_PreservesExplicitPermissionLevel(t *testing.T) {
+	mock := &mockAdapter{name: "codex", replies: []string{"ok"}}
+	RegisterCLIAdapter(mock)
+	t.Cleanup(func() { RegisterCLIAdapter(NewCodexAdapter()) })
+	c, _ := New(Options{Store: openTempStore(t)})
+	a := &Agent{ID: "a", Name: "A", Instructions: "x", Supports: []string{"codex"}, Workflows: []Workflow{{
+		Name: "go", Steps: []WorkflowStep{{Kind: StepUserMessage, Template: "work"}},
+	}}}
+	res := c.RunWorkflow(context.Background(), RunOptions{
+		Agent: a, WorkflowName: "go", CLI: "codex", Cwd: t.TempDir(), Tools: "edits",
+	})
+	if res.Err != nil {
+		t.Fatal(res.Err)
+	}
+	if got := mock.shots[0].Tools; got != "edits" {
+		t.Fatalf("workflow tools=%q, want edits", got)
 	}
 }
 

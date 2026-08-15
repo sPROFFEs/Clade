@@ -85,10 +85,8 @@ type ChatSettings struct {
 
 	// Local, if set, routes this chat through a self-hosted
 	// OpenAI-compatible endpoint instead of the CLI's cloud backend —
-	// the DB-chat counterpart of the TUI's per-chat Ollama wizard.
-	// Effective for claude/openclaude (per-turn env routing); the other
-	// CLIs read their global home-dir config, which the Local LLM tab
-	// manages (architecture invariant: claude config is per-chat only).
+	// resolved at launch for Claude, OpenClaude, OpenCode, and PrAImate
+	// Code. Codex local routing is deliberately unsupported.
 	Local *ChatLocalEndpoint `json:"local,omitempty"`
 }
 

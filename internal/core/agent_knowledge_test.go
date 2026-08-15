@@ -46,6 +46,13 @@ func TestAgentPack_ExportImportRoundTrip(t *testing.T) {
 	if _, err := AddAgentKnowledgeFiles("k-agent", []string{writeTempDoc(t, "guide.md", "# Style guide\nrules here")}); err != nil {
 		t.Fatalf("add knowledge: %v", err)
 	}
+	if err := SaveAgentRuntime("k-agent", &AgentRuntimeManifest{
+		Schema: AgentRuntimeSchema, PresetOrigin: PresetToolEnabled, Mode: RuntimeNative,
+		Capabilities: AgentCapabilities{ReadProject: true, ModifyFiles: true},
+		Permissions:  AgentRuntimePermissions{DefaultTools: "edits"},
+	}); err != nil {
+		t.Fatalf("save runtime: %v", err)
+	}
 
 	pack := filepath.Join(t.TempDir(), "k-agent"+AgentPackExt)
 	if err := c.ExportAgentPack(ctx, "k-agent", pack); err != nil {
@@ -71,6 +78,132 @@ func TestAgentPack_ExportImportRoundTrip(t *testing.T) {
 	body, _ := os.ReadFile(filepath.Join(dir, "guide.md"))
 	if !strings.Contains(string(body), "Style guide") {
 		t.Errorf("knowledge content lost: %q", body)
+	}
+	runtime, err := LoadAgentRuntime("k-agent")
+	if err != nil || runtime == nil || runtime.PresetOrigin != PresetToolEnabled || runtime.Permissions.DefaultTools != "edits" {
+		t.Fatalf("runtime after import = %#v (err %v)", runtime, err)
+	}
+}
+
+func TestAgentRuntime_MissingManifestPreservesNativeCompatibility(t *testing.T) {
+	withTempConfigDir(t)
+	c, _ := New(Options{Store: openTempStore(t)})
+	effective, err := c.ResolveEffectiveAgentConfig(context.Background(), &Agent{ID: "legacy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if effective.Mode != RuntimeNative || !effective.NativeCompatible || effective.Manifest != nil {
+		t.Fatalf("legacy runtime = %#v", effective)
+	}
+}
+
+func TestAgentRuntime_StrictValidationRejectsUnknownOrFalseClaims(t *testing.T) {
+	for _, body := range []string{
+		`{"schema":"praimate.runtime/v1","mode":"native","capabilities":{},"features":{},"permissions":{},"surprise":true}`,
+		`{"schema":"praimate.runtime/v1","mode":"native","capabilities":{},"features":{"sandbox":true},"permissions":{}}`,
+	} {
+		if _, err := ParseAgentRuntime([]byte(body)); err == nil {
+			t.Fatalf("invalid runtime accepted: %s", body)
+		}
+	}
+}
+
+func TestGuidedAgentPresetExpansionAndExecutionGate(t *testing.T) {
+	withTempConfigDir(t)
+	ctx := context.Background()
+	c, _ := New(Options{Store: openTempStore(t)})
+
+	toolAgent, err := c.CreateGuidedAgent(ctx, GuidedAgentRequest{
+		Name: "Tool Reviewer", Purpose: "Review code and fix confirmed defects.", Preset: PresetToolEnabled,
+		Supports: []string{"claude"}, Capabilities: AgentCapabilities{ReadProject: true, ModifyFiles: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	effective, err := c.ResolveExecutionConfig(ctx, ExecutionRequest{Surface: SurfaceChat, Agent: toolAgent, CLI: "claude", Cwd: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if effective.Tools != "edits" {
+		t.Fatalf("guided tool preset tools = %q, want edits", effective.Tools)
+	}
+
+	autonomous, err := c.CreateGuidedAgent(ctx, GuidedAgentRequest{
+		Name: "Autonomous Reviewer", Purpose: "Complete long reviews independently.", Preset: PresetAutonomous,
+		Supports: []string{"claude"}, Capabilities: AgentCapabilities{ReadProject: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, surface := range []ExecutionSurface{SurfaceChat, SurfaceStudio, SurfaceWorkflow, SurfaceTerminal} {
+		_, err = c.ResolveExecutionConfig(ctx, ExecutionRequest{Surface: surface, Agent: autonomous, CLI: "claude", Cwd: t.TempDir()})
+		if err == nil || !strings.Contains(err.Error(), "only supports native execution") {
+			t.Fatalf("agentic runtime did not fail closed on %s: %v", surface, err)
+		}
+	}
+}
+
+func TestGuidedAgentPresetExpansionIsDeterministic(t *testing.T) {
+	requested := AgentCapabilities{ReadProject: true, ExecuteCommands: true}
+	tests := []struct {
+		preset       AgentPreset
+		mode         AgentRuntimeMode
+		defaultTools string
+		features     []string
+		warnings     int
+		maxChildren  int
+	}{
+		{preset: PresetSimple, mode: RuntimeNative},
+		{preset: PresetToolEnabled, mode: RuntimeNative, defaultTools: "ask"},
+		{preset: PresetAutonomous, mode: RuntimeAgentic, features: []string{"managed tools", "working memory", "artifact store"}, warnings: 1},
+		{preset: PresetTeam, mode: RuntimeAgentic, features: []string{"managed tools", "working memory", "sandbox", "artifact store", "checkpoints", "delegation"}, warnings: 1, maxChildren: 4},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.preset), func(t *testing.T) {
+			first, summary, warnings, err := expandAgentPreset(tt.preset, requested)
+			if err != nil {
+				t.Fatal(err)
+			}
+			second, _, _, err := expandAgentPreset(tt.preset, requested)
+			if err != nil {
+				t.Fatal(err)
+			}
+			firstJSON, _ := MarshalAgentRuntime(first)
+			secondJSON, _ := MarshalAgentRuntime(second)
+			if string(firstJSON) != string(secondJSON) {
+				t.Fatalf("preset expansion is not deterministic:\n%s\n%s", firstJSON, secondJSON)
+			}
+			if first.Mode != tt.mode || first.Permissions.DefaultTools != tt.defaultTools || first.Features.MaxChildren != tt.maxChildren {
+				t.Fatalf("manifest = %#v", first)
+			}
+			if got := requiredAgenticFeatures(first.Features); strings.Join(got, ",") != strings.Join(tt.features, ",") {
+				t.Fatalf("features = %v, want %v", got, tt.features)
+			}
+			if len(warnings) != tt.warnings || len(summary) == 0 {
+				t.Fatalf("summary=%v warnings=%v", summary, warnings)
+			}
+		})
+	}
+}
+
+func TestImportAgentPackWithoutRuntimeRemovesStaleManifest(t *testing.T) {
+	withTempConfigDir(t)
+	ctx := context.Background()
+	c, _ := New(Options{Store: openTempStore(t)})
+	if _, err := c.ImportAgentYAML(ctx, knowledgeAgentYAML("replace-agent", ""), ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveAgentRuntime("replace-agent", &AgentRuntimeManifest{Schema: AgentRuntimeSchema, PresetOrigin: PresetSimple, Mode: RuntimeNative}); err != nil {
+		t.Fatal(err)
+	}
+	pack := filepath.Join(t.TempDir(), "replace"+AgentPackExt)
+	writeZip(t, pack, map[string]string{"agent.yaml": string(knowledgeAgentYAML("replace-agent", ""))})
+	if _, err := c.ImportAgentPack(ctx, pack); err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := LoadAgentRuntime("replace-agent")
+	if err != nil || manifest != nil {
+		t.Fatalf("runtime after replacement = %#v (err %v)", manifest, err)
 	}
 }
 
@@ -185,6 +318,9 @@ requirements:
 	if err := WriteAgentRequirementsScript("existing", "setup.sh", []byte("#!/bin/sh\necho keep\n")); err != nil {
 		t.Fatalf("write original requirements: %v", err)
 	}
+	if err := SaveAgentRuntime("existing", &AgentRuntimeManifest{Schema: AgentRuntimeSchema, PresetOrigin: PresetSimple, Mode: RuntimeNative}); err != nil {
+		t.Fatalf("write original runtime: %v", err)
+	}
 
 	pack := filepath.Join(t.TempDir(), "invalid"+AgentPackExt)
 	writeZip(t, pack, map[string]string{
@@ -196,6 +332,7 @@ supports: [claude]
 `,
 		"knowledge/new.md":          "new knowledge",
 		"requirements/../../bad.sh": "escape",
+		"runtime.json":              `{"schema":"praimate.runtime/v1","mode":"native","unknown":true}`,
 	})
 	if _, err := c.ImportAgentPack(ctx, pack); err == nil {
 		t.Fatal("invalid pack must fail")
@@ -216,6 +353,10 @@ supports: [claude]
 	body, err = ReadAgentRequirementsScript("existing", "setup.sh")
 	if err != nil || !strings.Contains(string(body), "echo keep") {
 		t.Fatalf("requirements were changed after failed import: %q (err %v)", body, err)
+	}
+	runtime, err := LoadAgentRuntime("existing")
+	if err != nil || runtime == nil || runtime.PresetOrigin != PresetSimple {
+		t.Fatalf("runtime was changed after failed import: %#v (err %v)", runtime, err)
 	}
 }
 

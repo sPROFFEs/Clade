@@ -43,8 +43,8 @@
   let localOpt = null // { configured, endpoint, hasApiKey, models[], error }
   let useLocal = false
   let localModel = ''
-  // CLIs a terminal can route to a local endpoint by env (matches the
-  // Go terminalLocalRoutable). Codex/Gemini local routing is unsupported.
+  // The shared Go execution resolver applies local routing for these CLIs.
+  // Codex local routing is deliberately unsupported.
   const LOCAL_ROUTABLE = ['claude', 'openclaude', 'opencode', 'praimate-code']
   $: localRoutable = LOCAL_ROUTABLE.includes(cli)
 

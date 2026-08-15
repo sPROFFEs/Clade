@@ -48,6 +48,9 @@ type buildIn struct {
 type execAdapter struct {
 	name string
 	bin  string
+	// managedSafe is true only when empty Tools is enforced as read-only or
+	// permission-denying by this adapter's exact argv path.
+	managedSafe bool
 	// versionArgs probes installation (usually {"--version"}).
 	versionArgs []string
 	// build returns the argv (after the binary) for a one-shot run of
@@ -67,6 +70,8 @@ type execAdapter struct {
 	// dir rather than on PATH.
 	extraDirs []string
 }
+
+func (a *execAdapter) ManagedSafeMode() bool { return a.managedSafe }
 
 // resolveBin locates the adapter's binary: extraDirs first, then PATH.
 func (a *execAdapter) resolveBin() (string, error) {
@@ -201,7 +206,7 @@ func (a *execAdapter) SingleShot(ctx context.Context, opts SingleShotOpts) (*Rep
 // is "-" so codex reads the (possibly multi-line) prompt from stdin.
 func NewCodexAdapter() *execAdapter {
 	return &execAdapter{
-		name: "codex", bin: "codex", stdinMsg: true,
+		name: "codex", bin: "codex", stdinMsg: true, managedSafe: true,
 		build: func(in buildIn) ([]string, string) {
 			out := filepath.Join(in.TmpDir, "reply.txt")
 			args := []string{"exec", "--skip-git-repo-check", "--output-last-message", out}
@@ -238,7 +243,7 @@ func codexPermissionArgs(tools string, resume bool) []string {
 // praimate-code.
 func NewOpenCodeAdapter() *execAdapter {
 	return &execAdapter{
-		name: "opencode", bin: "opencode", stdinMsg: true,
+		name: "opencode", bin: "opencode", stdinMsg: true, managedSafe: true,
 		build: func(in buildIn) ([]string, string) {
 			args := []string{"run"}
 			if in.Model != "" {
@@ -255,7 +260,7 @@ func NewOpenCodeAdapter() *execAdapter {
 // interface.
 func NewPraimateCodeAdapter() *execAdapter {
 	return &execAdapter{
-		name: "praimate-code", bin: "praimate-code", stdinMsg: true,
+		name: "praimate-code", bin: "praimate-code", stdinMsg: true, managedSafe: true,
 		extraDirs: []string{praimateManagedBinDir()},
 		build: func(in buildIn) ([]string, string) {
 			args := []string{"run"}

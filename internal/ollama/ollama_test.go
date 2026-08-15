@@ -110,6 +110,26 @@ func TestClaudeEnv_UsesAPIKeyWhenSet(t *testing.T) {
 	}
 }
 
+func TestOpenClaudeEnvUsesOpenAICompatibleRoute(t *testing.T) {
+	env := OpenClaudeEnv(Settings{Endpoint: "https://llm.example/v1/", Model: "qwen3", APIKey: "secret"})
+	if env["CLAUDE_CODE_USE_OPENAI"] != "1" || env["OPENAI_MODEL"] != "qwen3" {
+		t.Fatalf("OpenClaude mode variables = %#v", env)
+	}
+	if env["OPENAI_BASE_URL"] != "https://llm.example/v1" || env["OPENAI_API_KEY"] != "secret" {
+		t.Fatalf("OpenClaude route variables = %#v", env)
+	}
+}
+
+func TestOpenAIEnvDoesNotDuplicateV1(t *testing.T) {
+	env := OpenAIEnv(Settings{Endpoint: "https://llm.example/v1", Model: "qwen3"})
+	if env["OPENAI_BASE_URL"] != "https://llm.example/v1" {
+		t.Fatalf("OPENAI_BASE_URL = %q", env["OPENAI_BASE_URL"])
+	}
+	if env["OPENAI_API_KEY"] != "ollama" {
+		t.Fatalf("OPENAI_API_KEY = %q", env["OPENAI_API_KEY"])
+	}
+}
+
 // TestListModels_SendsBearerWhenKeySet verifies the probe forwards
 // Authorization: Bearer <key> when the user supplied one. GPUStack and
 // other gated providers reject /v1/models without it.

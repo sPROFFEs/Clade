@@ -19,8 +19,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-
-	"git.jtsec.local/lab/PrAImate/internal/ollama"
 )
 
 // ChatTurn is one completed interactive exchange.
@@ -235,77 +233,71 @@ func (c *Core) ContinueChatStream(ctx context.Context, chatID, userMessage, cwd,
 		}
 	}
 
-	// Ask level: wire the approval shim when a provider is registered
-	// (GUI). Without one — TUI, tests — "ask" degrades to the safe
-	// default inside the adapters.
+	// Ask level: wire the approval shim when a provider is registered.
 	var approval *ApprovalConfig
 	if chat.Settings.Tools == "ask" && c.approvalProvider != nil {
 		approval = c.approvalProvider(chatID)
 	}
-	// Per-chat local endpoint: env-route claude/openclaude through the
-	// self-hosted backend; the backend model name doubles as the model
-	// pin when none is set explicitly.
-	model := chat.Settings.Model
-	var env map[string]string
-	if l := chat.Settings.Local; l != nil && l.Endpoint != "" &&
-		(chat.CLIAgent == "claude" || chat.CLIAgent == "openclaude") {
-		if model == "" {
-			model = l.Model
-		}
-		apiKey := strings.TrimSpace(l.APIKey)
-		if apiKey == "" {
-			apiKey, err = c.localLLMAPIKey(ctx)
-			if err != nil {
-				return nil, err
-			}
-		}
-		env = ollama.ClaudeEnv(ollama.Settings{
-			Endpoint: l.Endpoint, APIKey: apiKey, Model: l.Model,
-		})
+	surface := SurfaceChat
+	if chat.Settings.Surface == "studio" || chat.Settings.Surface == "agent-helper" {
+		surface = SurfaceStudio
 	}
-	if isOpenCodeLikeAdapter(chat.CLIAgent) {
-		localRoute := chat.Settings.Local != nil && chat.Settings.Local.Endpoint != ""
-		if !localRoute {
-			localRoute, err = ollama.OpenCodeUsesManagedLocalRoute(model)
-			if err != nil {
-				return nil, fmt.Errorf("resolve OpenCode local route: %w", err)
-			}
+	var agent *Agent
+	if chat.AgentID != "" {
+		agent, _ = c.GetAgent(ctx, chat.AgentID)
+	}
+	if agent != nil {
+		if !contains(agent.Supports, chat.CLIAgent) {
+			return nil, fmt.Errorf("agent %q does not support CLI %q", agent.ID, chat.CLIAgent)
 		}
-		if localRoute {
-			apiKey := ""
-			if chat.Settings.Local != nil {
-				apiKey = strings.TrimSpace(chat.Settings.Local.APIKey)
+		runtimeConfig, runtimeErr := c.ResolveEffectiveAgentConfig(ctx, agent)
+		if runtimeErr != nil {
+			return nil, runtimeErr
+		}
+		// Agent Studio's authoring helper edits the definition itself and must
+		// remain on the native authoring path. A normal document-studio chat
+		// still uses the managed runtime.
+		if runtimeConfig.Mode == RuntimeAgentic && chat.Settings.Surface != "agent-helper" {
+			managedTask, historyErr := c.managedChatTask(ctx, chat.ID, attachments)
+			if historyErr != nil {
+				return nil, historyErr
 			}
-			if apiKey == "" {
-				apiKey, err = c.localLLMAPIKey(ctx)
-				if err != nil {
-					return nil, err
-				}
-			}
-			if apiKey != "" {
-				env = mergeStringMaps(env, map[string]string{"OPENAI_API_KEY": apiKey})
-			}
+			redaction := privacy.NewRedactionSession()
+			managedTask, _ = redaction.Redact(managedTask)
+			managedSystem, _ := redaction.Redact(systemPrompt)
+			return c.continueManagedChat(ctx, chat, agent, surface, managedTask, userMessage,
+				cwd, managedSystem, redaction, collect, &activity)
 		}
 	}
-	// MCP selection is per chat. Re-emit the project-scoped config on every
-	// turn so edits in the settings sheet (including clearing all MCPs) take
-	// effect without creating a new conversation.
-	if chat.Settings.MCPConfigured || len(chat.Settings.MCPServers) > 0 {
-		mcpEnv, err := c.PrepareSelectedMCPForRun(ctx, chat.Settings.MCPServers, chat.CLIAgent, cwd)
-		if err != nil {
-			return nil, err
-		}
-		env = mergeStringMaps(env, mcpEnv)
+	executionAgent := agent
+	if chat.Settings.Surface == "agent-helper" {
+		// The built-in authoring assistant is deliberately native even if its
+		// manifest is edited to an agentic preset. Its job requires the CLI's
+		// authoring permissions, which the managed runtime correctly denies.
+		executionAgent = nil
 	}
-	resumeOpts := ResumeOpts{Message: outbound, Cwd: cwd, Model: model, Tools: chat.Settings.Tools, Approval: approval, Env: env}
+	effective, err := c.ResolveExecutionConfig(ctx, ExecutionRequest{
+		Surface: surface, Agent: executionAgent, ChatID: chatID, CLI: chat.CLIAgent,
+		Cwd: cwd, Model: chat.Settings.Model, Tools: chat.Settings.Tools,
+		Local: chat.Settings.Local, MCPServers: chat.Settings.MCPServers,
+		ExplicitMCP: chat.Settings.MCPConfigured || len(chat.Settings.MCPServers) > 0,
+		Approval:    approval,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := c.PrepareExecution(ctx, effective); err != nil {
+		return nil, err
+	}
+	resumeOpts := ResumeOpts{Message: outbound, Cwd: cwd, Model: effective.Model, Tools: effective.Tools, Approval: effective.Approval, Env: effective.Env}
 	shotOpts := SingleShotOpts{
 		Cwd:          cwd,
 		Message:      outbound,
 		SystemPrompt: privacyRedactPlain(privacy, systemPrompt),
-		Model:        model,
-		Tools:        chat.Settings.Tools,
-		Approval:     approval,
-		Env:          env,
+		Model:        effective.Model,
+		Tools:        effective.Tools,
+		Approval:     effective.Approval,
+		Env:          effective.Env,
 	}
 	resuming := chat.SessionID != "" && adapter.SupportsResume()
 

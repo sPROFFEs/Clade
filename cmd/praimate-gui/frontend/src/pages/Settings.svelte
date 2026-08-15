@@ -618,7 +618,7 @@
       <h2 id="delete-data-title">Delete all PrAImate data</h2>
       <p class="danger-copy">
         This permanently deletes the encrypted database, its password-protected key envelope, settings, agents,
-        skills, MCP credentials, and PrAImate-managed tools. Managed PrAImate routing is removed
+        skills, MCP credentials, PrAImate-managed tools, and managed-run memory and artifacts. Managed PrAImate routing is removed
         from supported CLI configuration without deleting unrelated CLI data.
       </p>
 

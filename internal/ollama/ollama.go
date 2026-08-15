@@ -187,6 +187,41 @@ func ClaudeEnv(s Settings) map[string]string {
 	}
 }
 
+// OpenClaudeEnv returns the OpenAI-compatible environment expected by
+// OpenClaude. Unlike Claude Code, OpenClaude does not speak the Anthropic
+// protocol when routed to a local backend.
+func OpenClaudeEnv(s Settings) map[string]string {
+	if s.Endpoint == "" || s.Model == "" {
+		return nil
+	}
+	env := OpenAIEnv(s)
+	env["CLAUDE_CODE_USE_OPENAI"] = "1"
+	env["OPENAI_MODEL"] = s.Model
+	return env
+}
+
+// OpenAIEnv returns the standard environment used by OpenAI-compatible CLI
+// providers. The endpoint is normalized to the /v1 API root and the key falls
+// back to a harmless non-empty token for local servers that ignore auth.
+func OpenAIEnv(s Settings) map[string]string {
+	if s.Endpoint == "" {
+		return nil
+	}
+	token := s.APIKey
+	if token == "" {
+		token = "ollama"
+	}
+	base := NormalizeEndpoint(s.Endpoint)
+	if !strings.HasSuffix(base, "/v1") {
+		base += "/v1"
+	}
+	return map[string]string{
+		"OPENAI_API_KEY":  token,
+		"OPENAI_BASE_URL": base,
+		"OPENAI_API_BASE": base,
+	}
+}
+
 // CodexConfigPath is ~/.codex/config.toml.
 func CodexConfigPath() (string, error) {
 	home, err := os.UserHomeDir()

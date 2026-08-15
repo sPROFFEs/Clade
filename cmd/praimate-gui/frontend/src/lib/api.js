@@ -52,6 +52,9 @@ export const api = {
 
   listCLIs: () => call('ListCLIs'),
   listCLIModels: (cli) => call('ListCLIModels', cli),
+  executionCapabilities: (cli) => call('ExecutionCapabilities', cli),
+  preflightExecution: (agentID, surface, cli, model, tools, cwd, localEndpoint, localModel) =>
+    call('PreflightExecution', agentID || '', surface, cli, model || '', tools || '', cwd || '', localEndpoint || '', localModel || ''),
   listWorkspaceChats: () => call('ListWorkspaceChats'),
   openWorkspaceChat: (id) => call('OpenWorkspaceChat', id),
 
@@ -62,6 +65,14 @@ export const api = {
   agentYAML: (id) => call('AgentYAML', id),
   saveAgentYAML: (yaml) => call('SaveAgentYAML', yaml),
   newAgentTemplateYAML: () => call('NewAgentTemplateYAML'),
+  previewGuidedAgent: (request) => call('PreviewGuidedAgent', request),
+  createGuidedAgent: (request) => call('CreateGuidedAgent', request),
+  agentRuntimeJSON: (id) => call('AgentRuntimeJSON', id),
+  enableAgentRuntime: (id) => call('EnableAgentRuntime', id),
+  saveAgentRuntimeJSON: (id, body) => call('SaveAgentRuntimeJSON', id, body),
+  listManagedRuns: (agentID) => call('ListManagedRuns', agentID || ''),
+  managedRunDetails: (runID) => call('ManagedRunDetails', runID),
+  managedArtifactText: (runID, name) => call('ManagedArtifactText', runID, name),
   getAgentKnowledge: (id) => call('GetAgentKnowledge', id),
   setAgentKnowledgeMode: (id, mode) => call('SetAgentKnowledgeMode', id, mode),
   enableAgentKnowledge: (id) => call('EnableAgentKnowledge', id),

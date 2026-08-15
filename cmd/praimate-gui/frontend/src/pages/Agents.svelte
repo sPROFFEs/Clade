@@ -76,16 +76,20 @@
   let dlg = null
   let allClis = []
   let localOpt = null // { configured, endpoint, hasApiKey, models[], error }
-  // Terminals route a local endpoint by env (claude/openclaude/opencode/
-  // praimate-code); chat + studio route per-chat, honoured for claude/
-  // openclaude only (others read the global Local LLM config).
-  const LOCAL_ROUTABLE_TERMINAL = ['claude', 'openclaude', 'opencode', 'praimate-code']
-  function isLocalRoutable(surface, cli) {
-    return surface === 'terminal'
-      ? LOCAL_ROUTABLE_TERMINAL.includes(cli)
-      : (cli === 'claude' || cli === 'openclaude')
+  // The shared execution resolver supports local routing on every surface for
+  // these CLIs. Codex local routing is intentionally unsupported.
+  const LOCAL_ROUTABLE_CLIS = ['claude', 'openclaude', 'opencode', 'praimate-code']
+  function isLocalRoutable(cli) {
+    return LOCAL_ROUTABLE_CLIS.includes(cli)
   }
-  $: dlgLocalRoutable = !!dlg && isLocalRoutable(dlg.surface, dlg.cli)
+  $: dlgLocalRoutable = !!dlg && isLocalRoutable(dlg.cli)
+
+  function invalidateDlgPreflight() {
+    if (!dlg) return
+    dlg.preflight = null
+    dlg.preflightChecked = false
+    dlg = dlg
+  }
 
   function cliOptionsFor(agent) {
     if (!agent) return allClis
@@ -116,6 +120,9 @@
       busy: false,
       useLocal: false,
       localModel: '',
+      capabilities: null,
+      preflight: null,
+      preflightChecked: false,
     }
     if (localOpt === null) {
       api.localLLMModels().then((r) => { localOpt = r }).catch(() => { localOpt = { configured: false } })
@@ -141,9 +148,15 @@
   async function dlgCliChanged() {
     if (!dlg) return
     // Drop the local toggle if the new CLI can't route on this surface.
-    if (dlg.useLocal && !isLocalRoutable(dlg.surface, dlg.cli)) { dlg.useLocal = false; dlg = dlg }
+    if (dlg.useLocal && !isLocalRoutable(dlg.cli)) { dlg.useLocal = false; dlg = dlg }
     dlg.modelLoading = true
+    dlg.preflight = null
+    dlg.preflightChecked = false
     dlg = dlg
+    const selectedCLI = dlg.cli
+    api.executionCapabilities(selectedCLI).then((r) => {
+      if (dlg?.cli === selectedCLI) { dlg.capabilities = r; dlg = dlg }
+    }).catch(() => {})
     dlg.suggestions = (await api.listCLIModels(dlg.cli).catch(() => [])) || []
     dlg.modelLoading = false
     dlg = dlg
@@ -152,7 +165,7 @@
   async function dlgPickFolder() {
     try {
       const p = await api.pickFolder()
-      if (p && dlg) { dlg.folder = p; dlg = dlg }
+      if (p && dlg) { dlg.folder = p; invalidateDlgPreflight() }
     } catch (e) {
       error = String(e)
     }
@@ -168,7 +181,7 @@
     const lEnd = local ? localOpt.endpoint : ''
     const lKey = ''
     const lModel = local ? dlg.localModel.trim() : ''
-    if (local && surface === 'terminal' && !LOCAL_ROUTABLE_TERMINAL.includes(cli)) {
+    if (local && !LOCAL_ROUTABLE_CLIS.includes(cli)) {
       error = `${cli} local-LLM routing is not supported on this surface.`
       dlg.busy = false
       return
@@ -178,6 +191,21 @@
         error = 'Pick a project folder first.'
         dlg.busy = false
         return
+      }
+      if (!dlg.preflightChecked) {
+        const tools = surface === 'studio' ? 'edits' : ''
+        const check = await api.preflightExecution(agent?.id || '', surface, cli, local ? '' : model, tools, folder, lEnd, lModel)
+        dlg.preflight = check
+        dlg.preflightChecked = true
+        dlg.busy = false
+        dlg = dlg
+        if (!check?.ok) {
+          error = (check?.issues || []).filter((i) => i.severity === 'error').map((i) => i.message).join('\n') || 'Execution preflight failed.'
+          return
+        }
+        // Warnings require one deliberate second click after review.
+        if ((check?.issues || []).length > 0) return
+        dlg.busy = true
       }
       if (surface === 'chat') {
         const c = await api.startChat(agent.id, cli, folder)
@@ -559,30 +587,43 @@
       </select>
       {#if localOpt?.configured && dlgLocalRoutable}
         <label class="row" style="margin-top:10px; gap:8px; cursor:pointer">
-          <input type="checkbox" bind:checked={dlg.useLocal} />
+          <input type="checkbox" bind:checked={dlg.useLocal} on:change={invalidateDlgPreflight} />
           <span>Use the local LLM from Settings <span class="card-sub mono">{localOpt.endpoint}</span></span>
         </label>
       {:else if localOpt?.configured}
-        <div class="card-sub" style="margin-top:10px">{dlg.cli} can't route to the local endpoint on the {dlg.surface} surface{dlg.surface === 'terminal' ? '' : ' (chat/studio local routing is claude/openclaude only)'} — it uses its global config.</div>
+        <div class="card-sub" style="margin-top:10px">{dlg.cli} can't use a PrAImate-managed local route.</div>
       {/if}
 
       {#if dlg.useLocal && localOpt?.configured && dlgLocalRoutable}
         <label class="lbl">Local model</label>
-        <input class="field mono" style="max-width:420px" list="launch-local-models" bind:value={dlg.localModel} placeholder="model on your endpoint" />
+        <input class="field mono" style="max-width:420px" list="launch-local-models" bind:value={dlg.localModel} on:input={invalidateDlgPreflight} placeholder="model on your endpoint" />
         <datalist id="launch-local-models">{#each localOpt.models || [] as m}<option value={m}></option>{/each}</datalist>
         {#if localOpt.error}<div class="card-sub" style="color: var(--warn)">Couldn't list models: {localOpt.error}. You can still type a model name.</div>{/if}
       {:else}
         <label class="lbl">Model (blank = CLI default)</label>
-        <input class="field mono" style="max-width:420px" list="launch-model-suggestions" bind:value={dlg.model} />
+        <input class="field mono" style="max-width:420px" list="launch-model-suggestions" bind:value={dlg.model} on:input={invalidateDlgPreflight} />
         <datalist id="launch-model-suggestions">
           {#each dlg.suggestions as m}<option value={m}></option>{/each}
         </datalist>
         {#if dlg.modelLoading}<div class="card-sub">Loading models...</div>{/if}
       {/if}
+      {#if dlg.capabilities}
+        <div class="card-sub" style="margin-top:10px">
+          Capabilities: {dlg.capabilities.streaming ? 'streaming' : 'buffered'} · {dlg.capabilities.resume ? 'resume' : 'no resume'} · {dlg.capabilities.mcp ? 'MCP' : 'no MCP'} · permissions {(dlg.capabilities.toolLevels || []).map((x) => x || 'safe').join(', ')}
+        </div>
+      {/if}
+      {#if dlg.preflight?.issues?.length}
+        <div style="margin-top:10px">
+          {#each dlg.preflight.issues as issue}
+            <div class="banner" class:ok={issue.severity !== 'error'}>{issue.severity === 'error' ? 'Blocked' : 'Warning'}: {issue.message}</div>
+          {/each}
+          {#if dlg.preflight.ok}<div class="card-sub">Review the warnings, then press Launch again to continue.</div>{/if}
+        </div>
+      {/if}
       {#if true}
         <label class="lbl">Project folder *</label>
         <div class="row">
-          <input class="field grow mono" bind:value={dlg.folder} placeholder="pick the folder the agent works in" />
+          <input class="field grow mono" bind:value={dlg.folder} on:input={invalidateDlgPreflight} placeholder="pick the folder the agent works in" />
           <button class="btn" on:click={dlgPickFolder}>Browse…</button>
         </div>
       {/if}

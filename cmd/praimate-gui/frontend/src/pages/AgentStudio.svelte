@@ -17,6 +17,7 @@
   import { renderMarkdown } from '../lib/markdown.js'
 
   const DEF = '__definition__'
+  const RUNTIME = '__runtime__'
 
   let error = ''
   let notice = ''
@@ -32,12 +33,26 @@
   let agentId = ''
   let isNew = !initCfg.id
   let agentName = ''
-  let needName = !initCfg.id
+  let creationChoice = !initCfg.id
+  let needName = false
   let newName = ''
   let creating = false
+  let guided = false
+  let guidedStep = 1
+  let guidedPreview = null
+  let guidedForm = {
+    name: '', purpose: '', knowledge: '', preset: 'simple',
+    supports: ['claude', 'openclaude', 'codex', 'opencode', 'praimate-code'],
+    capabilities: { read_project: true, analyze_code: true, use_git: false, execute_commands: false, modify_files: false, network: false, external_services: false },
+  }
+  let runtimeConfigured = false
+  let managedRuns = []
+  let selectedRun = null
+  let artifactPreview = null
+  let runsLoading = false
 
   // --- tabs (center) ---
-  // {key, label, lang, content, dirty, ref, isDef}
+  // {key, label, lang, content, dirty, ref, isDef, isRuntime}
   let tabs = []
   let active = ''
 
@@ -146,16 +161,19 @@
     isNew = false
     needName = false
     try {
-      const defYaml = await api.agentYAML(id)
+      const [defYaml, runtimeJSON] = await Promise.all([api.agentYAML(id), api.agentRuntimeJSON(id)])
       const a = (await api.listAgents())?.find((x) => x.id === id)
       agentName = a?.name || id
       requirementsOS = a?.requirements?.os || 'linux'
       requirementsInstructions = a?.requirements?.instructions || ''
       requirementsScript = a?.requirements?.script || ''
-      tabs = [{ key: DEF, label: 'agent.yaml', lang: 'yaml', content: defYaml, dirty: false, ref: null, isDef: true }]
+      tabs = [{ key: DEF, label: 'agent.yaml', lang: 'yaml', content: defYaml, dirty: false, ref: null, isDef: true, isRuntime: false }]
+      runtimeConfigured = !!runtimeJSON
+      if (runtimeJSON) tabs = [...tabs, { key: RUNTIME, label: 'runtime.json', lang: 'json', content: runtimeJSON, dirty: false, ref: null, isDef: false, isRuntime: true }]
       active = DEF
       await refreshTree()
       await loadKnowledge()
+      await refreshManagedRuns()
       await tick()
       tabs.find((t) => t.isDef)?.ref?.setExternal(defYaml)
     } catch (e) {
@@ -177,6 +195,29 @@
     finally { treeLoading = false }
   }
 
+  async function refreshManagedRuns() {
+    if (!agentId) { managedRuns = []; return }
+    runsLoading = true
+    try { managedRuns = (await api.listManagedRuns(agentId)) || [] }
+    catch { managedRuns = [] }
+    finally { runsLoading = false }
+  }
+
+  async function inspectManagedRun(runId) {
+    artifactPreview = null
+    try { selectedRun = await api.managedRunDetails(runId) }
+    catch (e) { error = String(e) }
+  }
+
+  async function inspectArtifact(name) {
+    if (!selectedRun) return
+    try { artifactPreview = { name, content: await api.managedArtifactText(selectedRun.id, name) } }
+    catch (e) { error = String(e) }
+  }
+
+  function closeRunInspector() { selectedRun = null; artifactPreview = null }
+  function formatBytes(n) { return n < 1024 ? `${n} B` : `${(n / 1024).toFixed(1)} KB` }
+
   async function createNamed() {
     if (creating || !newName.trim()) return
     creating = true
@@ -197,13 +238,90 @@
     }
   }
 
+  function chooseManual() {
+    creationChoice = false
+    needName = true
+  }
+
+  function chooseGuided() {
+    creationChoice = false
+    guided = true
+    guidedStep = 1
+    guidedPreview = null
+  }
+
+  async function importFromCreation() {
+    creating = true
+    error = ''
+    try {
+      const imported = await api.importAgentDialog()
+      if (!imported?.id) return
+      creationChoice = false
+      await loadAll(imported.id)
+      await bootHelperChat()
+    } catch (e) { error = String(e) }
+    finally { creating = false }
+  }
+
+  function guidedRequest() {
+    return {
+      ...guidedForm,
+      name: guidedForm.name.trim(),
+      purpose: guidedForm.purpose.trim(),
+      supports: guidedForm.supports,
+      capabilities: guidedForm.capabilities,
+    }
+  }
+
+  function recommendedPreset() {
+    const c = guidedForm.capabilities
+    return c.execute_commands || c.modify_files || c.use_git || c.network || c.external_services ? 'tool-enabled' : 'simple'
+  }
+
+  async function guidedNext() {
+    error = ''
+    if (guidedStep === 1 && (!guidedForm.name.trim() || !guidedForm.purpose.trim())) {
+      error = 'Name and purpose are required.'
+      return
+    }
+    if (guidedStep < 4) { guidedStep += 1; return }
+    try { guidedPreview = await api.previewGuidedAgent(guidedRequest()) }
+    catch (e) { error = String(e) }
+  }
+
+  async function createGuided() {
+    if (creating || !guidedPreview) return
+    creating = true
+    error = ''
+    try {
+      const created = await api.createGuidedAgent(guidedRequest())
+      guided = false
+      await loadAll(created.id)
+      await bootHelperChat()
+    } catch (e) { error = String(e) }
+    finally { creating = false }
+  }
+
+  async function openRuntime() {
+    const existing = tabs.find((t) => t.isRuntime)
+    if (existing) { active = existing.key; return }
+    try {
+      const body = runtimeConfigured
+        ? await api.agentRuntimeJSON(agentId)
+        : await api.enableAgentRuntime(agentId)
+      runtimeConfigured = true
+      tabs = [...tabs, { key: RUNTIME, label: 'runtime.json', lang: 'json', content: body, dirty: false, ref: null, isDef: false, isRuntime: true }]
+      active = RUNTIME
+    } catch (e) { error = String(e) }
+  }
+
   // --- tabs ---
   async function openFile(rel) {
     const ex = tabs.find((t) => t.key === rel)
     if (ex) { active = rel; return }
     try {
       const content = await api.agentReadKnowledgeFile(agentId, rel)
-      tabs = [...tabs, { key: rel, label: rel.split('/').pop(), lang: langOf(rel), content, dirty: false, ref: null, isDef: false }]
+      tabs = [...tabs, { key: rel, label: rel.split('/').pop(), lang: langOf(rel), content, dirty: false, ref: null, isDef: false, isRuntime: false }]
       active = rel
       await tick()
       tabs.find((t) => t.key === rel)?.ref?.setExternal(content)
@@ -240,6 +358,8 @@
           agentId = saved.id
           agentName = saved.name
           try { await api.syncAgentYAMLToDisk(saved.id, helperCwd) } catch {}
+        } else if (t.isRuntime) {
+          await api.saveAgentRuntimeJSON(agentId, body)
         } else {
           await api.agentWriteKnowledgeFile(agentId, t.key, body)
         }
@@ -307,6 +427,9 @@
         notice = `Saved ${saved.name}`
         await refreshTree()
         await loadKnowledge()
+      } else if (t.isRuntime) {
+        await api.saveAgentRuntimeJSON(agentId, body)
+        notice = 'Saved runtime.json'
       } else {
         await api.agentWriteKnowledgeFile(agentId, t.key, body)
         notice = `Saved ${t.label}`
@@ -607,7 +730,119 @@
 
 <ContextMenu menu={ctx} on:close={() => (ctx = null)} />
 
-{#if needName}
+{#if selectedRun}
+  <div class="name-overlay run-overlay">
+    <section class="name-card run-card" role="dialog" aria-modal="true" aria-label="Managed run details">
+      <div class="run-title"><div><h2>Managed run</h2><div class="mono run-id">{selectedRun.id}</div></div><button class="xbtn" aria-label="Close run details" on:click={closeRunInspector}>×</button></div>
+      <div class="run-summary"><span class="run-state {selectedRun.state}">{selectedRun.state}</span><span>{selectedRun.turns} turn(s)</span><span>{new Date(selectedRun.startedAt).toLocaleString()}</span></div>
+      {#if selectedRun.error}<div class="banner">{selectedRun.error}</div>{/if}
+      {#if selectedRun.final}<div class="run-section"><strong>Final response</strong><div class="markdown run-final">{@html renderMarkdown(selectedRun.final)}</div></div>{/if}
+      <div class="run-columns">
+        <div class="run-section"><strong>Working memory · {selectedRun.memory?.length || 0}</strong>
+          {#if selectedRun.memory?.length}
+            {#each selectedRun.memory as item}<div class="run-item"><span class="tag">{item.kind}{item.status ? ` · ${item.status}` : ''}</span><b>{item.title || ''}</b><div>{item.content}</div></div>{/each}
+          {:else}<div class="hint">No per-run memory items.</div>{/if}
+        </div>
+        <div class="run-section"><strong>Artifacts · {selectedRun.artifacts?.length || 0}</strong>
+          {#if selectedRun.artifacts?.length}
+            {#each selectedRun.artifacts as artifact}<button class="artifact-row" on:click={() => inspectArtifact(artifact.name)}><span>{artifact.name}</span><span>{formatBytes(artifact.size)}</span></button>{/each}
+          {:else}<div class="hint">No artifacts.</div>{/if}
+        </div>
+      </div>
+      {#if artifactPreview}<div class="run-section artifact-preview"><strong>{artifactPreview.name}</strong><pre>{artifactPreview.content}</pre></div>{/if}
+    </section>
+  </div>
+{/if}
+
+{#if creationChoice}
+  <div class="name-overlay">
+    <div class="name-card creation-card">
+      <h2>Create new agent</h2>
+      <p class="sub">Choose how much help you want. Manual creation remains the same YAML editor.</p>
+      {#if error}<div class="banner error-banner" role="alert"><span>{error}</span><button class="error-close" aria-label="Cerrar error" on:click={dismissError}>×</button></div>{/if}
+      <div class="creation-options">
+        <button class="creation-option" on:click={chooseGuided}>
+          <strong>Guided creation</strong><span>Describe the agent and choose capabilities. PrAImate generates explicit, reviewable configuration.</span>
+        </button>
+        <button class="creation-option" on:click={chooseManual}>
+          <strong>Manual creation</strong><span>Name the agent, then open the existing YAML authoring studio.</span>
+        </button>
+        <button class="creation-option" on:click={importFromCreation} disabled={creating}>
+          <strong>Import agent</strong><span>Open an existing YAML or portable .praimate-agent package.</span>
+        </button>
+      </div>
+      <div class="row2" style="margin-top:14px; justify-content:flex-end"><button class="btn" on:click={close}>Cancel</button></div>
+    </div>
+  </div>
+{:else if guided}
+  <div class="name-overlay">
+    <div class="name-card creation-card guided-card">
+      <div class="wizard-progress">Step {guidedStep} of 4</div>
+      {#if guidedStep === 1}
+        <h2>Identity and purpose</h2>
+        <p class="sub">Use plain language. These fields become portable agent metadata and instructions.</p>
+        <label class="lbl" for="guided-name">Name</label>
+        <input id="guided-name" class="field" placeholder="e.g. Code Reviewer" bind:value={guidedForm.name} />
+        <label class="lbl" for="guided-purpose">What should it do?</label>
+        <textarea id="guided-purpose" class="field" rows="5" placeholder="Review software projects and report concrete defects…" bind:value={guidedForm.purpose}></textarea>
+      {:else if guidedStep === 2}
+        <h2>Knowledge</h2>
+        <p class="sub">Documents are attached after creation and travel inside the portable agent package.</p>
+        <label class="choice"><input type="radio" bind:group={guidedForm.knowledge} value="" /> No additional knowledge</label>
+        <label class="choice"><input type="radio" bind:group={guidedForm.knowledge} value="raw" /> Raw documents — the CLI reads files directly</label>
+        <label class="choice"><input type="radio" bind:group={guidedForm.knowledge} value="rag" /> Indexed knowledge — Graphify retrieval</label>
+      {:else if guidedStep === 3}
+        <h2>Capabilities</h2>
+        <p class="sub">These are explicit declarations, not hidden permission grants. The selected CLI still enforces native runs.</p>
+        <div class="cap-grid">
+          <label class="choice"><input type="checkbox" bind:checked={guidedForm.capabilities.read_project} /> Read project files</label>
+          <label class="choice"><input type="checkbox" bind:checked={guidedForm.capabilities.analyze_code} /> Analyze source code</label>
+          <label class="choice"><input type="checkbox" bind:checked={guidedForm.capabilities.use_git} /> Use Git</label>
+          <label class="choice"><input type="checkbox" bind:checked={guidedForm.capabilities.execute_commands} /> Execute commands</label>
+          <label class="choice"><input type="checkbox" bind:checked={guidedForm.capabilities.modify_files} /> Modify files</label>
+          <label class="choice"><input type="checkbox" bind:checked={guidedForm.capabilities.network} /> Access the Internet</label>
+          <label class="choice"><input type="checkbox" bind:checked={guidedForm.capabilities.external_services} /> Use external services</label>
+        </div>
+      {:else}
+        <h2>Runtime preset</h2>
+        <p class="sub">Presets expand into explicit runtime.json fields. Recommendation: <strong>{recommendedPreset()}</strong>.</p>
+        <div class="preset-grid">
+          {#each [
+            {id:'simple', title:'Simple', text:'Native CLI, safe default, step-by-step.'},
+            {id:'tool-enabled', title:'Tool-enabled', text:'Native CLI with declared capabilities and conservative permissions.'},
+            {id:'autonomous', title:'Autonomous', text:'Managed read-only lifecycle, working memory, artifacts and bounded context.'},
+            {id:'team', title:'Team', text:'Autonomous runtime plus static/dynamic delegation.'}
+          ] as preset}
+            <label class="preset" class:selected={guidedForm.preset === preset.id}>
+              <input type="radio" bind:group={guidedForm.preset} value={preset.id} on:change={() => (guidedPreview = null)} />
+              <strong>{preset.title}</strong><span>{preset.text}</span>
+            </label>
+          {/each}
+        </div>
+        {#if guidedPreview}
+          <div class="summary-card">
+            <strong>Generated capability summary</strong>
+            {#each guidedPreview.capabilitySummary || [] as item}<div>✓ {item}</div>{/each}
+            {#each guidedPreview.warnings || [] as warning}<div class="warn">⚠ {warning}</div>{/each}
+            <div class="mono summary-id">Agent ID: {guidedPreview.agent.id}</div>
+          </div>
+        {/if}
+      {/if}
+      {#if error}<div class="banner error-banner" role="alert"><span>{error}</span><button class="error-close" aria-label="Cerrar error" on:click={dismissError}>×</button></div>{/if}
+      <div class="row2 wizard-actions">
+        <button class="btn" on:click={() => { if (guidedStep === 1) { guided = false; creationChoice = true } else { guidedStep -= 1; guidedPreview = null } }}>Back</button>
+        <span class="grow"></span>
+        {#if guidedStep < 4}
+          <button class="btn primary" on:click={guidedNext}>Continue</button>
+        {:else if !guidedPreview}
+          <button class="btn primary" on:click={guidedNext}>Review configuration</button>
+        {:else}
+          <button class="btn primary" on:click={createGuided} disabled={creating}>{creating ? 'Creating…' : 'Create agent'}</button>
+        {/if}
+      </div>
+    </div>
+  </div>
+{:else if needName}
   <div class="name-overlay">
     <div class="name-card">
       <h2>Name your agent</h2>
@@ -644,6 +879,11 @@
          folder (everything inside it IS the agent's knowledge base) -->
     <div class="files">
       <button class="tree-item" class:on={active === DEF} on:click={() => (active = DEF)}>📄 agent.yaml <span class="tag">definition</span></button>
+      {#if runtimeConfigured}
+        <button class="tree-item" class:on={active === RUNTIME} on:click={openRuntime}>⚙ runtime.json <span class="tag">capabilities</span></button>
+      {:else}
+        <button class="tree-item runtime-add" on:click={openRuntime}>＋ Advanced capabilities</button>
+      {/if}
       {#if know?.exists}
         <div class="tree-row" style="padding-left:8px"><span class="tree-item dir">📁 knowledge <span class="tag">{tree.filter((n) => !n.isIndex && !n.isDir).length} file(s)</span></span></div>
         {#if tree.length === 0}
@@ -745,6 +985,14 @@
         <button class="btn sm" on:click={pickRequirementsScript} disabled={requirementsBusy}>{requirementsBusy ? 'Attaching…' : requirementsScript ? `Replace ${requirementsScript}` : 'Attach requirements script…'}</button>
       {/if}
     </div>
+
+    <div class="kctl managed-runs">
+      <div class="run-title"><div class="lbl2">Managed runs</div><button class="xbtn" title="Refresh managed runs" on:click={refreshManagedRuns} disabled={runsLoading}>{runsLoading ? '…' : '↻'}</button></div>
+      {#if managedRuns.length === 0}<div class="hint">No managed Autonomous runs yet. Native runs are not recorded here.</div>{/if}
+      {#each managedRuns.slice(0, 5) as run}
+        <button class="run-row" on:click={() => inspectManagedRun(run.id)}><span class="run-state {run.state}">{run.state}</span><span class="grow">{new Date(run.startedAt).toLocaleString()}</span><span>{run.turns}t</span></button>
+      {/each}
+    </div>
   </aside>
   {/if}
 
@@ -768,7 +1016,7 @@
       <button class="xbtn" title="Save all (Ctrl+Shift+S)" on:click={saveAllTabs} disabled={dirtyCount === 0}>💾·{dirtyCount}</button>
       <button class="xbtn" title="Close other tabs" on:click={closeOtherTabs} disabled={tabs.length < 2}>↹</button>
       <button class="xbtn" title="Close all tabs" on:click={closeAllTabs} disabled={tabs.length < 2}>✕</button>
-      <button class="btn primary" on:click={saveActive}>{activeTab?.isDef ? 'Save agent' : 'Save file'}</button>
+      <button class="btn primary" on:click={saveActive}>{activeTab?.isDef ? 'Save agent' : activeTab?.isRuntime ? 'Save runtime' : 'Save file'}</button>
     </div>
     {#if error}
       <div class="banner error-banner" role="alert">
@@ -973,6 +1221,44 @@
   .name-card { width: 420px; max-width: 92vw; background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 22px 24px; }
   .name-card h2 { margin: 0 0 4px; font-size: 16px; }
   .name-card .sub { color: var(--text-dim); font-size: 12.5px; margin: 0 0 14px; }
+  .creation-card { width: 620px; max-height: 88vh; overflow-y: auto; }
+  .guided-card { width: 680px; }
+  .creation-options { display: grid; gap: 10px; }
+  .creation-option { display: flex; flex-direction: column; gap: 4px; text-align: left; padding: 14px 16px; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 10px; cursor: pointer; }
+  .creation-option:hover { border-color: var(--accent); background: var(--bg-raised); }
+  .creation-option span, .preset span { color: var(--text-dim); font-size: 12px; line-height: 1.4; }
+  .wizard-progress { color: var(--accent); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; margin-bottom: 6px; }
+  .wizard-actions { margin-top: 18px; align-items: center; }
+  .choice { display: flex; align-items: center; gap: 8px; padding: 8px 4px; font-size: 13px; }
+  .cap-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 18px; }
+  .preset-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+  .preset { display: grid; grid-template-columns: 18px 1fr; gap: 3px 6px; padding: 11px; border: 1px solid var(--border); border-radius: 9px; cursor: pointer; }
+  .preset input { grid-row: 1 / 3; }
+  .preset.selected { border-color: var(--accent); background: var(--bg-raised); }
+  .summary-card { margin-top: 12px; padding: 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg); font-size: 12px; line-height: 1.6; }
+  .summary-card .warn { color: var(--warn); margin-top: 5px; }
+  .summary-id { color: var(--text-dim); margin-top: 5px; }
+  .runtime-add { color: var(--accent); }
+  .managed-runs { flex: 0 0 auto; max-height: 190px; border-top: 1px solid var(--border); }
+  .run-title { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+  .run-row, .artifact-row { display: flex; align-items: center; gap: 8px; width: 100%; border: 1px solid var(--border); border-radius: 7px; padding: 6px 8px; color: var(--text); background: var(--bg); text-align: left; cursor: pointer; font-size: 11px; }
+  .run-row:hover, .artifact-row:hover { border-color: var(--accent); }
+  .run-state { border-radius: 999px; padding: 1px 7px; font-size: 10px; color: var(--text-dim); background: var(--bg-raised); text-transform: uppercase; }
+  .run-state.completed { color: var(--ok); }
+  .run-state.failed, .run-state.stalled { color: var(--danger, #e5484d); }
+  .run-state.running, .run-state.waiting { color: var(--accent); }
+  .run-overlay { z-index: 70; }
+  .run-card { width: min(900px, 92vw); max-height: 88vh; overflow-y: auto; }
+  .run-card h2 { margin-bottom: 2px; }
+  .run-id { font-size: 11px; color: var(--text-dim); }
+  .run-summary { display: flex; gap: 10px; align-items: center; margin: 12px 0; color: var(--text-dim); font-size: 11px; }
+  .run-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .run-section { border: 1px solid var(--border); border-radius: 9px; padding: 11px; margin-top: 10px; }
+  .run-final { margin-top: 7px; max-height: 260px; overflow-y: auto; }
+  .run-item { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); font-size: 12px; overflow-wrap: anywhere; }
+  .run-item b { margin-left: 6px; }
+  .artifact-row { justify-content: space-between; margin-top: 7px; }
+  .artifact-preview pre { max-height: 260px; overflow: auto; white-space: pre-wrap; font-size: 11px; background: var(--bg); padding: 8px; border-radius: 6px; }
 
   /* right-click ask menu — HARDCODED black-on-white (WebKitGTK can't
      reliably render theme vars inside CodeMirror's tooltip). */

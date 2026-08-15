@@ -32,8 +32,8 @@ type RunOptions struct {
 	// Model, if non-empty, selects the model for every workflow turn.
 	Model string
 
-	// Tools is retained for compatibility; workflow runs always execute
-	// with full tool privileges.
+	// Tools selects the same permission level used by interactive chats.
+	// Empty is the safe default; workflows never elevate it implicitly.
 	Tools string
 
 	// OnTurn, if non-nil, is invoked with each completed turn as it
@@ -241,6 +241,14 @@ func (c *Core) runWorkflowSequence(ctx context.Context, cfg workflowRunConfig, p
 			cfg.Agent.ID, cfg.CLI, cfg.Agent.Supports)
 		return res
 	}
+	runtimeConfig, err := c.ResolveEffectiveAgentConfig(ctx, cfg.Agent)
+	if err != nil {
+		res.Err = err
+		return res
+	}
+	if runtimeConfig.Mode == RuntimeAgentic {
+		return c.runManagedWorkflowSequence(ctx, cfg, plans, res)
+	}
 
 	adapter, err := GetCLIAdapter(cfg.CLI)
 	if err != nil {
@@ -251,12 +259,21 @@ func (c *Core) runWorkflowSequence(ctx context.Context, cfg workflowRunConfig, p
 		res.Err = fmt.Errorf("agent %q: run all workflows requires resumable CLI %q", cfg.Agent.ID, cfg.CLI)
 		return res
 	}
-	if mcpEnv, err := c.prepareMCPForRun(ctx, cfg.Agent, cfg.CLI, cfg.Cwd); err != nil {
+	effective, err := c.ResolveExecutionConfig(ctx, ExecutionRequest{
+		Surface: SurfaceWorkflow, Agent: cfg.Agent, CLI: cfg.CLI, Cwd: cfg.Cwd,
+		Model: cfg.Model, Tools: cfg.Tools, Local: cfg.ChatSettings.Local,
+	})
+	if err != nil {
 		res.Err = err
 		return res
-	} else if len(mcpEnv) > 0 {
-		cfg.Env = mergeStringMaps(cfg.Env, mcpEnv)
 	}
+	if err := c.PrepareExecution(ctx, effective); err != nil {
+		res.Err = err
+		return res
+	}
+	cfg.Model = effective.Model
+	cfg.Tools = effective.Tools
+	cfg.Env = mergeStringMaps(cfg.Env, effective.Env)
 
 	rendered := make([]*RenderedWorkflow, 0, len(plans))
 	for _, p := range plans {
@@ -278,14 +295,14 @@ func (c *Core) runWorkflowSequence(ctx context.Context, cfg workflowRunConfig, p
 	// DB hiccupped.
 	chatID := c.maybeCreateChat(ctx, RunOptions{
 		Agent: cfg.Agent, WorkflowName: res.WorkflowName, CLI: cfg.CLI,
-		Cwd: cfg.Cwd, Model: cfg.Model, Persist: cfg.Persist, ChatTitle: cfg.ChatTitle,
+		Cwd: cfg.Cwd, Model: cfg.Model, Tools: cfg.Tools, Persist: cfg.Persist, ChatTitle: cfg.ChatTitle,
 		ChatSettings: cfg.ChatSettings,
 	})
 	res.ChatID = chatID
 
 	turnIdx := 0
 	var lastReply *Reply
-	tools := "full"
+	tools := cfg.Tools
 	for _, workflow := range rendered {
 		emitWorkflowEvent(cfg.OnEvent, WorkflowRunEvent{
 			WorkflowName: workflow.Name, Type: "workflow_start", OK: true,
@@ -477,7 +494,7 @@ func (c *Core) maybeCreateChat(ctx context.Context, opts RunOptions) string {
 		title = opts.Agent.Name + " · " + opts.WorkflowName
 	}
 	settings := opts.ChatSettings
-	settings.Tools = "full"
+	settings.Tools = opts.Tools
 	if settings.Model == "" {
 		settings.Model = opts.Model
 	}

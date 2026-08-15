@@ -335,11 +335,18 @@ modify the machine, so inspect imported scripts before authorizing them.
 
 ## Use Agent Studio
 
-Agent Studio provides a guided workspace for editing `agent.yaml`, attached
-knowledge files, and an optional requirements script. Its helper can draft
-changes through an installed CLI, but helper output is not automatically
-trusted or silently applied: review the resulting YAML and files, reload them
-into the editor if needed, then save.
+Agent Studio begins with Guided, Manual, and Import choices. Guided creation
+collects a name and purpose, knowledge mode, explicit capabilities, and one of
+four presets. Its final screen previews the effective capability summary and
+warnings before writing anything. Manual creation opens the familiar YAML
+editor. Import accepts either YAML or a complete pack.
+
+The generated files remain transparent: `agent.yaml` is the portable persona
+and workflow definition; optional `runtime.json` declares advanced runtime
+intent. Attached knowledge and an optional requirements script remain separate
+managed files. The helper can draft changes through an installed CLI, but
+helper output is not automatically trusted or silently applied: review the
+resulting files, reload them into the editor if needed, then save.
 
 For direct, precise changes, the Agents page YAML editor is the canonical
 definition editor.
@@ -388,17 +395,21 @@ The normal portable format is `.praimate-agent`, which is a ZIP archive:
 
 ```text
 agent.yaml
+runtime.json
 knowledge/**
 requirements/**
 ```
 
 The complete managed knowledge folder is included, including a built Graphify
-index. The complete requirements folder is also included.
+index. The complete requirements folder is also included. `runtime.json` is
+included only when advanced capabilities have been configured.
 
 Import validates and extracts a pack in a staging directory before replacing
 live agent data. Importing an existing agent ID updates its definition and, for
-a pack, replaces its managed knowledge and requirements folders. Review an
-imported definition and any script before running it.
+a pack, replaces its runtime manifest, managed knowledge, and requirements
+folders. A pack without `runtime.json` removes an older manifest for that agent
+instead of inheriting stale capabilities. Review an imported definition and
+any script before running it.
 
 ### What a pack does not contain
 
@@ -442,6 +453,68 @@ translate names into CLI permissions, or enforce an allowlist. Runtime tool
 availability comes from the selected CLI, its configuration, the launch
 surface, and any MCP configuration. Treat `tools` as documentation for humans
 and future integrations.
+
+## Runtime manifest reference
+
+`runtime.json` is optional and stored beside the agent's managed folders. If
+it is absent, the effective mode is `native` and behavior is identical to an
+existing agent. The decoder rejects unknown fields and multiple JSON values so
+typos and appended content cannot silently change the security boundary.
+
+```json
+{
+  "schema": "praimate.runtime/v1",
+  "preset_origin": "tool-enabled",
+  "mode": "native",
+  "capabilities": {
+    "read_project": true,
+    "analyze_code": true,
+    "modify_files": true
+  },
+  "features": {},
+  "permissions": {
+    "default_tools": "edits"
+  }
+}
+```
+
+| Field | Values and behavior |
+|---|---|
+| `schema` | Required; exactly `praimate.runtime/v1` |
+| `preset_origin` | Optional provenance: `simple`, `tool-enabled`, `autonomous`, `team`, or `custom` |
+| `mode` | Required: `native` or `agentic` |
+| `capabilities` | Boolean intent flags: `read_project`, `analyze_code`, `use_git`, `execute_commands`, `modify_files`, `network`, `external_services` |
+| `features` | Managed-runtime requirements: `managed_tools`, `working_memory`, `sandbox`, `artifacts`, `checkpoints`, `delegation`, and `max_children` |
+| `permissions.default_tools` | Optional native CLI preference: `ask`, `edits`, `plan`, or `full`; unsupported levels degrade to the CLI's safe mode with a warning |
+| `limits` | Optional managed limits: `max_turns` (1–100), `max_context_chars` (at least 2000), and `max_output_chars` (at least 500) |
+
+Native manifests cannot claim managed features. Agentic manifests must request
+at least one managed feature. The current executable single-agent profile
+requires all three implemented modules (`managed_tools`, `working_memory`, and
+`artifacts`); a partial profile is stored but rejected before launch rather
+than silently changing its semantics. Delegation requires `max_children` from
+1 to 32; the Team preset currently expands to 4.
+
+The current managed runtime supports `managed_tools`, `working_memory`, and
+`artifacts` for a single agent on Chat, document Studio, and Workflow surfaces.
+It requires explicit JSON lifecycle actions and stores only functional run
+state, per-run memory, and artifacts—no event log. The broker exposes
+`memory.task`, `memory.note`, `memory.fact`, `memory.decision`, and
+`artifact.write`; large output is bounded and preserved as an artifact.
+
+Sandbox, checkpoints, and delegation are still unavailable. A manifest that
+requests any of them is rejected before the CLI starts. Team therefore remains
+blocked, as do older Autonomous manifests generated when that preset included
+sandbox/checkpoint claims. Interactive Terminal launches remain native.
+Agentic agents with `mcp_servers` are also rejected until the policy-aware MCP
+broker is implemented; PrAImate does not pass MCP access around the broker.
+The selected CLI adapter must explicitly guarantee an enforceable headless safe
+mode. An adapter that ignores safe permissions is rejected before its process
+starts.
+Graphify RAG is available on native runtimes. Managed Autonomous agents must
+use `knowledge: raw` until the policy-aware knowledge broker is implemented;
+preflight rejects `knowledge: rag` rather than allowing an unbrokered host
+command.
 
 ### Validation rules
 

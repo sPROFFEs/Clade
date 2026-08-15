@@ -286,10 +286,9 @@ func DeleteAgentKnowledgeFile(id, rel string) error {
 // AgentPackExt is the distribution extension for agents with knowledge.
 const AgentPackExt = ".praimate-agent"
 
-// ExportAgentPack writes a .praimate-agent zip (agent.yaml + the whole
-// knowledge folder, graphify-out index included so RAG agents arrive
-// pre-indexed). Works for knowledge-less agents too — the zip then
-// just carries agent.yaml.
+// ExportAgentPack writes a .praimate-agent zip (agent.yaml, optional
+// runtime.json, and the whole knowledge folder; graphify-out is included so
+// RAG agents arrive pre-indexed). Requirements scripts travel in the pack too.
 func (c *Core) ExportAgentPack(ctx context.Context, id, path string) error {
 	agent, err := c.GetAgent(ctx, id)
 	if err != nil {
@@ -312,6 +311,29 @@ func (c *Core) ExportAgentPack(ctx context.Context, id, path string) error {
 		_ = zw.Close()
 		_ = f.Close()
 		return fmt.Errorf("write agent.yaml: %w", err)
+	}
+	runtimePath, err := AgentRuntimePath(id)
+	if err == nil {
+		if runtimeRaw, readErr := os.ReadFile(runtimePath); readErr == nil {
+			if _, parseErr := ParseAgentRuntime(runtimeRaw); parseErr != nil {
+				_ = zw.Close()
+				_ = f.Close()
+				return fmt.Errorf("export runtime.json: %w", parseErr)
+			}
+			rw, createErr := zw.Create("runtime.json")
+			if createErr == nil {
+				_, createErr = rw.Write(runtimeRaw)
+			}
+			if createErr != nil {
+				_ = zw.Close()
+				_ = f.Close()
+				return fmt.Errorf("write runtime.json: %w", createErr)
+			}
+		} else if !os.IsNotExist(readErr) {
+			_ = zw.Close()
+			_ = f.Close()
+			return fmt.Errorf("read runtime.json: %w", readErr)
+		}
 	}
 
 	dir, err := AgentKnowledgeDir(id)
@@ -373,8 +395,9 @@ func (c *Core) ExportAgentPack(ctx context.Context, id, path string) error {
 
 // ImportAgentPack imports a .praimate-agent zip. The pack is fully parsed and
 // extracted into a sibling staging directory before either the database or the
-// live agent folders are touched. Once validation succeeds, knowledge and
-// requirements are swapped with rollback protection and the agent is upserted.
+// live agent folders are touched. Once validation succeeds, runtime,
+// knowledge, and requirements are swapped with rollback protection and the
+// agent is upserted.
 func (c *Core) ImportAgentPack(ctx context.Context, path string) (*Agent, error) {
 	if c.store == nil {
 		return nil, fmt.Errorf("ImportAgentPack: no store configured")
@@ -385,11 +408,13 @@ func (c *Core) ImportAgentPack(ctx context.Context, path string) (*Agent, error)
 	}
 	defer zr.Close()
 
-	var yamlEntry *zip.File
+	var yamlEntry, runtimeEntry *zip.File
 	for _, zf := range zr.File {
 		if zf.Name == "agent.yaml" {
 			yamlEntry = zf
-			break
+		}
+		if zf.Name == "runtime.json" {
+			runtimeEntry = zf
 		}
 	}
 	if yamlEntry == nil {
@@ -408,6 +433,21 @@ func (c *Core) ImportAgentPack(ctx context.Context, path string) (*Agent, error)
 	if err != nil {
 		return nil, err
 	}
+	var runtimeBody []byte
+	if runtimeEntry != nil {
+		rr, openErr := runtimeEntry.Open()
+		if openErr != nil {
+			return nil, openErr
+		}
+		runtimeBody, err = io.ReadAll(io.LimitReader(rr, 1<<20))
+		_ = rr.Close()
+		if err != nil {
+			return nil, err
+		}
+		if _, err := ParseAgentRuntime(runtimeBody); err != nil {
+			return nil, err
+		}
+	}
 
 	agentDir, err := AgentDir(agent.ID)
 	if err != nil {
@@ -422,6 +462,11 @@ func (c *Core) ImportAgentPack(ctx context.Context, path string) (*Agent, error)
 		return nil, err
 	}
 	defer os.RemoveAll(stageDir)
+	if runtimeEntry != nil {
+		if err := os.WriteFile(filepath.Join(stageDir, "runtime.json"), runtimeBody, 0o600); err != nil {
+			return nil, err
+		}
+	}
 
 	// Extract everything before replacing live data. A malformed entry, CRC
 	// failure, or short read therefore leaves the existing agent untouched.
@@ -478,6 +523,11 @@ func (c *Core) ImportAgentPack(ctx context.Context, path string) (*Agent, error)
 			live:   filepath.Join(agentDir, "requirements"),
 			staged: filepath.Join(stageDir, "requirements"),
 			backup: filepath.Join(stageDir, ".backup-requirements"),
+		},
+		{
+			live:   filepath.Join(agentDir, "runtime.json"),
+			staged: filepath.Join(stageDir, "runtime.json"),
+			backup: filepath.Join(stageDir, ".backup-runtime.json"),
 		},
 	}
 	if err := os.MkdirAll(agentDir, 0o755); err != nil {

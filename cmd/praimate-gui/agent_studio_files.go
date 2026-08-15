@@ -6,7 +6,8 @@ package main
 // index. These bindings list the tree and read/write/create files inside
 // it (path-safety guarded so nothing escapes the knowledge folder). The
 // agent DEFINITION itself lives in the DB and is edited via AgentYAML /
-// SaveAgentYAML; the studio shows it as a pinned "agent.yaml" tab.
+// SaveAgentYAML; optional runtime capabilities live beside the knowledge
+// folder in runtime.json and are validated independently.
 
 import (
 	"fmt"
@@ -19,6 +20,88 @@ import (
 
 	"git.jtsec.local/lab/PrAImate/internal/core"
 )
+
+// PreviewGuidedAgent deterministically expands the guided form without
+// writing anything. The final wizard step renders this exact result.
+func (a *App) PreviewGuidedAgent(req core.GuidedAgentRequest) (*core.GuidedAgentPreview, error) {
+	if _, err := a.requireCore(); err != nil {
+		return nil, err
+	}
+	return core.PreviewGuidedAgent(req)
+}
+
+func (a *App) CreateGuidedAgent(req core.GuidedAgentRequest) (*core.Agent, error) {
+	c, err := a.requireCore()
+	if err != nil {
+		return nil, err
+	}
+	agent, err := c.CreateGuidedAgent(a.ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	if agent.Knowledge != "" {
+		if err := a.EnableAgentKnowledge(agent.ID); err != nil {
+			_ = c.DeleteAgent(a.ctx, agent.ID)
+			if runtimePath, pathErr := core.AgentRuntimePath(agent.ID); pathErr == nil {
+				_ = os.Remove(runtimePath)
+			}
+			return nil, fmt.Errorf("create knowledge folder: %w", err)
+		}
+	}
+	return agent, nil
+}
+
+func (a *App) AgentRuntimeJSON(id string) (string, error) {
+	if _, err := a.requireCore(); err != nil {
+		return "", err
+	}
+	manifest, err := core.LoadAgentRuntime(id)
+	if err != nil || manifest == nil {
+		return "", err
+	}
+	raw, err := core.MarshalAgentRuntime(manifest)
+	return string(raw), err
+}
+
+func (a *App) EnableAgentRuntime(id string) (string, error) {
+	c, err := a.requireCore()
+	if err != nil {
+		return "", err
+	}
+	if _, err := c.GetAgent(a.ctx, id); err != nil {
+		return "", err
+	}
+	manifest := &core.AgentRuntimeManifest{
+		Schema: core.AgentRuntimeSchema, PresetOrigin: core.PresetCustom, Mode: core.RuntimeNative,
+	}
+	raw, err := core.MarshalAgentRuntime(manifest)
+	if err != nil {
+		return "", err
+	}
+	if err := core.SaveAgentRuntime(id, manifest); err != nil {
+		return "", err
+	}
+	return string(raw), nil
+}
+
+func (a *App) SaveAgentRuntimeJSON(id, body string) (*core.EffectiveAgentConfig, error) {
+	c, err := a.requireCore()
+	if err != nil {
+		return nil, err
+	}
+	agent, err := c.GetAgent(a.ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	manifest, err := core.ParseAgentRuntime([]byte(body))
+	if err != nil {
+		return nil, err
+	}
+	if err := core.SaveAgentRuntime(id, manifest); err != nil {
+		return nil, err
+	}
+	return c.ResolveEffectiveAgentConfig(a.ctx, agent)
+}
 
 // AgentFileNode is one entry in the agent's knowledge tree.
 type AgentFileNode struct {
