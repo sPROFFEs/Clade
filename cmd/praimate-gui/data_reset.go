@@ -153,6 +153,12 @@ func (a *App) stopBackgroundWork() {
 	}
 	a.chatCancels = map[string]context.CancelFunc{}
 	a.chatCancelMu.Unlock()
+	a.managedCancelMu.Lock()
+	for _, cancel := range a.managedCancels {
+		cancel()
+	}
+	a.managedCancels = map[string]context.CancelFunc{}
+	a.managedCancelMu.Unlock()
 
 	a.ragCancelMu.Lock()
 	for _, run := range a.ragCancels {

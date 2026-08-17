@@ -137,7 +137,11 @@ func TestGuidedAgentPresetExpansionAndExecutionGate(t *testing.T) {
 	}
 	for _, surface := range []ExecutionSurface{SurfaceChat, SurfaceStudio, SurfaceWorkflow, SurfaceTerminal} {
 		_, err = c.ResolveExecutionConfig(ctx, ExecutionRequest{Surface: surface, Agent: autonomous, CLI: "claude", Cwd: t.TempDir()})
-		if err == nil || !strings.Contains(err.Error(), "only supports native execution") {
+		want := "only supports native execution"
+		if surface == SurfaceTerminal {
+			want = "not allowed"
+		}
+		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Fatalf("agentic runtime did not fail closed on %s: %v", surface, err)
 		}
 	}
@@ -155,7 +159,7 @@ func TestGuidedAgentPresetExpansionIsDeterministic(t *testing.T) {
 	}{
 		{preset: PresetSimple, mode: RuntimeNative},
 		{preset: PresetToolEnabled, mode: RuntimeNative, defaultTools: "ask"},
-		{preset: PresetAutonomous, mode: RuntimeAgentic, features: []string{"managed tools", "working memory", "artifact store"}, warnings: 1},
+		{preset: PresetAutonomous, mode: RuntimeAgentic, features: []string{"managed tools", "working memory", "artifact store", "checkpoints"}, warnings: 1},
 		{preset: PresetTeam, mode: RuntimeAgentic, features: []string{"managed tools", "working memory", "sandbox", "artifact store", "checkpoints", "delegation"}, warnings: 1, maxChildren: 4},
 	}
 	for _, tt := range tests {
@@ -183,6 +187,19 @@ func TestGuidedAgentPresetExpansionIsDeterministic(t *testing.T) {
 				t.Fatalf("summary=%v warnings=%v", summary, warnings)
 			}
 		})
+	}
+}
+
+func TestGuidedCreationHidesUnexecutableTeamAndRemovesTerminalFromAutonomous(t *testing.T) {
+	if _, err := PreviewGuidedAgent(GuidedAgentRequest{Name: "Team", Purpose: "Delegate work", Preset: PresetTeam}); err == nil || !strings.Contains(err.Error(), "unavailable") {
+		t.Fatalf("Team guided preview err = %v", err)
+	}
+	preview, err := PreviewGuidedAgent(GuidedAgentRequest{Name: "Autonomous", Purpose: "Work independently", Preset: PresetAutonomous})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if contains(preview.Agent.Surfaces, "terminal") || !contains(preview.Agent.Surfaces, "chat") || !contains(preview.Agent.Surfaces, "editor") {
+		t.Fatalf("Autonomous surfaces = %v", preview.Agent.Surfaces)
 	}
 }
 

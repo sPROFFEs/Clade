@@ -146,7 +146,7 @@ func TestPreflightExecutionRoutesCompatibleAgenticRuntimeButRejectsTerminal(t *t
 	}
 	foundInfo := false
 	for _, issue := range workflow.Issues {
-		foundInfo = foundInfo || issue.Code == "managed_read_only"
+		foundInfo = foundInfo || issue.Code == "managed_policy_broker"
 	}
 	if !foundInfo {
 		t.Fatalf("managed boundary not disclosed: %#v", workflow.Issues)
@@ -157,7 +157,7 @@ func TestPreflightExecutionRoutesCompatibleAgenticRuntimeButRejectsTerminal(t *t
 	}
 }
 
-func TestPreflightRejectsManagedRAGWithoutKnowledgeBroker(t *testing.T) {
+func TestPreflightAcceptsManagedRAGWithKnowledgeBroker(t *testing.T) {
 	withTempConfigDir(t)
 	c, _ := New(Options{Store: openTempStore(t)})
 	agent := &Agent{
@@ -170,18 +170,21 @@ func TestPreflightRejectsManagedRAGWithoutKnowledgeBroker(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	knowledgeDir, err := AgentKnowledgeDir(agent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(knowledgeDir, "graphify-out"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(knowledgeDir, "graphify-out", "graph.json"), []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	result := c.PreflightExecution(context.Background(), ExecutionRequest{
 		Surface: SurfaceChat, Agent: agent, CLI: "claude", Cwd: t.TempDir(),
 	}, false)
-	if result.OK {
-		t.Fatalf("managed RAG preflight unexpectedly succeeded: %#v", result)
-	}
-	found := false
-	for _, issue := range result.Issues {
-		found = found || issue.Code == "managed_rag_unavailable"
-	}
-	if !found {
-		t.Fatalf("managed RAG issue missing: %#v", result.Issues)
+	if !result.OK {
+		t.Fatalf("managed RAG preflight failed: %#v", result)
 	}
 }
 

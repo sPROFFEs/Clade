@@ -57,8 +57,10 @@ type App struct {
 	// chatCancels maps chatID → cancel func for the in-flight streamed
 	// turn, so the Stop button can interrupt it. Guarded by chatCancelMu
 	// (binding calls run on independent goroutines).
-	chatCancelMu sync.Mutex
-	chatCancels  map[string]context.CancelFunc
+	chatCancelMu    sync.Mutex
+	chatCancels     map[string]context.CancelFunc
+	managedCancelMu sync.Mutex
+	managedCancels  map[string]context.CancelFunc
 
 	// ragCancels maps agent IDs to active graphify extractions so the RAG
 	// controls can stop only their own child process. Guarded by ragCancelMu.
@@ -88,6 +90,7 @@ func NewApp() *App {
 	return &App{
 		terms:               newTermManager(),
 		chatCancels:         map[string]context.CancelFunc{},
+		managedCancels:      map[string]context.CancelFunc{},
 		ragCancels:          map[string]*ragRun{},
 		requirementsCancels: map[string]*requirementsRun{},
 		quit:                wruntime.Quit,

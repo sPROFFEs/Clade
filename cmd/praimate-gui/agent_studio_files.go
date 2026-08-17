@@ -63,6 +63,18 @@ func (a *App) AgentRuntimeJSON(id string) (string, error) {
 	return string(raw), err
 }
 
+func (a *App) AgentRuntimeConfig(id string) (*core.EffectiveAgentConfig, error) {
+	c, err := a.requireCore()
+	if err != nil {
+		return nil, err
+	}
+	agent, err := c.GetAgent(a.ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return c.ResolveEffectiveAgentConfig(a.ctx, agent)
+}
+
 func (a *App) EnableAgentRuntime(id string) (string, error) {
 	c, err := a.requireCore()
 	if err != nil {

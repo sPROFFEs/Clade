@@ -337,7 +337,7 @@ modify the machine, so inspect imported scripts before authorizing them.
 
 Agent Studio begins with Guided, Manual, and Import choices. Guided creation
 collects a name and purpose, knowledge mode, explicit capabilities, and one of
-four presets. Its final screen previews the effective capability summary and
+three presets. Its final screen previews the effective capability summary and
 warnings before writing anything. Manual creation opens the familiar YAML
 editor. Import accepts either YAML or a complete pack.
 
@@ -486,7 +486,7 @@ typos and appended content cannot silently change the security boundary.
 | `capabilities` | Boolean intent flags: `read_project`, `analyze_code`, `use_git`, `execute_commands`, `modify_files`, `network`, `external_services` |
 | `features` | Managed-runtime requirements: `managed_tools`, `working_memory`, `sandbox`, `artifacts`, `checkpoints`, `delegation`, and `max_children` |
 | `permissions.default_tools` | Optional native CLI preference: `ask`, `edits`, `plan`, or `full`; unsupported levels degrade to the CLI's safe mode with a warning |
-| `limits` | Optional managed limits: `max_turns` (1–100), `max_context_chars` (at least 2000), and `max_output_chars` (at least 500) |
+| `limits` | Optional managed limits: `max_turns` per execution/resume attempt (1–100), `max_context_chars` (at least 2000), and `max_output_chars` (at least 500) |
 
 Native manifests cannot claim managed features. Agentic manifests must request
 at least one managed feature. The current executable single-agent profile
@@ -495,26 +495,44 @@ requires all three implemented modules (`managed_tools`, `working_memory`, and
 than silently changing its semantics. Delegation requires `max_children` from
 1 to 32; the Team preset currently expands to 4.
 
-The current managed runtime supports `managed_tools`, `working_memory`, and
-`artifacts` for a single agent on Chat, document Studio, and Workflow surfaces.
-It requires explicit JSON lifecycle actions and stores only functional run
-state, per-run memory, and artifacts—no event log. The broker exposes
-`memory.task`, `memory.note`, `memory.fact`, `memory.decision`, and
-`artifact.write`; large output is bounded and preserved as an artifact.
+The current managed runtime supports `managed_tools`, `working_memory`,
+`artifacts`, and `checkpoints` for a single agent on Chat, document Studio, and
+Workflow surfaces. It requires explicit JSON lifecycle actions and stores only
+functional run state, per-run memory, checkpoints, and artifacts—no event log.
+The always-available broker tools are `memory.task`, `memory.note`,
+`memory.fact`, `memory.decision`, and `artifact.write`; large output is bounded
+and preserved as an artifact.
 
-Sandbox, checkpoints, and delegation are still unavailable. A manifest that
-requests any of them is rejected before the CLI starts. Team therefore remains
-blocked, as do older Autonomous manifests generated when that preset included
-sandbox/checkpoint claims. Interactive Terminal launches remain native.
-Agentic agents with `mcp_servers` are also rejected until the policy-aware MCP
-broker is implemented; PrAImate does not pass MCP access around the broker.
-The selected CLI adapter must explicitly guarantee an enforceable headless safe
+Runtime capabilities expose additional tools:
+
+- `read_project`, `analyze_code`, or `modify_files`: `project.list`,
+  `project.read`, and literal `project.search`, contained beneath the selected
+  working folder;
+- `modify_files`: atomic `project.write`, after approval;
+- `use_git`: `git.run`; read-only inspection is automatic and mutations need
+  approval;
+- `execute_commands`: argv-only `command.run`, after approval, with a fixed
+  working folder, reduced environment, timeout, and bounded output;
+- `network`: bounded `network.get`, after approval;
+- `external_services` plus `mcp_servers`: discovered MCP tools through local
+  stdio, Streamable HTTP, or legacy SSE, with approval before connection and
+  for every call;
+- `knowledge: raw`: contained `knowledge.read`; `knowledge: rag`:
+  `knowledge.query` against the existing Graphify index.
+
+Stopped, failed, stalled, and orphaned `running` runs can resume from their
+durable checkpoint in Agent Studio. A tool interrupted without a result is
+marked outcome-unknown; recovery directs the model to inspect current state
+instead of blindly replaying the operation. Credentials are never written to
+`request.json`.
+
+OS sandboxing and delegation are unavailable. A manifest that requests either
+is rejected before the CLI starts. Team therefore remains blocked and is not a
+guided-creation choice. Interactive Terminal launches remain native. The
+selected CLI adapter must explicitly guarantee an enforceable headless safe
 mode. An adapter that ignores safe permissions is rejected before its process
-starts.
-Graphify RAG is available on native runtimes. Managed Autonomous agents must
-use `knowledge: raw` until the policy-aware knowledge broker is implemented;
-preflight rejects `knowledge: rag` rather than allowing an unbrokered host
-command.
+starts. Approved commands are real host processes; the Autonomous preset does
+not imply OS-level isolation.
 
 ### Validation rules
 

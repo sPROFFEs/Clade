@@ -1,8 +1,11 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"unicode/utf8"
+
+	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"git.jtsec.local/lab/PrAImate/internal/core"
 )
@@ -13,6 +16,38 @@ func (a *App) ListManagedRuns(agentID string) ([]core.ManagedRun, error) {
 		return nil, err
 	}
 	return c.ListManagedRuns(agentID)
+}
+
+func (a *App) ResumeManagedRun(runID string) (*core.ManagedRun, error) {
+	c, err := a.requireCore()
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithCancel(a.ctx)
+	a.managedCancelMu.Lock()
+	if old := a.managedCancels[runID]; old != nil {
+		old()
+	}
+	a.managedCancels[runID] = cancel
+	a.managedCancelMu.Unlock()
+	defer func() {
+		cancel()
+		a.managedCancelMu.Lock()
+		delete(a.managedCancels, runID)
+		a.managedCancelMu.Unlock()
+	}()
+	return c.ResumeManagedRun(ctx, runID, func(event core.ManagedRunEvent) {
+		wruntime.EventsEmit(a.ctx, "praimate:managed-run", event)
+	})
+}
+
+func (a *App) CancelManagedRun(runID string) {
+	a.managedCancelMu.Lock()
+	cancel := a.managedCancels[runID]
+	a.managedCancelMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 }
 
 func (a *App) ManagedRunDetails(runID string) (*core.ManagedRun, error) {

@@ -2,7 +2,7 @@
   <img src="assets/monke-icon.png" alt="PrAImate" width="120" />
 </p>
 
-# PrAImate 1.2.0 user guide
+# PrAImate 1.2.1 user guide
 
 PrAImate is a Linux and Windows desktop harness around supported agent CLIs.
 It provides a shared GUI, but the chosen CLI still performs model requests,
@@ -211,24 +211,26 @@ Agent Studio offers three entry paths:
 - **Manual** creates the familiar YAML agent and leaves every field editable.
 - **Import** accepts a bare YAML definition or a portable agent pack.
 
-The four guided presets are deterministic. Simple and Tool-enabled use the
+The three guided presets are deterministic. Simple and Tool-enabled use the
 existing native CLI runtime. Autonomous uses the managed single-agent runtime
-in Chats, document Studio, and Workflows. Team remains fail-closed until the
-coordinator/delegation phase. Older manifests that explicitly request sandbox
-or checkpoints also remain blocked until those modules exist.
+in Chats, document Studio, and Workflows. Team remains a valid fail-closed
+manifest value for package compatibility, but is not offered in guided
+creation until coordinator/delegation execution exists.
 
 Managed Autonomous execution provides explicit lifecycle completion, bounded
-context/output, per-run working memory, artifacts, and live events. It pins the
-underlying CLI to safe permissions: host commands, file changes, network
-policy, approvals, and isolation are intentionally not available yet. Agent
-Studio lists recent managed runs and lets the user inspect their memory and
-text artifacts. Its authoring helper stays native so it can edit `agent.yaml`.
-An Autonomous agent that references MCP servers is rejected before launch;
-passing those servers directly to the CLI would bypass the managed broker, and
-the policy-aware MCP broker belongs to the next runtime phase.
-Managed Autonomous agents with Graphify RAG are rejected for the same reason:
-Graphify currently requires a host command. Use Raw documents for an
-Autonomous agent, or a native preset when Graphify retrieval is required.
+context/output, per-run working memory, artifacts, checkpoints, and live
+events. Its policy broker exposes only capabilities declared by the agent:
+contained project access, Git, argv-only commands, bounded network GET,
+Raw/Graphify knowledge, and configured MCP tools. File writes, mutating Git,
+commands, network requests, and MCP connection/tool calls require GUI approval. The underlying
+CLI stays in safe mode and never receives those host tools directly.
+
+Agent Studio lists recent managed runs, shows final output, memory, and text
+artifacts, and can resume stopped, failed, stalled, or crash-interrupted runs.
+Its authoring helper stays native so it can edit `agent.yaml`. MCP requires the
+`external_services` capability; Graphify RAG requires an index built in Agent
+Studio. Autonomous does not provide OS-level sandbox isolation: approved
+commands run on the host. Interactive Terminal execution remains native.
 
 The editor exposes advanced configuration as a separate, strictly validated
 `runtime.json` tab. Closing and reopening that tab reloads the saved manifest.
@@ -276,7 +278,7 @@ an import invisibly.
 Import validates a staged copy before replacing live agent data. Graphify
 output may travel with the pack, so an indexed agent can arrive pre-indexed.
 
-Skills are not embedded in agent packs in 1.2.0. Skills remain separate,
+Skills are not embedded in agent packs in 1.2.1. Skills remain separate,
 CLI-specific resources selected on Chats.
 
 ## Skills
@@ -521,8 +523,8 @@ The encrypted snapshot preserves structured credentials so a restore is
 complete. Anyone with the repository can attempt offline password guessing,
 so use a strong unique password and a private remote.
 
-Managed-run state under `runs/` is not included in Git backup. Its JSON memory
-and text artifacts are permission-restricted ordinary files outside the
+Managed-run state under `runs/` is not included in Git backup. Its request,
+transcript checkpoint, JSON memory, and text artifacts are permission-restricted ordinary files outside the
 encrypted database; protect access to the operating-system account and the
 PrAImate data folder.
 
@@ -560,8 +562,8 @@ Deletion removes:
 
 - the encrypted database and password envelope;
 - non-secret bootstrap configuration;
-- agents, skills, MCP credentials, managed tools, and managed-run memory and
-  artifacts;
+- agents, skills, MCP credentials, managed tools, and managed-run requests,
+  checkpoints, memory, and artifacts;
 - remembered database credential;
 - PrAImate-managed routing blocks from supported CLI configuration without
   deleting unrelated CLI data.
@@ -598,8 +600,8 @@ sudo apt-get install -y npm pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev
 Build the release bundles:
 
 ```sh
-scripts/build.sh --version=1.2.0
-scripts/build.sh --version=1.2.0 --with-code --with-graphify
+scripts/build.sh --version=1.2.1
+scripts/build.sh --version=1.2.1 --with-code --with-graphify
 ```
 
 Build only the GUI:

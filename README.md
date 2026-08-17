@@ -7,7 +7,7 @@
 > Official source and releases:
 > [sPROFFEs/PrAImate](https://github.com/sPROFFEs/PrAImate)
 
-PrAImate 1.2.0 is a GUI-only desktop harness for Claude Code,
+PrAImate 1.2.1 is a GUI-only desktop harness for Claude Code,
 OpenClaude, Codex CLI, OpenCode, and the bundled **PrAImate Code** build.
 It gives those CLIs one place for coding terminals, chats, reusable agents,
 workflows, skills, locally configured MCP servers, local-model routing,
@@ -98,7 +98,8 @@ All PrAImate-owned persistent data is centralized under:
 
 This root contains the encrypted database and key envelope, non-secret
 bootstrap configuration, agents, skills, managed tools, and managed-run state
-(`runs/<run-id>/run.json`, per-run memory, and artifacts). A user-selected
+(`runs/<run-id>/request.json`, status, transcript checkpoint, per-run memory,
+and artifacts). A user-selected
 projects/workspaces folder remains separate.
 
 Managed-run JSON and artifacts are permission-restricted ordinary files, not
@@ -138,7 +139,7 @@ Agents are portable YAML definitions. They can contain:
 
 Agent Studio starts with **Guided**, **Manual**, and **Import** paths. Guided
 creation turns a purpose, knowledge choice, and explicit capability checklist
-into a deterministic Simple, Tool-enabled, Autonomous, or Team preset. The
+into a deterministic Simple, Tool-enabled, or Autonomous preset. The
 result is always reviewable as `agent.yaml` plus an optional `runtime.json`.
 
 Agents with knowledge, requirements, or runtime capabilities are exported as
@@ -149,22 +150,23 @@ manifest keep the existing native CLI behavior.
 
 Simple and Tool-enabled presets run through the current native CLI path.
 Autonomous runs use a managed single-agent lifecycle in Chats, document Studio,
-and Workflows: explicit completion, structured per-run working memory,
-artifacts, bounded context/output, and live events. The underlying CLI is pinned
-to safe permissions. Host commands, file changes, network policy, approvals,
-sandbox isolation, checkpoints, and delegation are not part of this phase.
-Only adapters that explicitly declare an enforceable safe mode can use this
-path; other CLIs are blocked before process creation.
+and Workflows. The runtime provides explicit completion, structured per-run
+working memory, artifacts, bounded context/output, live events, and durable
+checkpoints. Declared capabilities expose brokered project read/search/write,
+Git, argv-only commands, bounded HTTP GET, Raw or Graphify RAG knowledge, and
+configured MCP tools. File writes, commands, mutating Git, network requests,
+and MCP connection/tool calls pause for explicit approval. The underlying CLI remains in
+safe mode and never receives those host tools directly.
 
-Graphify RAG remains available to native agents. Managed Autonomous agents
-must use Raw documents until the policy-aware knowledge broker is implemented;
-that combination is rejected before process creation instead of attempting an
-unbrokered `graphify query` host command.
+Stopped, failed, stalled, and crash-interrupted runs can resume from Agent
+Studio. If interruption occurred during a tool call, PrAImate records its
+outcome as unknown and tells the agent to inspect current state before retrying.
+Run checkpoints are functional state, not diagnostic/event logs.
 
-Team agents—and older Autonomous manifests that explicitly claim sandbox or
-checkpoint support—fail closed. PrAImate never silently weakens those claims.
-Agent Studio's authoring helper remains native so it can continue editing the
-agent definition.
+The Autonomous preset does not claim OS-level sandbox isolation: an approved
+command is still a real process on the host. Team/delegation and manifests that
+claim `sandbox` remain fail-closed. Team is not offered in guided creation until
+that coordinator exists. Interactive Terminal execution remains native.
 
 Skills are not currently embedded in agent packs. They remain independently
 managed, CLI-tagged resources selected per chat.
@@ -214,10 +216,11 @@ to safe mode instead of being silently promoted. Workflow runs default to safe
 mode and never force full tool access.
 
 Agentic runs use a separate managed path rather than replacing the workflow
-runner. The initial broker exposes working-memory and artifact actions only.
-Agents that reference MCP servers remain blocked until the policy-aware MCP
-broker can mediate them; MCP configuration is never silently passed through to
-the underlying CLI.
+runner. Its policy broker exposes only capabilities declared by the agent:
+project read/search/write, Git, argv-only commands, bounded HTTP GET, Raw or
+Graphify knowledge, configured MCP tools, working memory, and artifacts.
+Mutating or external operations pause for explicit GUI approval; MCP
+configuration and credentials remain backend-only.
 Plain model prose cannot finish a managed run: completion requires the runtime's
 explicit `finish` action. Large continuation or final output is shortened in
 the model/UI context and preserved as a text artifact.
@@ -290,8 +293,8 @@ sudo apt-get install -y npm pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev
 Build the supported release bundles:
 
 ```sh
-scripts/build.sh --version=1.2.0
-scripts/build.sh --version=1.2.0 --with-code --with-graphify
+scripts/build.sh --version=1.2.1
+scripts/build.sh --version=1.2.1 --with-code --with-graphify
 ```
 
 Build PrAImate Code from the vendored OpenCode source:

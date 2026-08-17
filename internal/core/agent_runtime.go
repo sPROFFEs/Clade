@@ -3,7 +3,7 @@ package core
 // Optional agent runtime manifests are authoring-time configuration. Existing
 // agents have no runtime.json and resolve to the native CLI runtime exactly as
 // before. Compatible single-agent manifests use the managed runtime; manifests
-// that claim later sandbox, checkpoint, or delegation phases fail closed.
+// that claim later sandbox or delegation phases fail closed.
 
 import (
 	"bytes"
@@ -321,9 +321,6 @@ func unsupportedAgenticFeatures(f AgentRuntimeFeatures) []string {
 	if f.Sandbox {
 		out = append(out, "sandbox")
 	}
-	if f.Checkpoints {
-		out = append(out, "checkpoints")
-	}
 	if f.Delegation {
 		out = append(out, "delegation")
 	}
@@ -365,6 +362,9 @@ func PreviewGuidedAgent(req GuidedAgentRequest) (*GuidedAgentPreview, error) {
 	if req.Preset == PresetCustom {
 		return nil, errors.New("custom runtime configuration must be created in the manual editor")
 	}
+	if req.Preset == PresetTeam {
+		return nil, errors.New("Team guided creation is unavailable until delegation execution is implemented")
+	}
 	id := strings.Trim(guidedAgentIDRE.ReplaceAllString(strings.ToLower(req.Name), "-"), "-")
 	if id == "" {
 		return nil, errors.New("agent name needs at least one letter or digit")
@@ -380,6 +380,9 @@ func PreviewGuidedAgent(req GuidedAgentRequest) (*GuidedAgentPreview, error) {
 	manifest, summary, warnings, err := expandAgentPreset(req.Preset, req.Capabilities)
 	if err != nil {
 		return nil, err
+	}
+	if manifest.Mode == RuntimeAgentic {
+		agent.Surfaces = []string{"chat", "editor"}
 	}
 	agent.Tools = capabilityToolNames(manifest.Capabilities)
 	if err := agent.Validate(); err != nil {
@@ -442,9 +445,9 @@ func expandAgentPreset(preset AgentPreset, requested AgentCapabilities) (*AgentR
 		}
 	case PresetAutonomous:
 		m.Mode = RuntimeAgentic
-		m.Features = AgentRuntimeFeatures{ManagedTools: true, WorkingMemory: true, Artifacts: true}
+		m.Features = AgentRuntimeFeatures{ManagedTools: true, WorkingMemory: true, Artifacts: true, Checkpoints: true}
 		m.Limits = AgentRuntimeLimits{MaxTurns: 12, MaxContextChars: 48000, MaxOutputChars: 8000}
-		warnings = append(warnings, "Autonomous runs are managed and read-only in this phase; host commands, file changes, network policy, approvals, and isolation arrive with the sandbox/policy runtime.")
+		warnings = append(warnings, "Autonomous runs use capability-gated project, command, knowledge, and MCP tools. File changes, commands, mutating Git, and MCP calls require explicit approval; this preset does not claim OS-level sandbox isolation.")
 	case PresetTeam:
 		m.Mode = RuntimeAgentic
 		m.Features = AgentRuntimeFeatures{ManagedTools: true, WorkingMemory: true, Sandbox: true, Artifacts: true, Checkpoints: true, Delegation: true, MaxChildren: 4}

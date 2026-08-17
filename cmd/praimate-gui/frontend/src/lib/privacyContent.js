@@ -20,11 +20,11 @@ export const privacyDisclosures = [
   },
   {
     title: 'Managed-run state is local',
-    body: 'Autonomous runs store functional state under the PrAImate data folder: run status, per-run working memory, and artifacts deliberately created by the agent or output-bounding system. These are ordinary permission-restricted files outside the encrypted database, so protect access to your operating-system account and data folder. PrAImate does not create an event or diagnostic log. This working memory belongs only to that run and is not a cross-chat profile.',
+    body: 'Autonomous runs store functional state under the PrAImate data folder: the task and non-secret launch settings, run status, a resumable transcript checkpoint containing tool results, per-run working memory, and artifacts deliberately created by the agent or output-bounding system. API keys and MCP credentials are not copied into the run request. These are ordinary permission-restricted files outside the encrypted database, so protect access to your operating-system account and data folder. PrAImate does not create an event or diagnostic log. This working memory belongs only to that run and is not a cross-chat profile.',
   },
   {
     title: 'Backups are your responsibility',
-    body: 'Git backup is off by default. The database snapshot and its key envelope are encrypted with the same database password, so another Windows or Linux installation can restore them with that password. Managed-run memory and artifacts are not included in Git backup. A copied repository permits offline password guessing, so use a strong unique password. Workspace files, transcripts, and per-chat MEMORY.md files remain normal Git files and may contain sensitive content. Use a private remote you trust.',
+    body: 'Git backup is off by default. The database snapshot and its key envelope are encrypted with the same database password, so another Windows or Linux installation can restore them with that password. Managed-run requests, checkpoints, memory, and artifacts are not included in Git backup. A copied repository permits offline password guessing, so use a strong unique password. Workspace files, transcripts, and per-chat MEMORY.md files remain normal Git files and may contain sensitive content. Use a private remote you trust.',
   },
 ]
 

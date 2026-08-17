@@ -6,8 +6,8 @@ import (
 )
 
 type contextEntry struct {
-	Role string
-	Text string
+	Role string `json:"role"`
+	Text string `json:"text"`
 }
 
 type contextManager struct {

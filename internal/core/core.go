@@ -15,6 +15,7 @@ package core
 import (
 	"context"
 	"errors"
+	"sync"
 
 	"git.jtsec.local/lab/PrAImate/internal/launcher"
 	"git.jtsec.local/lab/PrAImate/internal/store"
@@ -37,6 +38,9 @@ type Core struct {
 	// approval shim wiring for the "ask" Tools level. Nil = "ask"
 	// degrades to the safe default. See SetApprovalProvider.
 	approvalProvider func(chatID string) *ApprovalConfig
+
+	managedMu     sync.Mutex
+	managedActive map[string]bool
 }
 
 // ApprovalConfig tells a CLI adapter how to spawn the approval shim —
@@ -47,6 +51,10 @@ type Core struct {
 type ApprovalConfig struct {
 	Command string
 	Args    []string
+	// Request is used by PrAImate's managed runtime. It blocks until the GUI
+	// answers and fails closed when the broker is unavailable. Native Claude
+	// runs continue using Command+Args through the approval MCP shim.
+	Request func(ctx context.Context, tool string, input map[string]any) (bool, error)
 }
 
 // SetApprovalProvider registers the factory the chat layer calls when a
@@ -80,6 +88,7 @@ func New(opts Options) (*Core, error) {
 		store:          opts.Store,
 		privacy:        NewPrivacyScanner(),
 		workspacesRoot: opts.WorkspacesRoot,
+		managedActive:  map[string]bool{},
 	}
 	c.loadPrivacyPatterns(context.Background())
 	return c, nil

@@ -17,9 +17,11 @@ package main
 // chats (the chat id rides in the URL path).
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -107,11 +109,19 @@ func (b *approvalBroker) handleApprove(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]string{"behavior": behavior, "message": msg})
 	}
 
-	b.mu.Lock()
-	if b.always[chatID][req.ToolName] {
-		b.mu.Unlock()
-		respond(true, "")
+	allow, err := b.request(r.Context(), chatID, req.ToolName, req.Input)
+	if err != nil {
+		respond(false, err.Error())
 		return
+	}
+	respond(allow, "")
+}
+
+func (b *approvalBroker) request(ctx context.Context, scope, tool string, input map[string]any) (bool, error) {
+	b.mu.Lock()
+	if b.always[scope][tool] {
+		b.mu.Unlock()
+		return true, nil
 	}
 	b.seq++
 	id := fmt.Sprintf("ap-%d", b.seq)
@@ -124,23 +134,24 @@ func (b *approvalBroker) handleApprove(w http.ResponseWriter, r *http.Request) {
 		b.mu.Unlock()
 	}()
 
-	b.emit(ApprovalRequest{ID: id, ChatID: chatID, Tool: req.ToolName, Detail: summarizeApprovalInput(req.Input)})
-
+	b.emit(ApprovalRequest{ID: id, ChatID: scope, Tool: tool, Detail: summarizeApprovalInput(input)})
+	timer := time.NewTimer(approvalTimeout)
+	defer timer.Stop()
 	select {
 	case d := <-ch:
 		if d.allow && d.always {
 			b.mu.Lock()
-			if b.always[chatID] == nil {
-				b.always[chatID] = map[string]bool{}
+			if b.always[scope] == nil {
+				b.always[scope] = map[string]bool{}
 			}
-			b.always[chatID][req.ToolName] = true
+			b.always[scope][tool] = true
 			b.mu.Unlock()
 		}
-		respond(d.allow, "")
-	case <-time.After(approvalTimeout):
-		respond(false, "approval timed out in PrAImate GUI")
-	case <-r.Context().Done():
-		// shim/CLI went away — nothing to answer
+		return d.allow, nil
+	case <-timer.C:
+		return false, errors.New("approval timed out in PrAImate GUI")
+	case <-ctx.Done():
+		return false, ctx.Err()
 	}
 }
 
@@ -214,6 +225,9 @@ func (a *App) approvalProvider(chatID string) *core.ApprovalConfig {
 		Args: []string{
 			"-mcp-approve", "http://" + b.addr + "/approve/" + chatID,
 			"-mcp-token", b.token,
+		},
+		Request: func(ctx context.Context, tool string, input map[string]any) (bool, error) {
+			return b.request(ctx, chatID, tool, input)
 		},
 	}
 }

@@ -51,6 +51,15 @@ type Model interface {
 	Turn(ctx context.Context, input ModelInput, emit EventSink) (*ModelOutput, error)
 }
 
+// ToolExecutor is the host-owned extension point for managed tools. The
+// runtime deliberately owns only memory and artifact tools; Core implements
+// project, knowledge, command, and MCP policy without leaking database or GUI
+// dependencies into this package.
+type ToolExecutor interface {
+	Instructions() string
+	ExecuteTool(ctx context.Context, tool string, arguments json.RawMessage) (string, error)
+}
+
 type Limits struct {
 	MaxTurns        int `json:"maxTurns"`
 	MaxContextChars int `json:"maxContextChars"`
@@ -82,7 +91,10 @@ type Config struct {
 	Task         string
 	Limits       Limits
 	Model        Model
+	Tools        ToolExecutor
 	OnEvent      EventSink
+	RunID        string
+	ResumeRunID  string
 }
 
 type Instance struct {
@@ -98,6 +110,7 @@ type Instance struct {
 	Error       string     `json:"error,omitempty"`
 	Final       string     `json:"final,omitempty"`
 	Artifacts   []Artifact `json:"artifacts,omitempty"`
+	PendingTool string     `json:"pendingTool,omitempty"`
 }
 
 type Result struct {

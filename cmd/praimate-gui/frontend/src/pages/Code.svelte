@@ -10,6 +10,7 @@
   import { get } from 'svelte/store'
 
   let agents = []
+  let runtimeModes = {}
   let error = ''
 
   // PrAImate Code bundled CLI install state
@@ -36,7 +37,7 @@
   let modelLoadSeq = 0
   $: selectedCliInfo = clis.find((c) => c.id === cli)
   $: modelSupported = !!selectedCliInfo?.modelHint
-  $: terminalAgents = agents.filter((a) => !a.surfaces?.length || a.surfaces.includes('terminal'))
+  $: terminalAgents = agents.filter((a) => runtimeModes[a.id]?.mode === 'native' && (!a.surfaces?.length || a.surfaces.includes('terminal')))
 
   // Local LLM (Settings → Local LLM). useLocal routes the session at the
   // configured endpoint; localModel picks from its live model list.
@@ -126,7 +127,13 @@
 
   async function load() {
     try {
-      agents = (await api.listAgents()) || []
+      const loadedAgents = (await api.listAgents()) || []
+      const configs = await Promise.all(loadedAgents.map(async (agent) => {
+        try { return [agent.id, await api.agentRuntimeConfig(agent.id)] }
+        catch { return [agent.id, { mode: 'invalid' }] }
+      }))
+      runtimeModes = Object.fromEntries(configs)
+      agents = loadedAgents
     } catch (e) {
       error = String(e)
     }

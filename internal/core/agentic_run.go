@@ -31,16 +31,31 @@ type ManagedRunEvent struct {
 }
 
 type ManagedRunRequest struct {
-	Surface      ExecutionSurface
-	Agent        *Agent
-	CLI          string
-	Cwd          string
-	Model        string
-	Local        *ChatLocalEndpoint
-	Task         string
-	Instructions string
-	Env          map[string]string
-	OnEvent      func(ManagedRunEvent)
+	Surface       ExecutionSurface
+	Agent         *Agent
+	CLI           string
+	Cwd           string
+	Model         string
+	Local         *ChatLocalEndpoint
+	Task          string
+	Instructions  string
+	Env           map[string]string
+	Approval      *ApprovalConfig
+	ApprovalScope string
+	ResumeRunID   string
+	OnEvent       func(ManagedRunEvent)
+}
+
+type managedRunSpec struct {
+	Schema       string             `json:"schema"`
+	AgentID      string             `json:"agentId"`
+	Surface      ExecutionSurface   `json:"surface"`
+	CLI          string             `json:"cli"`
+	Cwd          string             `json:"cwd"`
+	Model        string             `json:"model,omitempty"`
+	Local        *ChatLocalEndpoint `json:"local,omitempty"`
+	Task         string             `json:"task"`
+	Instructions string             `json:"instructions,omitempty"`
 }
 
 type ManagedRun struct {
@@ -57,6 +72,7 @@ type ManagedRun struct {
 	Final       string                 `json:"final,omitempty"`
 	Artifacts   []ManagedRunArtifact   `json:"artifacts"`
 	Memory      []ManagedRunMemoryItem `json:"memory,omitempty"`
+	CanResume   bool                   `json:"canResume,omitempty"`
 }
 
 type ManagedRunArtifact struct {
@@ -87,6 +103,9 @@ func (c *Core) RunManagedAgent(ctx context.Context, req ManagedRunRequest) (*Man
 	if !effectiveAgent.AgenticCompatible {
 		return nil, fmt.Errorf("agent %q requires unavailable managed features: %s", req.Agent.Name, strings.Join(effectiveAgent.UnsupportedFeatures, ", "))
 	}
+	if err := validateManagedKnowledge(req.Agent); err != nil {
+		return nil, err
+	}
 	if !contains(req.Agent.Supports, req.CLI) {
 		return nil, fmt.Errorf("agent %q does not support CLI %q", req.Agent.ID, req.CLI)
 	}
@@ -99,12 +118,6 @@ func (c *Core) RunManagedAgent(ctx context.Context, req ManagedRunRequest) (*Man
 	}
 	if req.Surface == SurfaceTerminal {
 		return nil, errors.New("managed Autonomous runs are unavailable in the interactive Terminal surface")
-	}
-	if req.Agent.Knowledge == "rag" {
-		return nil, errors.New("managed Autonomous runs cannot query Graphify until the policy-aware knowledge broker is available; use Raw documents or a native runtime preset")
-	}
-	if len(req.Agent.MCPServers) > 0 {
-		return nil, errors.New("managed Autonomous runs cannot expose MCP servers until the policy-aware MCP broker is available")
 	}
 	adapter, err := GetCLIAdapter(strings.TrimSpace(req.CLI))
 	if err != nil {
@@ -133,9 +146,53 @@ func (c *Core) RunManagedAgent(ctx context.Context, req ManagedRunRequest) (*Man
 	if err != nil {
 		return nil, err
 	}
+	runID := strings.TrimSpace(req.ResumeRunID)
+	if runID == "" {
+		runID, err = agentic.NewRunID()
+		if err != nil {
+			return nil, err
+		}
+		local := req.Local
+		if local != nil {
+			copyLocal := *local
+			copyLocal.APIKey = ""
+			local = &copyLocal
+		}
+		spec := managedRunSpec{
+			Schema: "praimate.managed-run/v1", AgentID: req.Agent.ID, Surface: req.Surface,
+			CLI: req.CLI, Cwd: execution.Cwd, Model: req.Model, Local: local,
+			Task: req.Task, Instructions: req.Instructions,
+		}
+		runDir := filepath.Join(root, runID)
+		if err := os.MkdirAll(runDir, 0o700); err != nil {
+			return nil, err
+		}
+		if err := writeManagedRunSpec(filepath.Join(runDir, "request.json"), spec); err != nil {
+			return nil, err
+		}
+	}
+	c.managedMu.Lock()
+	if c.managedActive[runID] {
+		c.managedMu.Unlock()
+		return nil, fmt.Errorf("managed run %q is already active", runID)
+	}
+	c.managedActive[runID] = true
+	c.managedMu.Unlock()
+	defer func() {
+		c.managedMu.Lock()
+		delete(c.managedActive, runID)
+		c.managedMu.Unlock()
+	}()
 	model := &managedCLIModel{
 		adapter: adapter, cwd: execution.Cwd, model: execution.Model,
 		env: mergeStringMaps(req.Env, execution.Env),
+	}
+	if req.ResumeRunID != "" {
+		previous, loadErr := agentic.LoadInstance(root, req.ResumeRunID)
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		model.sessionID = previous.SessionID
 	}
 	manifest := effectiveAgent.Manifest
 	limits := agentic.Limits{}
@@ -144,13 +201,55 @@ func (c *Core) RunManagedAgent(ctx context.Context, req ManagedRunRequest) (*Man
 		limits.MaxContextChars = manifest.Limits.MaxContextChars
 		limits.MaxOutputChars = manifest.Limits.MaxOutputChars
 	}
+	approval := req.Approval
+	if approval == nil && c.approvalProvider != nil {
+		scope := strings.TrimSpace(req.ApprovalScope)
+		if scope == "" {
+			scope = req.Agent.ID
+		}
+		approval = c.approvalProvider(scope)
+	}
+	var mcpServers []MCPServer
+	if len(req.Agent.MCPServers) > 0 {
+		if !manifest.Capabilities.ExternalServices {
+			return nil, errors.New("managed MCP servers require the external_services capability")
+		}
+		mcpServers, err = c.resolveAgentMCPServers(ctx, req.Agent)
+		if err != nil {
+			return nil, err
+		}
+		for _, server := range mcpServers {
+			if approval == nil || approval.Request == nil {
+				return nil, fmt.Errorf("managed MCP %q requires GUI approval before connection", server.Name)
+			}
+			detail := map[string]any{"server": server.ID, "transport": server.Transport}
+			if server.Transport == MCPTransportStdio {
+				detail["command"] = server.Command
+			} else {
+				detail["url"] = server.URL
+			}
+			allowed, approvalErr := approval.Request(ctx, "mcp.connect."+server.ID, detail)
+			if approvalErr != nil {
+				return nil, approvalErr
+			}
+			if !allowed {
+				return nil, fmt.Errorf("managed MCP connection to %q was denied", server.Name)
+			}
+		}
+	}
+	tools, err := newManagedToolBroker(ctx, req.Agent, manifest.Capabilities, execution.Cwd, approval, mcpServers)
+	if err != nil {
+		return nil, err
+	}
+	defer tools.Close()
 	instructions := strings.TrimSpace(req.Instructions)
 	if instructions == "" {
 		instructions = AgentSystemPrompt(req.Agent)
 	}
 	result, runErr := agentic.Run(ctx, agentic.Config{
 		RootDir: root, AgentID: req.Agent.ID, AgentName: req.Agent.Name,
-		Instructions: instructions, Task: req.Task, Limits: limits, Model: model,
+		Instructions: instructions, Task: req.Task, Limits: limits, Model: model, Tools: tools,
+		RunID: runID, ResumeRunID: req.ResumeRunID,
 		OnEvent: func(ev agentic.Event) {
 			if req.OnEvent != nil {
 				req.OnEvent(ManagedRunEvent{
@@ -165,6 +264,71 @@ func (c *Core) RunManagedAgent(ctx context.Context, req ManagedRunRequest) (*Man
 	}
 	managed := managedRunFromResult(result)
 	return managed, runErr
+}
+
+func validateManagedKnowledge(agent *Agent) error {
+	if agent == nil || agent.Knowledge == "" {
+		return nil
+	}
+	dir, err := AgentKnowledgeDir(agent.ID)
+	if err != nil {
+		return err
+	}
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		return fmt.Errorf("managed %s knowledge directory is unavailable; add knowledge in Agent Studio", agent.Knowledge)
+	}
+	if agent.Knowledge == "rag" {
+		if info, err := os.Stat(filepath.Join(dir, "graphify-out", "graph.json")); err != nil || info.IsDir() {
+			return errors.New("managed Graphify index is unavailable; build the RAG index in Agent Studio")
+		}
+	}
+	return nil
+}
+
+func writeManagedRunSpec(path string, spec managedRunSpec) error {
+	raw, err := json.MarshalIndent(spec, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(raw, '\n'), 0o600)
+}
+
+func loadManagedRunSpec(root, runID string) (*managedRunSpec, error) {
+	if filepath.Base(runID) != runID {
+		return nil, errors.New("invalid run ID")
+	}
+	raw, err := os.ReadFile(filepath.Join(root, runID, "request.json"))
+	if err != nil {
+		return nil, err
+	}
+	var spec managedRunSpec
+	if err := json.Unmarshal(raw, &spec); err != nil {
+		return nil, err
+	}
+	if spec.Schema != "praimate.managed-run/v1" {
+		return nil, errors.New("managed run request has an unsupported schema")
+	}
+	return &spec, nil
+}
+
+func (c *Core) ResumeManagedRun(ctx context.Context, runID string, onEvent func(ManagedRunEvent)) (*ManagedRun, error) {
+	root, err := managedRunsRoot()
+	if err != nil {
+		return nil, err
+	}
+	spec, err := loadManagedRunSpec(root, strings.TrimSpace(runID))
+	if err != nil {
+		return nil, fmt.Errorf("resume managed run: %w", err)
+	}
+	agent, err := c.GetAgent(ctx, spec.AgentID)
+	if err != nil {
+		return nil, err
+	}
+	return c.RunManagedAgent(ctx, ManagedRunRequest{
+		Surface: spec.Surface, Agent: agent, CLI: spec.CLI, Cwd: spec.Cwd, Model: spec.Model,
+		Local: spec.Local, Task: spec.Task, Instructions: spec.Instructions,
+		ApprovalScope: runID, ResumeRunID: runID, OnEvent: onEvent,
+	})
 }
 
 type managedCLIModel struct {
@@ -248,7 +412,9 @@ func (c *Core) ListManagedRuns(agentID string) ([]ManagedRun, error) {
 	sort.Slice(instances, func(i, j int) bool { return instances[i].StartedAt.After(instances[j].StartedAt) })
 	out := make([]ManagedRun, 0, len(instances))
 	for i := range instances {
-		out = append(out, *managedRunFromInstance(&instances[i], nil))
+		run := managedRunFromInstance(&instances[i], nil)
+		run.CanResume = c.managedRunCanResume(root, instances[i])
+		out = append(out, *run)
 	}
 	return out, nil
 }
@@ -272,7 +438,27 @@ func (c *Core) GetManagedRun(runID string) (*ManagedRun, error) {
 			return nil, err
 		}
 	}
-	return managedRunFromInstance(instance, &memory), nil
+	out := managedRunFromInstance(instance, &memory)
+	out.CanResume = c.managedRunCanResume(root, *instance)
+	return out, nil
+}
+
+func (c *Core) managedRunCanResume(root string, instance agentic.Instance) bool {
+	if instance.State == agentic.StateCompleted {
+		return false
+	}
+	c.managedMu.Lock()
+	active := c.managedActive[instance.ID]
+	c.managedMu.Unlock()
+	if active {
+		return false
+	}
+	for _, name := range []string{"request.json", "checkpoint.json", "memory.json"} {
+		if info, err := os.Stat(filepath.Join(root, instance.ID, name)); err != nil || info.IsDir() {
+			return false
+		}
+	}
+	return true
 }
 
 func (c *Core) ReadManagedArtifact(runID, name string) ([]byte, error) {

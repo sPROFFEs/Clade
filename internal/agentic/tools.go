@@ -2,6 +2,7 @@ package agentic
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,9 +11,10 @@ import (
 type toolBroker struct {
 	memory    *Memory
 	artifacts artifactStore
+	external  ToolExecutor
 }
 
-func (b toolBroker) execute(decision Decision) (string, *Artifact, error) {
+func (b toolBroker) execute(ctx context.Context, decision Decision) (string, *Artifact, error) {
 	switch decision.Tool {
 	case "memory.task":
 		result, err := b.memory.add("task", decision.Arguments)
@@ -33,7 +35,11 @@ func (b toolBroker) execute(decision Decision) (string, *Artifact, error) {
 		}
 		return "created artifact://" + artifact.Name, &artifact, nil
 	default:
-		return "", nil, fmt.Errorf("managed tool %q is unavailable", decision.Tool)
+		if b.external == nil {
+			return "", nil, fmt.Errorf("managed tool %q is unavailable", decision.Tool)
+		}
+		result, err := b.external.ExecuteTool(ctx, decision.Tool, decision.Arguments)
+		return result, nil, err
 	}
 }
 

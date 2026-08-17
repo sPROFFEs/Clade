@@ -2,6 +2,7 @@ package agentic
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -13,6 +14,17 @@ type scriptedModel struct {
 	outputs []string
 	inputs  []ModelInput
 	err     error
+}
+
+type blockingExternalTool struct{ started chan struct{} }
+
+func (t *blockingExternalTool) Instructions() string {
+	return `{"action":"tool","tool":"external.block","arguments":{}}`
+}
+func (t *blockingExternalTool) ExecuteTool(ctx context.Context, _ string, _ json.RawMessage) (string, error) {
+	close(t.started)
+	<-ctx.Done()
+	return "", ctx.Err()
 }
 
 func (m *scriptedModel) Turn(_ context.Context, input ModelInput, _ EventSink) (*ModelOutput, error) {
@@ -141,5 +153,59 @@ func TestMemorySummaryKeepsNewestItemsWhenBounded(t *testing.T) {
 	}
 	if !strings.Contains(summary, "older working-memory items omitted") {
 		t.Fatalf("missing omission marker: %q", summary)
+	}
+}
+
+func TestRunResumesDurableCheckpoint(t *testing.T) {
+	root := t.TempDir()
+	first := &scriptedModel{outputs: []string{`{"action":"tool","tool":"memory.fact","arguments":{"content":"checkpoint fact"}}`}}
+	failed, err := Run(context.Background(), Config{
+		RootDir: root, AgentID: "resume", AgentName: "Resume", Task: "Continue safely.", Model: first, Limits: Limits{MaxTurns: 4},
+	})
+	if err == nil || failed.Instance.State != StateFailed {
+		t.Fatalf("first result=%#v err=%v", failed, err)
+	}
+	second := &scriptedModel{outputs: []string{`{"action":"finish","message":"Recovered."}`}}
+	resumed, err := Run(context.Background(), Config{
+		RootDir: root, AgentID: "resume", AgentName: "Resume", Task: "Continue safely.", Model: second,
+		ResumeRunID: failed.Instance.ID, Limits: Limits{MaxTurns: 4},
+	})
+	if err != nil || resumed.Instance.State != StateCompleted || resumed.Instance.Turns != 3 || resumed.Instance.ID != failed.Instance.ID {
+		t.Fatalf("resumed=%#v err=%v", resumed, err)
+	}
+	if len(second.inputs) != 1 || !strings.Contains(second.inputs[0].Message, "checkpoint fact") {
+		t.Fatalf("resume prompt = %#v", second.inputs)
+	}
+}
+
+func TestInterruptedToolIsMarkedUnknownBeforeResume(t *testing.T) {
+	root := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	tool := &blockingExternalTool{started: make(chan struct{})}
+	type runResult struct {
+		result *Result
+		err    error
+	}
+	done := make(chan runResult, 1)
+	go func() {
+		result, err := Run(ctx, Config{
+			RootDir: root, AgentID: "interrupted", AgentName: "Interrupted", Task: "Use the tool.",
+			Model: &scriptedModel{outputs: []string{`{"action":"tool","tool":"external.block","arguments":{}}`}}, Tools: tool,
+		})
+		done <- runResult{result: result, err: err}
+	}()
+	<-tool.started
+	cancel()
+	stopped := <-done
+	if stopped.err == nil || stopped.result.Instance.State != StateStopped || stopped.result.Instance.PendingTool != "external.block" {
+		t.Fatalf("stopped=%#v err=%v", stopped.result, stopped.err)
+	}
+	model := &scriptedModel{outputs: []string{`{"action":"finish","message":"Recovered after inspection."}`}}
+	resumed, err := Run(context.Background(), Config{
+		RootDir: root, AgentID: "interrupted", AgentName: "Interrupted", Task: "Use the tool.",
+		Model: model, Tools: tool, ResumeRunID: stopped.result.Instance.ID,
+	})
+	if err != nil || resumed.Instance.State != StateCompleted || !strings.Contains(model.inputs[0].Message, "outcome is unknown") {
+		t.Fatalf("resumed=%#v prompt=%#v err=%v", resumed, model.inputs, err)
 	}
 }

@@ -349,23 +349,29 @@ func (c *Core) preflightManagedExecution(ctx context.Context, req ExecutionReque
 			Message: "This agent requires unavailable managed features: " + strings.Join(agentConfig.UnsupportedFeatures, ", "),
 		})
 	}
+	if err := validateManagedKnowledge(req.Agent); err != nil {
+		result.Issues = append(result.Issues, PreflightIssue{Severity: "error", Code: "managed_knowledge", Message: err.Error()})
+	}
 	if req.Surface == SurfaceTerminal {
 		result.Issues = append(result.Issues, PreflightIssue{
 			Severity: "error", Code: "managed_terminal_unavailable",
 			Message: "Managed Autonomous runs are available in Chats, Studio, and Workflows; interactive Terminal execution remains native",
 		})
 	}
-	if req.Agent.Knowledge == "rag" {
+	if len(req.Agent.MCPServers) > 0 && (agentConfig.Manifest == nil || !agentConfig.Manifest.Capabilities.ExternalServices) {
 		result.Issues = append(result.Issues, PreflightIssue{
-			Severity: "error", Code: "managed_rag_unavailable",
-			Message: "Managed Autonomous runs cannot query Graphify until the policy-aware knowledge broker is available; use Raw documents or a native runtime preset",
+			Severity: "error", Code: "managed_mcp_capability",
+			Message: "Managed MCP servers require the external_services capability",
 		})
-	}
-	if len(req.Agent.MCPServers) > 0 {
-		result.Issues = append(result.Issues, PreflightIssue{
-			Severity: "error", Code: "managed_mcp_unavailable",
-			Message: "Managed Autonomous runs cannot expose MCP servers until the policy-aware MCP broker is available",
-		})
+	} else {
+		for _, id := range req.Agent.MCPServers {
+			s, err := c.GetMCPServer(ctx, id)
+			if err != nil {
+				result.Issues = append(result.Issues, PreflightIssue{Severity: "error", Code: "mcp_missing", Message: fmt.Sprintf("MCP server %q is unavailable: %v", id, err)})
+			} else if !s.Enabled {
+				result.Issues = append(result.Issues, PreflightIssue{Severity: "warning", Code: "mcp_disabled", Message: fmt.Sprintf("MCP server %q is disabled and will not be exposed", s.Name)})
+			}
+		}
 	}
 	if req.CLI == "" {
 		result.Issues = append(result.Issues, PreflightIssue{Severity: "error", Code: "cli", Message: "No CLI selected"})
@@ -408,8 +414,8 @@ func (c *Core) preflightManagedExecution(ctx context.Context, req ExecutionReque
 		}
 	}
 	result.Issues = append(result.Issues, PreflightIssue{
-		Severity: "info", Code: "managed_read_only",
-		Message: "This run uses the managed single-agent lifecycle with safe CLI permissions; host commands and file changes remain disabled until the policy/sandbox runtime",
+		Severity: "info", Code: "managed_policy_broker",
+		Message: "This run uses PrAImate's managed single-agent lifecycle; declared project, command, knowledge, and MCP tools are capability-gated and mutations require approval",
 	})
 	result.OK = true
 	for _, issue := range result.Issues {

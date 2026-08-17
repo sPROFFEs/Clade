@@ -11,6 +11,7 @@
   import WorkflowRunner from '../lib/WorkflowRunner.svelte'
 
   let agents = []
+  let runtimeModes = {}
   let error = ''
   let notice = ''
   let requirementsRunning = ''
@@ -57,12 +58,19 @@
   let view = 'list'
 
   function allows(a, surface) {
+    if (surface === 'terminal' && runtimeModes[a.id]?.mode === 'agentic') return false
     return !a.surfaces?.length || a.surfaces.includes(surface)
   }
 
   async function load() {
     try {
-      agents = (await api.listAgents()) || []
+      const loadedAgents = (await api.listAgents()) || []
+      const configs = await Promise.all(loadedAgents.map(async (agent) => {
+        try { return [agent.id, await api.agentRuntimeConfig(agent.id)] }
+        catch { return [agent.id, { mode: 'invalid', agenticCompatible: false }] }
+      }))
+      runtimeModes = Object.fromEntries(configs)
+      agents = loadedAgents
       error = ''
     } catch (e) {
       error = String(e)
@@ -638,7 +646,7 @@
     <div class="card">
       <div class="row">
         <div class="grow">
-          <div class="card-title">{a.name} <span class="card-sub mono">({a.id})</span></div>
+          <div class="card-title">{a.name} <span class="card-sub mono">({a.id})</span> {#if runtimeModes[a.id]?.mode === 'agentic'}<span class="pill warn">Managed Autonomous</span>{:else if runtimeModes[a.id]?.mode === 'invalid'}<span class="pill danger">Invalid runtime</span>{:else}<span class="pill">Native CLI</span>{/if}</div>
           <div class="card-sub">{a.description?.split('\n')[0]}</div>
         </div>
         {#if allows(a, 'chat')}<button class="btn primary" on:click={() => openLaunch(a, 'chat')}>Chat</button>{/if}

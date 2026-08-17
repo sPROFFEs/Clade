@@ -44,7 +44,7 @@ func (c *Core) runManagedWorkflowSequence(ctx context.Context, cfg workflowRunCo
 	managed, runErr := c.RunManagedAgent(ctx, ManagedRunRequest{
 		Surface: SurfaceWorkflow, Agent: cfg.Agent, CLI: cfg.CLI, Cwd: cfg.Cwd,
 		Model: cfg.Model, Local: cfg.ChatSettings.Local, Task: managedTask,
-		Instructions: systemPrompt, Env: cfg.Env,
+		Instructions: systemPrompt, Env: cfg.Env, ApprovalScope: chatID,
 		OnEvent: func(event ManagedRunEvent) {
 			emitWorkflowEvent(cfg.OnEvent, managedWorkflowEvent(res.WorkflowName, event))
 		},

@@ -33,6 +33,13 @@ test('managed runs expose lifecycle state, working memory, and artifacts', () =>
   assert.match(source, /Artifacts/)
 })
 
+test('guided creation offers only executable presets', () => {
+  assert.match(source, /id:'autonomous'/)
+  assert.doesNotMatch(source, /id:'team'/)
+  assert.match(source, /Resume checkpoint/)
+  assert.match(source, /Managed tool approval/)
+})
+
 test('a successful requirements action clears a previous Agent Studio error', () => {
   assert.match(
     source,

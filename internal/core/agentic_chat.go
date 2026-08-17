@@ -22,7 +22,7 @@ func (c *Core) continueManagedChat(
 	managed, runErr := c.RunManagedAgent(ctx, ManagedRunRequest{
 		Surface: surface, Agent: agent, CLI: chat.CLIAgent, Cwd: cwd,
 		Model: chat.Settings.Model, Local: chat.Settings.Local,
-		Task: task, Instructions: systemPrompt,
+		Task: task, Instructions: systemPrompt, ApprovalScope: chat.ID,
 		OnEvent: func(event ManagedRunEvent) {
 			if emit != nil {
 				emit(managedStreamEvent(event))

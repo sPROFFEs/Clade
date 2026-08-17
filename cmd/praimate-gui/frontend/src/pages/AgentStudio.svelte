@@ -50,6 +50,7 @@
   let selectedRun = null
   let artifactPreview = null
   let runsLoading = false
+  let managedRunBusy = false
 
   // --- tabs (center) ---
   // {key, label, lang, content, dirty, ref, isDef, isRuntime}
@@ -217,6 +218,28 @@
 
   function closeRunInspector() { selectedRun = null; artifactPreview = null }
   function formatBytes(n) { return n < 1024 ? `${n} B` : `${(n / 1024).toFixed(1)} KB` }
+
+  async function resumeManagedRun() {
+    if (!selectedRun?.canResume || managedRunBusy) return
+    managedRunBusy = true
+    error = ''
+    try {
+      selectedRun = await api.resumeManagedRun(selectedRun.id)
+      await refreshManagedRuns()
+    } catch (e) {
+      error = String(e)
+      try { selectedRun = await api.managedRunDetails(selectedRun.id) } catch {}
+    } finally {
+      const runId = selectedRun?.id
+      approvals = approvals.filter((ap) => ap.chatId !== runId)
+      managedRunBusy = false
+    }
+  }
+
+  async function stopManagedRun() {
+    if (!selectedRun || !managedRunBusy) return
+    try { await api.cancelManagedRun(selectedRun.id) } catch (e) { error = String(e) }
+  }
 
   async function createNamed() {
     if (creating || !newName.trim()) return
@@ -613,7 +636,8 @@
     stream = stream; scrollChat()
   }
   function handleApproval(req) {
-    if (req.chatId !== helperChatId) { api.resolveApproval(req.id, false, false).catch(() => {}); return }
+    const isManagedResume = managedRunBusy && req.chatId === selectedRun?.id
+    if (req.chatId !== helperChatId && !isManagedResume) { api.resolveApproval(req.id, false, false).catch(() => {}); return }
     approvals = [...approvals, req]
   }
   async function answerApproval(req, allow, always) {
@@ -733,8 +757,18 @@
 {#if selectedRun}
   <div class="name-overlay run-overlay">
     <section class="name-card run-card" role="dialog" aria-modal="true" aria-label="Managed run details">
-      <div class="run-title"><div><h2>Managed run</h2><div class="mono run-id">{selectedRun.id}</div></div><button class="xbtn" aria-label="Close run details" on:click={closeRunInspector}>×</button></div>
+      <div class="run-title"><div><h2>Managed run</h2><div class="mono run-id">{selectedRun.id}</div></div><div class="row2">
+        {#if selectedRun.canResume}<button class="btn primary" on:click={resumeManagedRun} disabled={managedRunBusy}>{managedRunBusy ? 'Resuming…' : 'Resume checkpoint'}</button>{/if}
+        {#if managedRunBusy}<button class="btn" on:click={stopManagedRun}>Stop</button>{/if}
+        <button class="xbtn" aria-label="Close run details" on:click={closeRunInspector}>×</button>
+      </div></div>
       <div class="run-summary"><span class="run-state {selectedRun.state}">{selectedRun.state}</span><span>{selectedRun.turns} turn(s)</span><span>{new Date(selectedRun.startedAt).toLocaleString()}</span></div>
+      {#each approvals.filter((ap) => ap.chatId === selectedRun.id) as ap (ap.id)}
+        <div class="approval"><div>⚠ Managed tool approval: <strong>{ap.tool}</strong></div>
+          {#if ap.detail}<div class="mono approval-detail">{ap.detail}</div>{/if}
+          <div class="row2"><button class="btn sm" on:click={() => answerApproval(ap, false, false)}>Deny</button><button class="btn sm" on:click={() => answerApproval(ap, true, false)}>Allow once</button><button class="btn sm primary" on:click={() => answerApproval(ap, true, true)}>Always this run</button></div>
+        </div>
+      {/each}
       {#if selectedRun.error}<div class="banner">{selectedRun.error}</div>{/if}
       {#if selectedRun.final}<div class="run-section"><strong>Final response</strong><div class="markdown run-final">{@html renderMarkdown(selectedRun.final)}</div></div>{/if}
       <div class="run-columns">
@@ -793,7 +827,7 @@
         <label class="choice"><input type="radio" bind:group={guidedForm.knowledge} value="rag" /> Indexed knowledge — Graphify retrieval</label>
       {:else if guidedStep === 3}
         <h2>Capabilities</h2>
-        <p class="sub">These are explicit declarations, not hidden permission grants. The selected CLI still enforces native runs.</p>
+        <p class="sub">These are explicit declarations, not hidden permission grants. Native runs use CLI permissions; Autonomous runs use PrAImate's approval broker.</p>
         <div class="cap-grid">
           <label class="choice"><input type="checkbox" bind:checked={guidedForm.capabilities.read_project} /> Read project files</label>
           <label class="choice"><input type="checkbox" bind:checked={guidedForm.capabilities.analyze_code} /> Analyze source code</label>
@@ -810,8 +844,7 @@
           {#each [
             {id:'simple', title:'Simple', text:'Native CLI, safe default, step-by-step.'},
             {id:'tool-enabled', title:'Tool-enabled', text:'Native CLI with declared capabilities and conservative permissions.'},
-            {id:'autonomous', title:'Autonomous', text:'Managed read-only lifecycle, working memory, artifacts and bounded context.'},
-            {id:'team', title:'Team', text:'Autonomous runtime plus static/dynamic delegation.'}
+            {id:'autonomous', title:'Autonomous', text:'Managed project, command, knowledge and MCP tools with approvals, checkpoints, working memory and artifacts.'}
           ] as preset}
             <label class="preset" class:selected={guidedForm.preset === preset.id}>
               <input type="radio" bind:group={guidedForm.preset} value={preset.id} on:change={() => (guidedPreview = null)} />
