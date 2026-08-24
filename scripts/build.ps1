@@ -21,7 +21,7 @@ param(
         "windows-amd64",
         "windows-arm64"
     ),
-    [string] $Version = "1.2.1",
+    [string] $Version = "1.2.2",
     [string] $LdFlags = "-s -w",
     [switch] $NoArchive
 )
@@ -82,7 +82,10 @@ function Build-One($triplet) {
     Copy-Item -Recurse -Force "samples" (Join-Path $out "samples")
     $docsOut = Join-Path $out "docs"
     if (-not (Test-Path $docsOut)) { New-Item -ItemType Directory -Path $docsOut | Out-Null }
-    Copy-Item "docs/ACTIVATION.md","docs/TARGETS.md","docs/SCHEMA.md","docs/QUICKSTART.md" $docsOut
+    Copy-Item "docs/ACTIVATION.md","docs/TARGETS.md","docs/SCHEMA.md","docs/QUICKSTART.md","docs/GUIDE.md","docs/AGENT_GUIDE.md","docs/CLI_AGENT_API.md" $docsOut
+    $examplesOut = Join-Path $out "examples"
+    if (-not (Test-Path $examplesOut)) { New-Item -ItemType Directory -Path $examplesOut | Out-Null }
+    Copy-Item "examples/praimate_agent_review.py" $examplesOut
     Copy-Item "README.md","LICENSE" $out
 
     # Ship the install scripts inside the archive so the README's

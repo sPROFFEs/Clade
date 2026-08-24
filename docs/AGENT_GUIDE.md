@@ -372,6 +372,57 @@ praimate -list-agents
 praimate -run-agent project-reviewer
 ```
 
+### Headless agent API
+
+Use the versioned agent-run interface when another program needs PrAImate as
+an intermediary to an installed CLI/model:
+
+```bash
+praimate agent run \
+  --agent project-reviewer \
+  --cli praimate-code \
+  --folder /srv/source \
+  --prompt "Review this code"
+```
+
+The compact spelling below is equivalent:
+
+```bash
+praimate --agent project-reviewer --cli praimate-code --folder /srv/source --prompt "Review this code"
+```
+
+The default `--output json` writes exactly one
+`praimate.agent-run/v1` object to stdout. A successful result contains
+`ok`, `agentId`, `agentName`, `cli`, `runtime`, `reply`, and `durationMs`.
+Failures use the same schema with `ok: false`, an `error`, and a non-zero exit
+status. `--output jsonl` emits live `type: "event"` records followed by one
+`type: "result"` record. `--output text` is intended for humans, not parsers.
+
+Useful options:
+
+| Option | Behavior |
+| --- | --- |
+| `--cli NAME` | Select the CLI adapter that executes the agent. |
+| `--model NAME` | Pin a cloud model, or the model served by `--endpoint`. |
+| `--endpoint URL` | Use a local/OpenAI-compatible route; requires `--model` and loads its API key from encrypted settings. |
+| `--prompt-file PATH` | Read the prompt from a file; `-` means stdin. With no prompt flag, piped stdin is used automatically. |
+| `--timeout 30m` | Cancel the run at the deadline; `0` disables it. Timeout exits with status 124. |
+| `--tools safe` | Default. Explicit read/answer-only policy, even when the agent manifest has a wider default. |
+| `--tools edits` | Permit declared project-file writes when the selected runtime/CLI can enforce that level; otherwise it degrades to Safe. |
+| `--tools full` | Approve every capability declared by the agent. Use only for a trusted agent and folder. |
+| `--persist` | Keep the backing chat and return `chatId`; otherwise the temporary chat/messages are deleted after the result. |
+
+For secure-storage unlock, the command first uses a password remembered in the
+OS credential store. If it is not remembered and stdin is a terminal, PrAImate
+asks for it with input echo disabled. Non-interactive jobs fail immediately
+with structured output unless they supply the secret through an approved
+channel. A database password is never accepted in argv because process
+listings may expose command-line values.
+
+See the dedicated [CLI agent API guide](CLI_AGENT_API.md) for the complete
+contract, unlock precedence, exit codes, and a link to the runnable Python
+example.
+
 Agent creation, YAML import, pack import, and export are GUI operations in the
 current release.
 

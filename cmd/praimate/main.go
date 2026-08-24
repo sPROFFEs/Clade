@@ -30,6 +30,11 @@ func run(args []string) int {
 	if len(args) >= 1 && args[0] == "code" {
 		return runCode(args[1:])
 	}
+	// Long form for automation. The top-level --agent spelling remains as a
+	// compact alias for scripts and CI jobs.
+	if len(args) >= 2 && args[0] == "agent" && args[1] == "run" {
+		args = args[2:]
+	}
 
 	flags := flag.NewFlagSet("praimate", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
@@ -44,9 +49,20 @@ func run(args []string) int {
 		"git merge driver hook for per-chat MEMORY.md files; not for direct use")
 	runAgent := flags.String("run-agent", "",
 		"run an agent workflow non-interactively and print the assistant reply")
-	runCLI := flags.String("cli", "claude", "CLI used with -run-agent")
+	runCLI := flags.String("cli", "", "CLI used for non-interactive agent execution (default: agent's first supported CLI)")
 	runWorkflow := flags.String("workflow", "", "workflow used with -run-agent")
 	runInputs := flags.String("inputs", "", "comma-separated key=value inputs for -run-agent")
+	agentPrompt := flags.String("agent", "", "run one agent prompt without opening the GUI")
+	agentFolder := flags.String("folder", "", "project folder for --agent")
+	agentPromptText := flags.String("prompt", "", "prompt for --agent (prefer --prompt-file for sensitive or large prompts)")
+	agentPromptFile := flags.String("prompt-file", "", "read the --agent prompt from a file; use - for stdin")
+	agentModel := flags.String("model", "", "optional model override for --agent")
+	agentEndpoint := flags.String("endpoint", "", "use 'saved' or the Local LLM endpoint configured in the GUI (requires --model)")
+	agentTools := flags.String("tools", "safe", "headless tool policy: safe, edits, or full")
+	agentOutput := flags.String("output", "json", "headless output: json, jsonl, or text")
+	agentTimeout := flags.Duration("timeout", 30*time.Minute, "maximum --agent execution time; 0 disables the deadline")
+	agentPersist := flags.Bool("persist", false, "keep the headless run in Chats (default: remove its temporary chat)")
+	dbPasswordStdin := flags.Bool("db-password-stdin", false, "read the database password securely from the terminal, or from piped stdin")
 	listAgents := flags.Bool("list-agents", false, "print every agent in the database and exit")
 	importTemplate := flags.String("import-template", "", "import legacy workpath template(s) and exit")
 	if err := flags.Parse(args); err != nil {
@@ -81,7 +97,21 @@ func run(args []string) int {
 		return runImportTemplate(*importTemplate)
 	}
 	if *runAgent != "" {
-		return runAgentWorkflow(*runAgent, *runCLI, *runWorkflow, *runInputs)
+		cli := *runCLI
+		if cli == "" {
+			cli = "claude" // preserve the legacy -run-agent default
+		}
+		return runAgentWorkflow(*runAgent, cli, *runWorkflow, *runInputs)
+	}
+	if *agentPrompt != "" {
+		return runAgentPrompt(agentPromptOptions{
+			AgentID: *agentPrompt, CLI: *runCLI, Folder: *agentFolder,
+			Prompt: *agentPromptText, PromptFile: *agentPromptFile,
+			Model: *agentModel, Endpoint: *agentEndpoint,
+			Tools: *agentTools, Output: *agentOutput,
+			Timeout: *agentTimeout, Persist: *agentPersist,
+			DBPasswordStdin: *dbPasswordStdin,
+		})
 	}
 
 	_ = guiFlag // `--gui` is now an explicit spelling of the default.

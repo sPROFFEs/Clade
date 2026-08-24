@@ -127,6 +127,16 @@ func TestGuidedAgentPresetExpansionAndExecutionGate(t *testing.T) {
 	if effective.Tools != "edits" {
 		t.Fatalf("guided tool preset tools = %q, want edits", effective.Tools)
 	}
+	explicitSafe, err := c.ResolveExecutionConfig(ctx, ExecutionRequest{
+		Surface: SurfaceChat, Agent: toolAgent, CLI: "claude", Cwd: t.TempDir(),
+		ToolsConfigured: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if explicitSafe.Tools != "" {
+		t.Fatalf("explicit safe tools = %q, want empty", explicitSafe.Tools)
+	}
 
 	autonomous, err := c.CreateGuidedAgent(ctx, GuidedAgentRequest{
 		Name: "Autonomous Reviewer", Purpose: "Complete long reviews independently.", Preset: PresetAutonomous,

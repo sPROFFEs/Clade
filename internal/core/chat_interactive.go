@@ -119,6 +119,7 @@ func (c *Core) UpdateChatConfig(ctx context.Context, chatID, cli, model, tools s
 	return c.UpdateChatSettings(ctx, chatID, func(s *ChatSettings) {
 		s.Model = model
 		s.Tools = tools
+		s.ToolsConfigured = true
 	})
 }
 
@@ -279,7 +280,8 @@ func (c *Core) ContinueChatStream(ctx context.Context, chatID, userMessage, cwd,
 	effective, err := c.ResolveExecutionConfig(ctx, ExecutionRequest{
 		Surface: surface, Agent: executionAgent, ChatID: chatID, CLI: chat.CLIAgent,
 		Cwd: cwd, Model: chat.Settings.Model, Tools: chat.Settings.Tools,
-		Local: chat.Settings.Local, MCPServers: chat.Settings.MCPServers,
+		ToolsConfigured: chat.Settings.ToolsConfigured,
+		Local:           chat.Settings.Local, MCPServers: chat.Settings.MCPServers,
 		ExplicitMCP: chat.Settings.MCPConfigured || len(chat.Settings.MCPServers) > 0,
 		Approval:    approval,
 	})

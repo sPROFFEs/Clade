@@ -16,9 +16,10 @@ import (
 )
 
 // RecordCodeSession persists a surface="code" chat pointer for a freshly
-// launched terminal session and returns its id. localEndpoint, when set,
-// is stored so reopening restores the local route.
-func (a *App) RecordCodeSession(cli, model, cwd, localEndpoint, _ string, localModel string) (string, error) {
+// launched terminal session and returns its id. agentID preserves the persona
+// used to launch the PTY so every reopening surface can identify and restore
+// it. localEndpoint, when set, is stored so reopening restores the local route.
+func (a *App) RecordCodeSession(agentID, cli, model, cwd, localEndpoint, _ string, localModel string) (string, error) {
 	c, err := a.requireCore()
 	if err != nil {
 		return "", err
@@ -33,7 +34,12 @@ func (a *App) RecordCodeSession(cli, model, cwd, localEndpoint, _ string, localM
 	if localEndpoint != "" {
 		startModel = "" // the local route carries the model
 	}
-	chat, err := c.StartCleanChat(a.ctx, cli, startModel, cwd)
+	var chat *core.Chat
+	if strings.TrimSpace(agentID) != "" {
+		chat, err = c.StartInteractiveChat(a.ctx, agentID, cli, cwd)
+	} else {
+		chat, err = c.StartCleanChat(a.ctx, cli, startModel, cwd)
+	}
 	if err != nil {
 		return "", err
 	}

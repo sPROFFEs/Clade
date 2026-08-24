@@ -33,7 +33,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-VERSION="${VERSION:-1.2.1}"
+VERSION="${VERSION:-1.2.2}"
 EXTRA_LDFLAGS="${LDFLAGS:--s -w}"  # strip symbols by default — tiny binaries
 ARCHIVE=1
 WITH_CODE=0
@@ -154,7 +154,10 @@ build_one() {
   # exes' embedded resources: cmd/praimate-gui + cmd/praimate .syso).
   cp cmd/praimate-gui/frontend/src/assets/monke-icon.png "$out/praimate.png"
   mkdir -p "$out/docs"
-  cp docs/ACTIVATION.md docs/TARGETS.md docs/SCHEMA.md docs/QUICKSTART.md "$out/docs/"
+  cp docs/ACTIVATION.md docs/TARGETS.md docs/SCHEMA.md docs/QUICKSTART.md \
+    docs/GUIDE.md docs/AGENT_GUIDE.md docs/CLI_AGENT_API.md "$out/docs/"
+  mkdir -p "$out/examples"
+  cp examples/praimate_agent_review.py "$out/examples/"
   cp README.md LICENSE "$out/"
 
   # Drop the install scripts into a scripts/ subdir so the README's

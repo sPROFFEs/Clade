@@ -18,6 +18,7 @@
   export let chatId = ''
 
   let files = []
+  let agentName = ''
   let error = ''
   let treeLoading = false
   let tabs = [] // [{path, content, dirty, ref, flushTimer, externalPending}]
@@ -528,7 +529,14 @@
     }
     await loadTree()
     await loadChat()
-    try { chat = (await api.listChats())?.find((c) => c.ID === chatId) || null } catch {}
+    try {
+      chat = (await api.listChats())?.find((c) => c.ID === chatId) || null
+      if (chat?.AgentID) {
+        const agents = (await api.listAgents()) || []
+        agentName = agents.find((a) => a.id === chat.AgentID)?.name || chat.AgentID
+        document.title = `PrAImate Studio — ${agentName} — ${folder.split(/[\\/]/).pop()}`
+      }
+    } catch {}
     await refreshEditorSkills()
     // Open the first markdown file so the window isn't empty.
     const first = files.find((f) => /\.md$/i.test(f)) || files[0]
@@ -683,6 +691,7 @@
   <aside class="chatpane">
     <div class="chat-head">
       <strong class="grow">{chat?.Title || 'Agent chat'}</strong>
+      {#if chat?.AgentID}<span class="pill">Agent: {agentName || chat.AgentID}</span>{/if}
       <span class="pill">{chat?.CLIAgent || ''}</span>
       <button class="btn sm" title={editorSkills.length ? `${editorSkills.length} skill${editorSkills.length === 1 ? '' : 's'} enabled` : 'Configure skills'} on:click={() => (skillsPickerOpen = true)}>
         {editorSkills.length ? `★ ${editorSkills.length}` : '★'}

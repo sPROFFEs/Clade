@@ -271,8 +271,11 @@ func (a *App) startEditorWatcher() {
 	}
 	addTree(editorFolder)
 	go func() {
+		defer w.Close()
 		for {
 			select {
+			case <-a.ctx.Done():
+				return
 			case ev, ok := <-w.Events:
 				if !ok {
 					return

@@ -17,6 +17,8 @@
   import { activePage, pageRevision, openChatId, pendingTerm } from './stores.js'
 
   let chats = []
+  let agents = []
+  let agentNames = new Map()
   let active = new Set()
   let liveTerms = new Map() // chatID → termID (live PTY we can resume)
   let open = false
@@ -27,12 +29,15 @@
     if (loading) return
     loading = true
     try {
-      const [cs, ids, terms] = await Promise.all([
+      const [cs, ids, terms, loadedAgents] = await Promise.all([
         api.listChats().catch(() => []),
         api.activeChatIDs().catch(() => []),
         api.listTerminalSessions().catch(() => []),
+        api.listAgents().catch(() => []),
       ])
       chats = cs || []
+      agents = loadedAgents || []
+      agentNames = new Map(agents.map((a) => [a.id, a.name || a.id]))
       active = new Set(ids || [])
       const m = new Map()
       for (const t of (terms || [])) if (t.chatId) m.set(t.chatId, t)
@@ -63,6 +68,11 @@
 
   function surfaceLabel(s) {
     return s === 'studio' ? 'Studio' : s === 'code' ? 'Code' : s === 'helper' ? 'Agent helper' : 'Chat'
+  }
+
+  function agentName(c) {
+    if (!c?.AgentID) return ''
+    return agentNames.get(c.AgentID) || c.AgentID
   }
 
   function supportsNativeTerminalResume(cli) {
@@ -123,6 +133,8 @@
       pendingTerm.set({
         termId: live ? live.id : '',
         chatId: c.ID,
+        agentId: c.AgentID || '',
+        agentName: agentName(c),
         cli: c.CLIAgent || '',
         cwd: c.WorkspacePath || '',
         label: c.Title || '',
@@ -184,7 +196,7 @@
             <span class="pulse" class:live={liveStream || liveTerm}></span>
             <span class="surf surf-{s}">{surfaceLabel(s)}</span>
             <span class="title grow">{c.Title || c.ID}</span>
-            <span class="meta">{c.CLIAgent || ''} · {fmtAgo(c.UpdatedAt || c.CreatedAt)}</span>
+            <span class="meta">{#if c.AgentID}Agent: {agentName(c)} · {/if}{c.CLIAgent || ''} · {fmtAgo(c.UpdatedAt || c.CreatedAt)}</span>
           </button>
           <button class="row-close" title="Close this session (stops the chat / kills the PTY and deletes the row)" on:click|stopPropagation={() => closeSession(c)}>×</button>
         </div>

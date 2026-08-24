@@ -1,50 +1,35 @@
-# PrAImate 1.2.1
+# PrAImate 1.2.2
 
-PrAImate 1.2.1 completes the managed Autonomous single-agent runtime introduced
-in 1.2.0. Autonomous agents can now perform useful project work through a
-PrAImate-owned policy and approval boundary instead of depending on unrestricted
-CLI tools.
+PrAImate 1.2.2 makes installed agents usable from external scripts and keeps
+their identity visible when sessions move between Code, Chats, Sessions, and
+Studio. It also closes permission and lifecycle gaps found while exercising the
+1.2 managed runtime.
 
 ## Added
 
-- Capability-gated project listing, reading, literal search, atomic file writes,
-  Git operations, argv-only commands, and bounded HTTP GET requests.
-- Direct managed MCP clients for local stdio, Streamable HTTP, and legacy SSE
-  servers, with approval before connection and before each tool call.
-- Raw-document and Graphify RAG knowledge tools with index validation and
-  backend-only local-model credential resolution.
-- Durable transcript checkpoints and resume controls for stopped, failed,
-  stalled, and crash-interrupted runs.
-- Agent Studio controls to inspect, resume, stop, and approve tools for managed
-  runs, plus clear Managed Autonomous and Native CLI labels.
+- A versioned `praimate agent run` automation interface with JSON, JSONL, and
+  text output, deadlines, temporary or persisted chats, and explicit Safe,
+  edits, or full tool policies.
+- Deterministic `--cli` and `--model` selection plus `--endpoint saved` routing
+  through the Local LLM endpoint configured in the GUI.
+- Secure interactive database unlock with terminal echo disabled when the
+  password is not remembered; unattended runs fail with structured output.
+- A complete CLI API guide and a cross-platform Python caller example.
 
-## Changed
+## Fixed
 
-- Guided creation no longer offers Team agents until delegation has a real
-  coordinator. Existing Team manifests remain fail-closed.
-- Managed Autonomous agents are hidden from the interactive Terminal surface;
-  Chats, Studio, and Workflows use the managed runtime.
-- Each resume attempt receives a fresh bounded turn budget while preserving the
-  same run ID, working memory, artifacts, and model session.
-- Documentation and privacy disclosures now describe the complete managed-tool
-  surface and the plaintext, permission-restricted run files outside the
-  encrypted database.
+- Explicit Safe mode no longer inherits an agent runtime's wider default tool
+  policy.
+- Code and Studio sessions preserve and display the selected agent when they
+  are closed, reopened, or resumed.
+- Studio filesystem watchers now stop and release their resources when the
+  application context closes.
+- Local endpoint automation loads its API key from encrypted storage and
+  refuses redirects to endpoints other than the saved GUI configuration.
 
-## Security
+## Packaging
 
-- File tools resolve paths beneath the selected project or knowledge root and
-  reject traversal and symlink escapes.
-- File writes, commands, mutating Git operations, network requests, MCP
-  connections, and MCP calls require explicit GUI approval.
-- MCP credentials remain in the backend and MCP schemas/output are treated as
-  untrusted data with bounded model-facing content.
-- Interrupted tool calls are recorded with an unknown outcome so resume tells
-  the agent to inspect current state before retrying.
-- Sandbox and delegation claims remain blocked; approved commands are real host
-  processes and are not presented as OS-level isolation.
-
-## Compatibility
-
-- Linux amd64 desktop bundle.
-- Windows amd64 and arm64 desktop bundles.
-- macOS and GUI-less release bundles are not supported.
+- Linux and Windows bundles now include the full user guide, agent manual, CLI
+  API guide, and runnable Python automation example referenced by the README.
+- Supported release targets remain Linux amd64 and Windows amd64/arm64. macOS
+  and GUI-less bundles are not supported.

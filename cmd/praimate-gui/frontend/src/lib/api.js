@@ -138,8 +138,8 @@ export const api = {
   startTerminal: (agentID, cli, model, cwd, localEndpoint, localApiKey, localModel, resume = false) =>
     call('StartTerminal', agentID, cli, model || '', cwd, localEndpoint || '', localApiKey || '', localModel || '', !!resume),
   localLLMModels: () => call('LocalLLMModels'),
-  recordCodeSession: (cli, model, cwd, localEndpoint, localApiKey, localModel) =>
-    call('RecordCodeSession', cli, model || '', cwd, localEndpoint || '', localApiKey || '', localModel || ''),
+  recordCodeSession: (agentID, cli, model, cwd, localEndpoint, localApiKey, localModel) =>
+    call('RecordCodeSession', agentID || '', cli, model || '', cwd, localEndpoint || '', localApiKey || '', localModel || ''),
   bindChatToTerminal: (termID, chatID) => call('BindChatToTerminal', termID, chatID),
   listTerminalSessions: () => call('ListTerminalSessions'),
   startAgentHelperChat: (cli, model, cwd, agentID) => call('StartAgentHelperChat', cli, model || '', cwd || '', agentID || ''),

@@ -69,7 +69,10 @@ type ExecutionRequest struct {
 	Cwd     string
 	Model   string
 	Tools   string
-	Local   *ChatLocalEndpoint
+	// ToolsConfigured prevents an explicit empty/safe policy from being
+	// replaced by the agent runtime's default tool level.
+	ToolsConfigured bool
+	Local           *ChatLocalEndpoint
 
 	// MCP selection precedence: ExplicitMCP, then Agent.MCPServers, then
 	// AllEnabledMCP for clean terminal sessions.
@@ -167,7 +170,7 @@ func (c *Core) ResolveExecutionConfig(ctx context.Context, req ExecutionRequest)
 			return nil, fmt.Errorf("agent %q requires the %s runtime (%s); this PrAImate build only supports native execution",
 				req.Agent.Name, agentConfig.Mode, strings.Join(agentConfig.RequiredFeatures, ", "))
 		}
-		if req.Tools == "" {
+		if req.Tools == "" && !req.ToolsConfigured {
 			req.Tools = agentConfig.DefaultTools
 		}
 	}

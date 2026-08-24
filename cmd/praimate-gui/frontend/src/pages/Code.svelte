@@ -207,6 +207,7 @@
     // can leave a live PTY that the Sessions panel cannot find again.
     try {
       const chatId = await api.recordCodeSession(
+        agent ? agent.id : '',
         cli,
         local ? '' : (modelSupported ? model.trim() : ''),
         cwd,
@@ -331,6 +332,7 @@
     sessionLabel = p.label
     cli = p.cli
     cwd = p.cwd
+    agent = p.agentId ? agents.find((a) => a.id === p.agentId) || { id: p.agentId, name: p.agentName || p.agentId } : null
     sessionChatId = p.chatId || ''
     if (sessionChatId) {
       try { sessionSkills = (await api.chatSkills(sessionChatId)) || [] } catch { sessionSkills = [] }
@@ -356,7 +358,7 @@
     // bells; those came off the original chat record.
     try {
       termId = await term.start(
-        '', cli, p.model || '', cwd,
+        p.agentId || '', cli, p.model || '', cwd,
         p.localEndpoint || '', p.localApiKey || '', p.localModel || '', true)
       if (sessionChatId) await api.bindChatToTerminal(termId, sessionChatId)
     } catch (e) {

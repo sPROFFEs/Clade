@@ -41,7 +41,10 @@ func (a *App) SetChatTools(chatID, tools string) error {
 	if err != nil {
 		return err
 	}
-	return c.UpdateChatSettings(a.ctx, chatID, func(s *core.ChatSettings) { s.Tools = tools })
+	return c.UpdateChatSettings(a.ctx, chatID, func(s *core.ChatSettings) {
+		s.Tools = tools
+		s.ToolsConfigured = true
+	})
 }
 
 // SetChatMCPServers overwrites the per-chat MCP selection. Only connected,

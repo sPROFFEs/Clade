@@ -9,6 +9,8 @@
   let skillsPickerOpen = false
 
   let chats = []
+  let agents = []
+  let agentNames = new Map()
   let workspaceChats = []
   let error = ''
   let selected = null
@@ -103,10 +105,15 @@
   $: studioChats = shownChats.filter((c) => c.Settings?.surface === 'studio')
   $: codeChats = shownChats.filter((c) => c.Settings?.surface === 'code')
 
+  function agentName(chat) {
+    if (!chat?.AgentID) return ''
+    return agentNames.get(chat.AgentID) || chat.AgentID
+  }
+
   async function reopenStudio(chat) {
     error = ''
     try {
-      await api.openEditorWindow(chat.WorkspacePath, '', '', '', chat.ID, '', '', '')
+      await api.openEditorWindow(chat.WorkspacePath, chat.AgentID || '', '', '', chat.ID, '', '', '')
     } catch (e) {
       error = String(e)
     }
@@ -126,8 +133,9 @@
       }
       pendingTerm.set({
         termId: live?.id || '', chatId: chat.ID,
+        agentId: chat.AgentID || '', agentName: agentName(chat),
         cli: chat.CLIAgent, cwd: chat.WorkspacePath,
-        label: (chat.CLIAgent || 'CLI') + (l?.endpoint ? ' · local' : ''),
+        label: (agentName(chat) || chat.CLIAgent || 'CLI') + (l?.endpoint ? ' · local' : ''),
         model: chat.Settings?.model || '',
         localEndpoint: l?.endpoint || '', localApiKey: l?.api_key || '', localModel: l?.model || '',
         note: live
@@ -145,7 +153,13 @@
 
   async function load() {
     try {
-      chats = (await api.listChats()) || []
+      const [loadedChats, loadedAgents] = await Promise.all([
+        api.listChats(),
+        api.listAgents().catch(() => []),
+      ])
+      chats = loadedChats || []
+      agents = loadedAgents || []
+      agentNames = new Map(agents.map((a) => [a.id, a.name || a.id]))
       error = ''
     } catch (e) {
       error = String(e)
@@ -628,6 +642,7 @@
     <button class="btn" on:click={back}>← Chats</button>
     <div class="grow">
       <strong>{selected.Title}</strong>
+      {#if selected.AgentID}<span class="pill">Agent: {agentName(selected)}</span>{/if}
       <span class="pill">{selected.CLIAgent}</span>
       {#if selected.Settings?.model}<span class="pill">{selected.Settings.model}</span>{/if}
       {#if selected.ExitKind}<span class="pill" class:ok={selected.ExitKind === 'completed'}>{selected.ExitKind}</span>{/if}
@@ -890,6 +905,7 @@
         <div class="card-title">{chat.Title}</div>
         <div class="card-sub">
           {chat.CLIAgent}
+          {#if chat.AgentID} · Agent: {agentName(chat)}{/if}
           {#if chat.Settings?.model} · model: {chat.Settings.model}{/if}
           · {fmtDate(chat.UpdatedAt)}
           {#if chat.ExitKind} · {chat.ExitKind}{/if}
@@ -910,6 +926,7 @@
           <div class="card-title">{chat.Title}</div>
           <div class="card-sub mono">
             {chat.WorkspacePath} · {chat.CLIAgent}
+            {#if chat.AgentID} · Agent: {agentName(chat)}{/if}
             {#if chat.Settings?.model} · {chat.Settings.model}{/if}
             · {fmtDate(chat.UpdatedAt)}
           </div>
@@ -931,6 +948,7 @@
           <div class="card-title mono">{chat.WorkspacePath}</div>
           <div class="card-sub mono">
             {chat.CLIAgent}
+            {#if chat.AgentID} · Agent: {agentName(chat)}{/if}
             {#if chat.Settings?.local?.endpoint}· local {chat.Settings.local.model || chat.Settings.local.endpoint}
             {:else if chat.Settings?.model}· {chat.Settings.model}{/if}
             · {fmtDate(chat.UpdatedAt)}

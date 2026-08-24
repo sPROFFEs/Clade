@@ -7,7 +7,7 @@
 > Official source and releases:
 > [sPROFFEs/PrAImate](https://github.com/sPROFFEs/PrAImate)
 
-PrAImate 1.2.1 is a GUI-only desktop harness for Claude Code,
+PrAImate 1.2.2 is a GUI-only desktop harness for Claude Code,
 OpenClaude, Codex CLI, OpenCode, and the bundled **PrAImate Code** build.
 It gives those CLIs one place for coding terminals, chats, reusable agents,
 workflows, skills, locally configured MCP servers, local-model routing,
@@ -46,10 +46,21 @@ Useful commands:
 ```sh
 praimate                # open the desktop application
 praimate code           # launch the managed PrAImate Code CLI
+praimate agent run --agent DEV-TEAM --cli praimate-code --folder /project --prompt "review this code"
 praimate -check-update  # check the latest GitHub release
 praimate -update        # update the installed release
 praimate -version       # print version and platform
 ```
+
+Headless agent runs are a versioned machine interface: JSON is written to
+stdout and diagnostics stay on stderr. Use `--output jsonl` for live events,
+use a protected `--prompt-file` to keep large/sensitive text out of the process
+list, and add `--persist` only when the run should appear in Chats. The default
+`--tools safe` policy is read/answer-only; `edits` and `full` are explicit
+automation trust decisions. When the database password is not remembered, an
+interactive terminal prompts for it with input echo disabled. See the
+[CLI agent API guide](docs/CLI_AGENT_API.md) and
+[Python example](examples/praimate_agent_review.py).
 
 The installer supports binary/source, user/system, and uninstall modes:
 
@@ -293,8 +304,8 @@ sudo apt-get install -y npm pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev
 Build the supported release bundles:
 
 ```sh
-scripts/build.sh --version=1.2.1
-scripts/build.sh --version=1.2.1 --with-code --with-graphify
+scripts/build.sh --version=1.2.2
+scripts/build.sh --version=1.2.2 --with-code --with-graphify
 ```
 
 Build PrAImate Code from the vendored OpenCode source:

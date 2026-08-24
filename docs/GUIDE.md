@@ -2,7 +2,7 @@
   <img src="assets/monke-icon.png" alt="PrAImate" width="120" />
 </p>
 
-# PrAImate 1.2.1 user guide
+# PrAImate 1.2.2 user guide
 
 PrAImate is a Linux and Windows desktop harness around supported agent CLIs.
 It provides a shared GUI, but the chosen CLI still performs model requests,
@@ -52,6 +52,7 @@ Launch and maintenance commands:
 praimate
 praimate --gui
 praimate code
+praimate agent run --agent DEV-TEAM --cli praimate-code --folder /path/to/project --prompt "review this code"
 praimate -check-update
 praimate -update
 praimate -version
@@ -60,6 +61,13 @@ praimate -version
 `praimate` is a lightweight bootstrap and maintenance command. It opens the
 mandatory sibling `praimate-gui` desktop binary. `--gui` is a compatibility
 alias; there is no supported text-user-interface mode.
+
+`praimate agent run` is the non-GUI automation interface. It runs an installed
+agent through the same encrypted settings, execution resolver, local routing,
+knowledge, and runtime policy as the desktop app, then emits parseable JSON.
+If the database password is not remembered, an interactive terminal asks for
+it with input echo disabled. See the dedicated [CLI agent API](CLI_AGENT_API.md)
+and [Python example](../examples/praimate_agent_review.py).
 
 Supported published archives:
 
@@ -278,7 +286,7 @@ an import invisibly.
 Import validates a staged copy before replacing live agent data. Graphify
 output may travel with the pack, so an indexed agent can arrive pre-indexed.
 
-Skills are not embedded in agent packs in 1.2.1. Skills remain separate,
+Skills are not embedded in agent packs in 1.2.2. Skills remain separate,
 CLI-specific resources selected on Chats.
 
 ## Skills
@@ -600,8 +608,8 @@ sudo apt-get install -y npm pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev
 Build the release bundles:
 
 ```sh
-scripts/build.sh --version=1.2.1
-scripts/build.sh --version=1.2.1 --with-code --with-graphify
+scripts/build.sh --version=1.2.2
+scripts/build.sh --version=1.2.2 --with-code --with-graphify
 ```
 
 Build only the GUI:

@@ -57,6 +57,9 @@ type ChatSettings struct {
 	// (auto-approve file edits), "full" (skip approvals entirely). See
 	// SingleShotOpts.Tools for the per-CLI flag mapping.
 	Tools string `json:"tools,omitempty"`
+	// ToolsConfigured distinguishes an explicit Safe selection (Tools is
+	// empty) from an agent chat that should inherit runtime.default_tools.
+	ToolsConfigured bool `json:"tools_configured,omitempty"`
 
 	// Skills lists the IDs of skills (system-prompt fragments shipped
 	// in the catalogue) that should be prepended to this chat's
