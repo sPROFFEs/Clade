@@ -5,7 +5,7 @@
   import { onMount, onDestroy } from 'svelte'
   import { get } from 'svelte/store'
   import { api } from '../lib/api.js'
-  import { cliCache } from '../lib/stores.js'
+  import { cliCache, prefetchCLIs } from '../lib/stores.js'
 
   let clis = []
   let error = ''
@@ -106,8 +106,23 @@
       clis = cached.clis
       tools = cached.tools
       loading = false
+      await load()
+      return
     }
-    await load()
+    // App startup may already be probing. Await that same request instead
+    // of launching a duplicate set of cold CLI processes.
+    await prefetchCLIs()
+    const warmed = get(cliCache)
+    // KnownAgents always returns rows. An empty prefetch therefore means
+    // the background binding failed; retry through load() so the tab
+    // surfaces the real error instead of silently rendering no CLIs.
+    if (!warmed.clis?.length) {
+      await load()
+      return
+    }
+    clis = warmed.clis
+    tools = warmed.tools
+    loading = false
   })
   onDestroy(() => unsub())
 </script>

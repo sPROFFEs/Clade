@@ -26,6 +26,9 @@ Studio. It also closes permission and lifecycle gaps found while exercising the
   application context closes.
 - Local endpoint automation loads its API key from encrypted storage and
   refuses redirects to endpoints other than the saved GUI configuration.
+- CLI installation checks now refresh managed and user PATH entries before
+  probing, run independent probes concurrently, and share the GUI startup
+  probe so slow Node or Bun cold starts do not produce false missing results.
 
 ## Packaging
 

@@ -25,22 +25,24 @@ export const cliCache = writable({ clis: [], tools: [], loaded: false })
 
 // prefetchCLIs runs the detection once and fills cliCache. force=true
 // re-probes even if already loaded (used by the tab's Re-detect button).
-let prefetchInFlight = false
-export async function prefetchCLIs(force = false) {
-  if (prefetchInFlight) return
+let prefetchPromise = null
+export function prefetchCLIs(force = false) {
+  if (prefetchPromise) return prefetchPromise
   let already = false
   cliCache.update((c) => { already = c.loaded; return c })
-  if (already && !force) return
-  prefetchInFlight = true
-  try {
-    const [clis, tools] = await Promise.all([
-      api.listCLIBackends().catch(() => []),
-      api.listManagedTools().catch(() => []),
-    ])
-    cliCache.set({ clis: clis || [], tools: tools || [], loaded: true })
-  } finally {
-    prefetchInFlight = false
-  }
+  if (already && !force) return Promise.resolve()
+  prefetchPromise = (async () => {
+    try {
+      const [clis, tools] = await Promise.all([
+        api.listCLIBackends().catch(() => []),
+        api.listManagedTools().catch(() => []),
+      ])
+      cliCache.set({ clis: clis || [], tools: tools || [], loaded: true })
+    } finally {
+      prefetchPromise = null
+    }
+  })()
+  return prefetchPromise
 }
 
 // pendingTerm, when set, tells the Code page to attach to an

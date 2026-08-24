@@ -107,13 +107,7 @@ func (a *App) startup(ctx context.Context) {
 	// (praimate-code). Without it the GUI — and every CLI child it
 	// spawns — can't resolve tools installed into the managed dirs:
 	// "graphify installs but isn't detected".
-	installer.ImportManagedToolsToPath()
-	installer.ImportPraimateBinToPath()
-	// Windows: merge HKCU\Environment\Path + HKLM\…\Environment\Path
-	// into our PATH so user-installer registry edits made after the
-	// GUI launched (npm prefix, pnpm setup, bun installer, …) reach
-	// exec.LookPath. No-op on non-Windows.
-	installer.ImportWindowsRegistryPath()
+	refreshManagedPaths()
 
 	// Live PATH rescan — periodically check the well-known per-user CLI
 	// dirs in case the user installed bun/pnpm/cargo/uv in another
@@ -129,11 +123,7 @@ func (a *App) startup(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				installer.ImportPnpmPathIfPresent()
-				installer.ImportManagedToolsToPath()
-				installer.ImportPraimateBinToPath()
-				installer.ImportUserBinDirs()
-				installer.ImportWindowsRegistryPath()
+				refreshManagedPaths()
 			}
 		}
 	}()

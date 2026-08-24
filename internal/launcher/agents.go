@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"git.jtsec.local/lab/PrAImate/internal/installer"
@@ -139,35 +140,46 @@ func KnownAgents() []Agent {
 // isn't on PATH in our process.
 func DetectAgents(ctx context.Context) []Agent {
 	agents := KnownAgents()
+	var wg sync.WaitGroup
 	for i := range agents {
-		candidates := candidatePaths(agents[i].ID, agents[i].Binary)
-		var lastErr error
-		for _, candidate := range candidates {
-			if st, err := os.Stat(candidate); err != nil || st.IsDir() {
-				continue
-			}
-			version, perr := probeVersion(ctx, candidate)
-			if perr != nil {
-				if errors.Is(perr, ErrProbeTimeout) {
-					agents[i].Available = true
-					agents[i].Binary = candidate
-					break
-				}
-				if lastErr == nil {
-					lastErr = perr
-				}
-				continue
-			}
-			agents[i].Available = true
-			agents[i].Version = version
-			agents[i].Binary = candidate
-			break
-		}
-		if !agents[i].Available && lastErr != nil {
-			agents[i].ProbeError = trimErr(lastErr)
-		}
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			agents[i] = detectAgent(ctx, agents[i])
+		}(i)
 	}
+	wg.Wait()
 	return agents
+}
+
+func detectAgent(ctx context.Context, agent Agent) Agent {
+	candidates := candidatePaths(agent.ID, agent.Binary)
+	var lastErr error
+	for _, candidate := range candidates {
+		if st, err := os.Stat(candidate); err != nil || st.IsDir() {
+			continue
+		}
+		version, perr := probeVersion(ctx, candidate)
+		if perr != nil {
+			if errors.Is(perr, ErrProbeTimeout) {
+				agent.Available = true
+				agent.Binary = candidate
+				break
+			}
+			if lastErr == nil {
+				lastErr = perr
+			}
+			continue
+		}
+		agent.Available = true
+		agent.Version = version
+		agent.Binary = candidate
+		break
+	}
+	if !agent.Available && lastErr != nil {
+		agent.ProbeError = trimErr(lastErr)
+	}
+	return agent
 }
 
 // candidatePaths returns the ordered list of full paths to try when

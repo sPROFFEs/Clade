@@ -9,6 +9,7 @@ package main
 import (
 	"context"
 	"strings"
+	"sync"
 	"time"
 
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -31,6 +32,7 @@ type CLIBackend struct {
 // ListCLIBackends detects every known CLI (8s probe each, parallel via
 // launcher.DetectAgents) and returns the status list for the CLIs tab.
 func (a *App) ListCLIBackends() ([]CLIBackend, error) {
+	refreshManagedPaths()
 	ctx, cancel := context.WithTimeout(a.ctx, 30*time.Second)
 	defer cancel()
 	detected := launcher.DetectAgents(ctx)
@@ -61,6 +63,7 @@ type InstallMethod struct {
 // ListInstallMethods returns the runnable install methods for a CLI on
 // the current OS, recommended first (installer.Methods ordering).
 func (a *App) ListInstallMethods(cli string) ([]InstallMethod, error) {
+	refreshManagedPaths()
 	methods := installer.Methods(installer.AgentID(cli), installer.ActionInstall, installer.DetectOS())
 	out := make([]InstallMethod, 0, len(methods))
 	for _, m := range methods {
@@ -92,6 +95,7 @@ func (w installLogWriter) Write(p []byte) (int, error) {
 // "praimate:install". Returns when the method finishes; the frontend
 // re-probes the CLI list afterwards.
 func (a *App) InstallCLI(cli, methodID string) error {
+	refreshManagedPaths()
 	methods := installer.Methods(installer.AgentID(cli), installer.ActionInstall, installer.DetectOS())
 	for _, m := range methods {
 		if m.ID == methodID {
@@ -111,7 +115,12 @@ func (a *App) InstallCLI(cli, methodID string) error {
 // (and is inherited by every CLI child the GUI spawns from now on).
 // Covers both the PrAImate-managed prefixes AND the user-level dirs the
 // just-finished installer might have written to (pnpm/bun/cargo/…).
+var pathRefreshMu sync.Mutex
+
 func refreshManagedPaths() {
+	pathRefreshMu.Lock()
+	defer pathRefreshMu.Unlock()
+
 	installer.ImportPnpmPathIfPresent()
 	installer.ImportManagedToolsToPath()
 	installer.ImportPraimateBinToPath()
@@ -154,6 +163,7 @@ type ManagedTool struct {
 
 // ListManagedTools detects the PrAImate-managed helper tools.
 func (a *App) ListManagedTools() ([]ManagedTool, error) {
+	refreshManagedPaths()
 	ctx, cancel := context.WithTimeout(a.ctx, 30*time.Second)
 	defer cancel()
 	tools := installer.DetectTools(ctx)
@@ -173,6 +183,7 @@ func (a *App) ListManagedTools() ([]ManagedTool, error) {
 // ListToolInstallMethods returns the runnable install methods for a
 // managed tool on this OS.
 func (a *App) ListToolInstallMethods(tool string) ([]InstallMethod, error) {
+	refreshManagedPaths()
 	methods := installer.ToolMethods(installer.ToolID(tool), installer.ActionInstall, installer.DetectOS())
 	out := make([]InstallMethod, 0, len(methods))
 	for _, m := range methods {
@@ -187,6 +198,7 @@ func (a *App) ListToolInstallMethods(tool string) ([]InstallMethod, error) {
 // InstallManagedTool runs the chosen method, streaming output over the
 // same "praimate:install" channel the CLI installs use.
 func (a *App) InstallManagedTool(tool, methodID string) error {
+	refreshManagedPaths()
 	methods := installer.ToolMethods(installer.ToolID(tool), installer.ActionInstall, installer.DetectOS())
 	for _, m := range methods {
 		if m.ID == methodID {
