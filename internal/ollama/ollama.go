@@ -81,6 +81,9 @@ func ListModels(ctx context.Context, endpoint, apiKey string) ([]string, error) 
 	if endpoint == "" {
 		return nil, errors.New("empty endpoint")
 	}
+	// Saved OpenAI-compatible endpoints may already include /v1. Discovery
+	// builds both the Ollama-native and OpenAI paths from the server root.
+	endpoint = strings.TrimSuffix(endpoint, "/v1")
 	cli := &http.Client{Timeout: 8 * time.Second}
 
 	if models, err := tryOllamaTags(ctx, cli, endpoint, apiKey); err == nil && len(models) > 0 {

@@ -85,7 +85,7 @@ function Build-One($triplet) {
     Copy-Item "docs/ACTIVATION.md","docs/TARGETS.md","docs/SCHEMA.md","docs/QUICKSTART.md","docs/GUIDE.md","docs/AGENT_GUIDE.md","docs/CLI_AGENT_API.md" $docsOut
     $examplesOut = Join-Path $out "examples"
     if (-not (Test-Path $examplesOut)) { New-Item -ItemType Directory -Path $examplesOut | Out-Null }
-    Copy-Item "examples/praimate_agent_review.py" $examplesOut
+    Copy-Item "examples/praimate_agent_capture.py","examples/praimate_agent_review.py" $examplesOut
     Copy-Item "README.md","LICENSE" $out
 
     # Ship the install scripts inside the archive so the README's

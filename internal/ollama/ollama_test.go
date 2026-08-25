@@ -81,6 +81,28 @@ func TestListModels_FallsBackToOpenAI(t *testing.T) {
 	}
 }
 
+func TestListModels_DoesNotDuplicateSavedV1(t *testing.T) {
+	var paths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		if r.URL.Path == "/v1/models" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]string{{"id": "qwen"}}})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+	models, err := ListModels(context.Background(), srv.URL+"/v1", "")
+	if err != nil || len(models) != 1 || models[0] != "qwen" {
+		t.Fatalf("models=%v err=%v paths=%v", models, err, paths)
+	}
+	for _, path := range paths {
+		if strings.Contains(path, "/v1/v1/") {
+			t.Fatalf("duplicated /v1 in discovery path: %v", paths)
+		}
+	}
+}
+
 func TestClaudeEnv(t *testing.T) {
 	env := ClaudeEnv(Settings{Endpoint: "192.168.1.10:11434", Model: "qwen"})
 	if env["ANTHROPIC_BASE_URL"] != "http://192.168.1.10:11434" {

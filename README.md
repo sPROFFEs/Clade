@@ -55,12 +55,14 @@ praimate -version       # print version and platform
 Headless agent runs are a versioned machine interface: JSON is written to
 stdout and diagnostics stay on stderr. Use `--output jsonl` for live events,
 use a protected `--prompt-file` to keep large/sensitive text out of the process
-list, and add `--persist` only when the run should appear in Chats. The default
+list, or use `--workflow` with repeatable `--input key=value` parameters. A
+caller-supplied `--run-id` enables encrypted status lookup and idempotent result
+replay. Add `--persist` only when the run should appear in Chats. The default
 `--tools safe` policy is read/answer-only; `edits` and `full` are explicit
 automation trust decisions. When the database password is not remembered, an
 interactive terminal prompts for it with input echo disabled. See the
 [CLI agent API guide](docs/CLI_AGENT_API.md) and
-[Python example](examples/praimate_agent_review.py).
+[Python example](examples/praimate_agent_capture.py).
 
 The installer supports binary/source, user/system, and uninstall modes:
 

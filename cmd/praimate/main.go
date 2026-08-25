@@ -24,16 +24,24 @@ func main() {
 	os.Exit(run(os.Args[1:]))
 }
 
-var launchDesktop = launchGUI
+var (
+	launchDesktop      = launchGUI
+	executeAgentPrompt = runAgentPrompt
+	executeAgentStatus = runAgentStatus
+	executeModelCheck  = runModelCheck
+)
 
 func run(args []string) int {
 	if len(args) >= 1 && args[0] == "code" {
 		return runCode(args[1:])
 	}
-	// Long form for automation. The top-level --agent spelling remains as a
+	// Long forms for automation. The top-level --agent spelling remains as a
 	// compact alias for scripts and CI jobs.
-	if len(args) >= 2 && args[0] == "agent" && args[1] == "run" {
-		args = args[2:]
+	agentCommand, modelCommand := "", ""
+	if len(args) >= 2 && args[0] == "agent" && (args[1] == "run" || args[1] == "status") {
+		agentCommand, args = args[1], args[2:]
+	} else if len(args) >= 2 && args[0] == "model" && args[1] == "check" {
+		modelCommand, args = args[1], args[2:]
 	}
 
 	flags := flag.NewFlagSet("praimate", flag.ContinueOnError)
@@ -52,6 +60,8 @@ func run(args []string) int {
 	runCLI := flags.String("cli", "", "CLI used for non-interactive agent execution (default: agent's first supported CLI)")
 	runWorkflow := flags.String("workflow", "", "workflow used with -run-agent")
 	runInputs := flags.String("inputs", "", "comma-separated key=value inputs for -run-agent")
+	var agentInputs stringListFlag
+	flags.Var(&agentInputs, "input", "workflow input as key=value; repeat for multiple values")
 	agentPrompt := flags.String("agent", "", "run one agent prompt without opening the GUI")
 	agentFolder := flags.String("folder", "", "project folder for --agent")
 	agentPromptText := flags.String("prompt", "", "prompt for --agent (prefer --prompt-file for sensitive or large prompts)")
@@ -62,6 +72,10 @@ func run(args []string) int {
 	agentOutput := flags.String("output", "json", "headless output: json, jsonl, or text")
 	agentTimeout := flags.Duration("timeout", 30*time.Minute, "maximum --agent execution time; 0 disables the deadline")
 	agentPersist := flags.Bool("persist", false, "keep the headless run in Chats (default: remove its temporary chat)")
+	agentRunID := flags.String("run-id", "", "caller-supplied durable idempotency key and status ID")
+	agentRetry := flags.Bool("retry", false, "explicitly retry a failed/interrupted durable --run-id")
+	skipModelPreflight := flags.Bool("skip-model-preflight", false, "skip authenticated model-list validation for a saved endpoint")
+	modelProbe := flags.Bool("probe", false, "with model check, run a tiny generation probe through --cli")
 	dbPasswordStdin := flags.Bool("db-password-stdin", false, "read the database password securely from the terminal, or from piped stdin")
 	listAgents := flags.Bool("list-agents", false, "print every agent in the database and exit")
 	importTemplate := flags.String("import-template", "", "import legacy workpath template(s) and exit")
@@ -96,7 +110,21 @@ func run(args []string) int {
 	if *importTemplate != "" {
 		return runImportTemplate(*importTemplate)
 	}
+	if agentCommand == "status" {
+		return executeAgentStatus(agentStatusOptions{RunID: *agentRunID, Output: *agentOutput, DBPasswordStdin: *dbPasswordStdin})
+	}
+	if modelCommand == "check" {
+		return executeModelCheck(modelCheckOptions{
+			CLI: *runCLI, Folder: *agentFolder, Model: *agentModel, Endpoint: *agentEndpoint,
+			Output: *agentOutput, Timeout: *agentTimeout, Probe: *modelProbe,
+			DBPasswordStdin: *dbPasswordStdin,
+		})
+	}
 	if *runAgent != "" {
+		if len(agentInputs) > 0 {
+			fmt.Fprintln(os.Stderr, "praimate: -run-agent uses legacy --inputs; use `agent run --input key=value` for the modern API")
+			return 2
+		}
 		cli := *runCLI
 		if cli == "" {
 			cli = "claude" // preserve the legacy -run-agent default
@@ -104,14 +132,23 @@ func run(args []string) int {
 		return runAgentWorkflow(*runAgent, cli, *runWorkflow, *runInputs)
 	}
 	if *agentPrompt != "" {
-		return runAgentPrompt(agentPromptOptions{
+		if strings.TrimSpace(*runInputs) != "" {
+			fmt.Fprintln(os.Stderr, "praimate: --inputs is legacy; use repeatable --input key=value with agent run")
+			return 2
+		}
+		return executeAgentPrompt(agentPromptOptions{
 			AgentID: *agentPrompt, CLI: *runCLI, Folder: *agentFolder,
 			Prompt: *agentPromptText, PromptFile: *agentPromptFile,
-			Model: *agentModel, Endpoint: *agentEndpoint,
+			Workflow: *runWorkflow, Inputs: agentInputs,
+			Model: *agentModel, Endpoint: *agentEndpoint, SkipModelPreflight: *skipModelPreflight,
 			Tools: *agentTools, Output: *agentOutput,
-			Timeout: *agentTimeout, Persist: *agentPersist,
+			Timeout: *agentTimeout, Persist: *agentPersist, RunID: *agentRunID, Retry: *agentRetry,
 			DBPasswordStdin: *dbPasswordStdin,
 		})
+	}
+	if agentCommand == "run" {
+		fmt.Fprintln(os.Stderr, "praimate: agent run requires --agent")
+		return 2
 	}
 
 	_ = guiFlag // `--gui` is now an explicit spelling of the default.

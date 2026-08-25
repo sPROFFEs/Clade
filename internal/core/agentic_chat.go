@@ -53,7 +53,7 @@ func (c *Core) continueManagedChat(
 			if _, err := c.AddMessage(persistCtx, chat.ID, "assistant", final, meta); err != nil {
 				return nil, fmt.Errorf("persist stopped managed run: %w", err)
 			}
-			return &ChatTurn{UserMessage: userMessage, Reply: final, SessionID: managed.SessionID, DurationMs: time.Since(start).Milliseconds()}, nil
+			return &ChatTurn{UserMessage: userMessage, Reply: final, SessionID: managed.SessionID, ManagedRunID: managed.ID, DurationMs: time.Since(start).Milliseconds()}, nil
 		}
 		return nil, runErr
 	}
@@ -64,7 +64,7 @@ func (c *Core) continueManagedChat(
 		return nil, fmt.Errorf("persist managed reply: %w", err)
 	}
 	return &ChatTurn{
-		UserMessage: userMessage, Reply: final, SessionID: managed.SessionID,
+		UserMessage: userMessage, Reply: final, SessionID: managed.SessionID, ManagedRunID: managed.ID,
 		DurationMs: time.Since(start).Milliseconds(),
 	}, nil
 }

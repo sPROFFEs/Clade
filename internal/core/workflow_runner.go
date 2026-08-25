@@ -111,6 +111,7 @@ type RunAllOptions struct {
 type RunResult struct {
 	AgentID      string
 	WorkflowName string
+	RunID        string // managed-runtime run ID; empty for native CLI workflows
 	Turns        []TurnResult
 	SessionID    string // last seen session id from the adapter
 	Outcome      RunOutcome
@@ -261,7 +262,8 @@ func (c *Core) runWorkflowSequence(ctx context.Context, cfg workflowRunConfig, p
 	}
 	effective, err := c.ResolveExecutionConfig(ctx, ExecutionRequest{
 		Surface: SurfaceWorkflow, Agent: cfg.Agent, CLI: cfg.CLI, Cwd: cfg.Cwd,
-		Model: cfg.Model, Tools: cfg.Tools, Local: cfg.ChatSettings.Local,
+		Model: cfg.Model, Tools: cfg.Tools, ToolsConfigured: true,
+		Local: cfg.ChatSettings.Local,
 	})
 	if err != nil {
 		res.Err = err

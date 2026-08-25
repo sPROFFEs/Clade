@@ -65,9 +65,11 @@ alias; there is no supported text-user-interface mode.
 `praimate agent run` is the non-GUI automation interface. It runs an installed
 agent through the same encrypted settings, execution resolver, local routing,
 knowledge, and runtime policy as the desktop app, then emits parseable JSON.
+It supports one-off prompts and named workflows, authenticated local-model
+preflight, correlated JSONL events, and opt-in durable `--run-id` status/replay.
 If the database password is not remembered, an interactive terminal asks for
 it with input echo disabled. See the dedicated [CLI agent API](CLI_AGENT_API.md)
-and [Python example](../examples/praimate_agent_review.py).
+and [Python example](../examples/praimate_agent_capture.py).
 
 Supported published archives:
 

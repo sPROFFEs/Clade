@@ -23,10 +23,11 @@ import (
 
 // ChatTurn is one completed interactive exchange.
 type ChatTurn struct {
-	UserMessage string
-	Reply       string
-	SessionID   string
-	DurationMs  int64
+	UserMessage  string
+	Reply        string
+	SessionID    string
+	ManagedRunID string
+	DurationMs   int64
 }
 
 // SetChatSessionID persists the adapter session id on a chat row so the

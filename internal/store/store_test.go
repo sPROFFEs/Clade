@@ -70,6 +70,7 @@ func TestSchemaTables_Present(t *testing.T) {
 		"chats", "messages", "agents",
 		"mcp_servers", "schedules", "watchers",
 		"settings_cli", "settings_gui",
+		"external_agent_runs",
 		"schema_version",
 	}
 	for _, table := range want {

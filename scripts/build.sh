@@ -157,7 +157,7 @@ build_one() {
   cp docs/ACTIVATION.md docs/TARGETS.md docs/SCHEMA.md docs/QUICKSTART.md \
     docs/GUIDE.md docs/AGENT_GUIDE.md docs/CLI_AGENT_API.md "$out/docs/"
   mkdir -p "$out/examples"
-  cp examples/praimate_agent_review.py "$out/examples/"
+  cp examples/praimate_agent_capture.py examples/praimate_agent_review.py "$out/examples/"
   cp README.md LICENSE "$out/"
 
   # Drop the install scripts into a scripts/ subdir so the README's

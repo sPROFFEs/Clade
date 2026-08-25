@@ -4,6 +4,8 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -60,6 +62,14 @@ func openCoreWithPassword(password string) (*core.Core, func(), error) {
 
 const agentRunSchema = "praimate.agent-run/v1"
 
+type stringListFlag []string
+
+func (f *stringListFlag) String() string { return strings.Join(*f, ",") }
+func (f *stringListFlag) Set(value string) error {
+	*f = append(*f, value)
+	return nil
+}
+
 var (
 	agentRunInput                io.Reader = os.Stdin
 	agentRunOutput               io.Writer = os.Stdout
@@ -70,52 +80,105 @@ var (
 )
 
 type agentPromptOptions struct {
-	AgentID         string
-	CLI             string
-	Folder          string
-	Prompt          string
-	PromptFile      string
-	Model           string
-	Endpoint        string
-	Tools           string
-	Output          string
-	Timeout         time.Duration
-	Persist         bool
-	DBPasswordStdin bool
+	AgentID            string
+	CLI                string
+	Folder             string
+	Prompt             string
+	PromptFile         string
+	Workflow           string
+	Inputs             []string
+	Model              string
+	Endpoint           string
+	SkipModelPreflight bool
+	Tools              string
+	Output             string
+	Timeout            time.Duration
+	Persist            bool
+	RunID              string
+	Retry              bool
+	Durable            bool
+	DBPasswordStdin    bool
 }
 
 type agentRunResult struct {
-	Schema     string `json:"schema"`
-	OK         bool   `json:"ok"`
-	AgentID    string `json:"agentId"`
-	AgentName  string `json:"agentName,omitempty"`
-	CLI        string `json:"cli,omitempty"`
-	Runtime    string `json:"runtime,omitempty"`
-	ChatID     string `json:"chatId,omitempty"`
-	Reply      string `json:"reply"`
-	DurationMs int64  `json:"durationMs"`
-	Error      string `json:"error,omitempty"`
+	Schema       string `json:"schema"`
+	OK           bool   `json:"ok"`
+	AgentID      string `json:"agentId"`
+	AgentName    string `json:"agentName,omitempty"`
+	CLI          string `json:"cli,omitempty"`
+	Runtime      string `json:"runtime,omitempty"`
+	RunID        string `json:"runId,omitempty"`
+	ManagedRunID string `json:"managedRunId,omitempty"`
+	State        string `json:"state,omitempty"`
+	Attempt      int    `json:"attempt,omitempty"`
+	Cached       bool   `json:"cached,omitempty"`
+	Workflow     string `json:"workflow,omitempty"`
+	Outcome      string `json:"outcome,omitempty"`
+	Turns        int    `json:"turns,omitempty"`
+	ChatID       string `json:"chatId,omitempty"`
+	Reply        string `json:"reply"`
+	DurationMs   int64  `json:"durationMs"`
+	ExitCode     int    `json:"exitCode,omitempty"`
+	Error        string `json:"error,omitempty"`
 }
 
 type agentRunEvent struct {
 	Schema    string `json:"schema"`
 	Type      string `json:"type"`
 	AgentID   string `json:"agentId"`
+	RunID     string `json:"runId,omitempty"`
+	Workflow  string `json:"workflow,omitempty"`
+	Turn      *int   `json:"turn,omitempty"`
 	EventType string `json:"eventType,omitempty"`
 	Text      string `json:"text,omitempty"`
 	Tool      string `json:"tool,omitempty"`
 	Detail    string `json:"detail,omitempty"`
-	OK        bool   `json:"ok,omitempty"`
+	ID        string `json:"id,omitempty"`
+	OK        *bool  `json:"ok,omitempty"`
 }
 
 func runAgentPrompt(opts agentPromptOptions) int {
-	promptUsesStdin := opts.PromptFile == "-" || (opts.Prompt == "" && opts.PromptFile == "")
-	if opts.DBPasswordStdin && promptUsesStdin {
-		return writeAgentFailure(opts, 2, "stdin cannot carry both the prompt and database password; use --prompt or --prompt-file")
+	opts.Output = strings.ToLower(strings.TrimSpace(opts.Output))
+	if opts.Output == "" {
+		opts.Output = "json"
 	}
-	prompt, err := readAgentPrompt(opts)
+	if opts.Output != "json" && opts.Output != "jsonl" && opts.Output != "text" {
+		return writeAgentFailure(opts, 2, "--output must be json, jsonl, or text")
+	}
+	opts.RunID = strings.TrimSpace(opts.RunID)
+	opts.Durable = opts.RunID != ""
+	if opts.Retry && !opts.Durable {
+		return writeAgentFailure(opts, 2, "--retry requires a caller-supplied --run-id")
+	}
+	if opts.RunID == "" {
+		var err error
+		opts.RunID, err = newExternalRunID()
+		if err != nil {
+			return writeAgentFailure(opts, 1, err.Error())
+		}
+	}
+
+	workflow := strings.TrimSpace(opts.Workflow)
+	if workflow != "" && (opts.Prompt != "" || opts.PromptFile != "") {
+		return writeAgentFailure(opts, 2, "--workflow cannot be combined with --prompt or --prompt-file")
+	}
+	inputs, err := parseStrictInputs(opts.Inputs)
 	if err != nil {
 		return writeAgentFailure(opts, 2, err.Error())
+	}
+	if workflow == "" && len(inputs) > 0 {
+		return writeAgentFailure(opts, 2, "--input requires --workflow")
+	}
+	prompt := ""
+	if workflow == "" {
+		promptUsesStdin := opts.PromptFile == "-" || (opts.Prompt == "" && opts.PromptFile == "")
+		if opts.DBPasswordStdin && promptUsesStdin {
+			return writeAgentFailure(opts, 2, "stdin cannot carry both the prompt and database password; use --prompt or --prompt-file")
+		}
+		prompt, err = readAgentPrompt(opts)
+		if err != nil {
+			return writeAgentFailure(opts, 2, err.Error())
+		}
 	}
 	password := strings.TrimSpace(os.Getenv("PRAIMATE_DB_PASSWORD"))
 	_ = os.Unsetenv("PRAIMATE_DB_PASSWORD")
@@ -149,13 +212,6 @@ func runAgentPrompt(opts agentPromptOptions) int {
 	if tools != "" && tools != "edits" && tools != "full" {
 		return writeAgentFailure(opts, 2, "--tools must be safe, edits, or full")
 	}
-	if opts.Output == "" {
-		opts.Output = "json"
-	}
-	if opts.Output != "json" && opts.Output != "jsonl" && opts.Output != "text" {
-		return writeAgentFailure(opts, 2, "--output must be json, jsonl, or text")
-	}
-
 	c, cleanup, err := openAgentRunCore(password)
 	if err != nil && password == "" && errors.Is(err, store.ErrPasswordRequired) && agentRunTerminalAvailable() {
 		password, err = readAgentRunTerminalPassword()
@@ -204,9 +260,97 @@ func runAgentPrompt(opts agentPromptOptions) int {
 		})
 	}
 
-	chat, err := c.StartInteractiveChat(ctx, agent.ID, cli, folder)
+	effective, err := c.ResolveEffectiveAgentConfig(ctx, agent)
 	if err != nil {
 		return writeAgentFailure(opts, 1, err.Error())
+	}
+	kind := "prompt"
+	if workflow != "" {
+		kind = "workflow"
+	}
+	requestHash, err := externalRunRequestHash(
+		agent.ID, cli, folder, kind, prompt, workflow, inputs, model, endpoint, tools,
+		opts.Timeout, opts.Persist, opts.SkipModelPreflight,
+	)
+	if err != nil {
+		return writeAgentFailure(opts, 1, err.Error())
+	}
+	var claimed *core.ExternalAgentRun
+	if opts.Durable {
+		var execute bool
+		var claimErr error
+		claimed, execute, claimErr = c.ClaimExternalAgentRun(ctx, core.ClaimExternalAgentRunRequest{
+			ID: opts.RunID, RequestHash: requestHash, AgentID: agent.ID, CLI: cli,
+			Runtime: string(effective.Mode), Kind: kind, Retry: opts.Retry,
+		})
+		if claimErr != nil {
+			return writeAgentFailure(opts, 1, claimErr.Error())
+		}
+		if !execute {
+			return replayExternalAgentRun(opts, claimed)
+		}
+	}
+	attempt := 1
+	if claimed != nil {
+		attempt = claimed.Attempt
+	}
+	if endpoint != "" && !opts.SkipModelPreflight {
+		if err := requireLocalModel(ctx, c, endpoint, model); err != nil {
+			return finishAndWriteAgentFailure(c, opts, agent, cli, string(effective.Mode), attempt, 1, "failed", "model preflight: "+err.Error())
+		}
+	}
+
+	started := time.Now()
+	if workflow != "" {
+		var onEvent func(core.WorkflowRunEvent)
+		if opts.Output == "jsonl" {
+			enc := json.NewEncoder(agentRunOutput)
+			onEvent = func(ev core.WorkflowRunEvent) {
+				turn := ev.TurnIndex
+				_ = enc.Encode(agentRunEvent{
+					Schema: agentRunSchema, Type: "event", AgentID: agent.ID, RunID: opts.RunID,
+					Workflow: ev.WorkflowName, Turn: &turn, EventType: ev.Type,
+					Text: ev.Text, Tool: ev.Tool, Detail: ev.Detail, ID: ev.ID, OK: agentEventOK(ev.Type, ev.OK),
+				})
+			}
+		}
+		settings := core.ChatSettings{Tools: tools, ToolsConfigured: true}
+		if endpoint != "" {
+			settings.Local = &core.ChatLocalEndpoint{Endpoint: endpoint, Model: model}
+		}
+		res := c.RunWorkflow(ctx, core.RunOptions{
+			Agent: agent, WorkflowName: workflow, Inputs: inputs, CLI: cli, Cwd: folder,
+			Model: model, Tools: tools, OnEvent: onEvent, Persist: opts.Persist,
+			ChatSettings: settings,
+		})
+		duration := time.Since(started).Milliseconds()
+		result := agentRunResult{
+			Schema: agentRunSchema, AgentID: agent.ID, AgentName: agent.Name, CLI: cli,
+			Runtime: string(effective.Mode), RunID: opts.RunID, ManagedRunID: res.RunID,
+			State: "completed", Attempt: attempt, Workflow: res.WorkflowName,
+			Outcome: string(res.Outcome), Turns: len(res.Turns), DurationMs: duration,
+		}
+		if len(res.Turns) > 0 && res.Turns[len(res.Turns)-1].Reply != nil {
+			result.Reply = res.Turns[len(res.Turns)-1].Reply.Text
+		}
+		if opts.Persist {
+			result.ChatID = res.ChatID
+		}
+		if res.Err != nil {
+			code, state := 1, "failed"
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				code, state = 124, "timed_out"
+			}
+			result.State, result.ExitCode, result.Error = state, code, res.Err.Error()
+			return finishAndWriteAgentResult(c, opts, result, code)
+		}
+		result.OK = true
+		return finishAndWriteAgentResult(c, opts, result, 0)
+	}
+
+	chat, err := c.StartInteractiveChat(ctx, agent.ID, cli, folder)
+	if err != nil {
+		return finishAndWriteAgentFailure(c, opts, agent, cli, string(effective.Mode), attempt, 1, "failed", err.Error())
 	}
 	if !opts.Persist {
 		defer func() { _ = c.DeleteChat(context.Background(), chat.ID) }()
@@ -214,51 +358,434 @@ func runAgentPrompt(opts agentPromptOptions) int {
 	// Always persist the policy, including explicit Safe (empty). Otherwise an
 	// agent runtime's default_tools could silently widen a headless run.
 	if err := c.UpdateChatConfig(ctx, chat.ID, cli, model, tools); err != nil {
-		return writeAgentFailure(opts, 1, err.Error())
+		return finishAndWriteAgentFailure(c, opts, agent, cli, string(effective.Mode), attempt, 1, "failed", err.Error())
 	}
 	if endpoint != "" {
 		if err := c.UpdateChatSettings(ctx, chat.ID, func(s *core.ChatSettings) {
 			s.Model = ""
 			s.Local = &core.ChatLocalEndpoint{Endpoint: endpoint, Model: model}
 		}); err != nil {
-			return writeAgentFailure(opts, 1, err.Error())
+			return finishAndWriteAgentFailure(c, opts, agent, cli, string(effective.Mode), attempt, 1, "failed", err.Error())
 		}
 	}
-	effective, err := c.ResolveEffectiveAgentConfig(ctx, agent)
-	if err != nil {
-		return writeAgentFailure(opts, 1, err.Error())
-	}
 
-	started := time.Now()
 	var onEvent core.StreamHandler
 	if opts.Output == "jsonl" {
 		enc := json.NewEncoder(agentRunOutput)
 		onEvent = func(ev core.StreamEvent) {
 			_ = enc.Encode(agentRunEvent{
-				Schema: agentRunSchema, Type: "event", AgentID: agent.ID,
+				Schema: agentRunSchema, Type: "event", AgentID: agent.ID, RunID: opts.RunID,
 				EventType: ev.Type, Text: ev.Text, Tool: ev.Tool,
-				Detail: ev.Detail, OK: ev.OK,
+				Detail: ev.Detail, ID: ev.ID, OK: agentEventOK(ev.Type, ev.OK),
 			})
 		}
 	}
 	turn, err := c.ContinueChatStream(ctx, chat.ID, prompt, folder, core.AgentSystemPrompt(agent), nil, onEvent)
 	duration := time.Since(started).Milliseconds()
 	if err != nil {
-		code := 1
+		code, state := 1, "failed"
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			code = 124
+			code, state = 124, "timed_out"
 		}
-		return writeAgentFailureWithMeta(opts, code, agent, cli, string(effective.Mode), chat.ID, duration, err.Error())
+		result := agentRunResult{
+			Schema: agentRunSchema, AgentID: agent.ID, AgentName: agent.Name, CLI: cli,
+			Runtime: string(effective.Mode), RunID: opts.RunID, State: state, Attempt: attempt,
+			DurationMs: duration, ExitCode: code, Error: err.Error(),
+		}
+		if opts.Persist {
+			result.ChatID = chat.ID
+		}
+		return finishAndWriteAgentResult(c, opts, result, code)
 	}
 	result := agentRunResult{
 		Schema: agentRunSchema, OK: true, AgentID: agent.ID, AgentName: agent.Name,
-		CLI: cli, Runtime: string(effective.Mode), Reply: turn.Reply,
-		DurationMs: duration,
+		CLI: cli, Runtime: string(effective.Mode), RunID: opts.RunID,
+		State: "completed", Attempt: attempt, ManagedRunID: turn.ManagedRunID,
+		Reply: turn.Reply, DurationMs: duration,
 	}
 	if opts.Persist {
 		result.ChatID = chat.ID
 	}
-	return writeAgentResult(opts.Output, result)
+	return finishAndWriteAgentResult(c, opts, result, 0)
+}
+
+func agentEventOK(eventType string, ok bool) *bool {
+	switch eventType {
+	case "tool_end", "step_finish", "workflow_finish", "turn_finish", "error":
+		value := ok
+		return &value
+	default:
+		return nil
+	}
+}
+
+func newExternalRunID() (string, error) {
+	var suffix [8]byte
+	if _, err := rand.Read(suffix[:]); err != nil {
+		return "", fmt.Errorf("generate run ID: %w", err)
+	}
+	return fmt.Sprintf("run-%s-%x", time.Now().UTC().Format("20060102T150405"), suffix[:]), nil
+}
+
+func parseStrictInputs(values []string) (map[string]string, error) {
+	out := make(map[string]string, len(values))
+	for _, value := range values {
+		key, raw, ok := strings.Cut(value, "=")
+		key = strings.TrimSpace(key)
+		if !ok || key == "" {
+			return nil, fmt.Errorf("invalid --input %q; expected key=value", value)
+		}
+		if _, exists := out[key]; exists {
+			return nil, fmt.Errorf("duplicate --input key %q", key)
+		}
+		out[key] = strings.TrimSpace(raw)
+	}
+	return out, nil
+}
+
+func externalRunRequestHash(agentID, cli, folder, kind, prompt, workflow string, inputs map[string]string, model, endpoint, tools string, timeout time.Duration, persist, skipModelPreflight bool) (string, error) {
+	body := struct {
+		AgentID            string            `json:"agentId"`
+		CLI                string            `json:"cli"`
+		Folder             string            `json:"folder"`
+		Kind               string            `json:"kind"`
+		Prompt             string            `json:"prompt,omitempty"`
+		Workflow           string            `json:"workflow,omitempty"`
+		Inputs             map[string]string `json:"inputs,omitempty"`
+		Model              string            `json:"model,omitempty"`
+		Endpoint           string            `json:"endpoint,omitempty"`
+		Tools              string            `json:"tools,omitempty"`
+		TimeoutNanoseconds int64             `json:"timeoutNanoseconds"`
+		Persist            bool              `json:"persist"`
+		SkipModelPreflight bool              `json:"skipModelPreflight"`
+	}{
+		agentID, cli, folder, kind, prompt, workflow, inputs, model,
+		ollama.NormalizeEndpoint(endpoint), tools, int64(timeout), persist, skipModelPreflight,
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return "", fmt.Errorf("hash run request: %w", err)
+	}
+	sum := sha256.Sum256(raw)
+	return fmt.Sprintf("%x", sum[:]), nil
+}
+
+func localLLMAPIKey(ctx context.Context, c *core.Core) (string, error) {
+	raw, err := c.GetSetting(ctx, core.ScopeCLI, "local_llm.api_key")
+	if err != nil || len(raw) == 0 {
+		return "", err
+	}
+	var key string
+	if err := json.Unmarshal(raw, &key); err != nil {
+		return "", fmt.Errorf("decode local LLM API key: %w", err)
+	}
+	return strings.TrimSpace(key), nil
+}
+
+func requireLocalModel(ctx context.Context, c *core.Core, endpoint, model string) error {
+	key, err := localLLMAPIKey(ctx, c)
+	if err != nil {
+		return err
+	}
+	models, err := ollama.ListModels(ctx, ollama.NormalizeEndpoint(endpoint), key)
+	if err != nil {
+		return fmt.Errorf("list models: %w", err)
+	}
+	for _, candidate := range models {
+		if candidate == model {
+			return nil
+		}
+	}
+	return fmt.Errorf("model %q is not listed by the saved endpoint", model)
+}
+
+func replayExternalAgentRun(opts agentPromptOptions, run *core.ExternalAgentRun) int {
+	if run == nil {
+		return writeAgentFailure(opts, 1, "durable run state is unavailable")
+	}
+	if run.ResultJSON == "" {
+		return writeAgentFailure(opts, 1, fmt.Sprintf("run %q is %s; use --retry only after confirming no other process is executing it", run.ID, run.State))
+	}
+	var result agentRunResult
+	if err := json.Unmarshal([]byte(run.ResultJSON), &result); err != nil {
+		return writeAgentFailure(opts, 1, "decode cached run result: "+err.Error())
+	}
+	result.Cached = true
+	result.Attempt = run.Attempt
+	_ = writeAgentResult(opts.Output, result)
+	if result.ExitCode != 0 {
+		return result.ExitCode
+	}
+	if !result.OK {
+		return 1
+	}
+	return 0
+}
+
+func finishAndWriteAgentFailure(c *core.Core, opts agentPromptOptions, agent *core.Agent, cli, runtime string, attempt, code int, state, message string) int {
+	result := agentRunResult{
+		Schema: agentRunSchema, RunID: opts.RunID, AgentID: opts.AgentID, CLI: cli,
+		Runtime: runtime, State: state, Attempt: attempt, ExitCode: code, Error: message,
+	}
+	if agent != nil {
+		result.AgentID, result.AgentName = agent.ID, agent.Name
+	}
+	return finishAndWriteAgentResult(c, opts, result, code)
+}
+
+func finishAndWriteAgentResult(c *core.Core, opts agentPromptOptions, result agentRunResult, code int) int {
+	if opts.Durable && c != nil {
+		raw, err := json.Marshal(result)
+		if err != nil {
+			result.OK, result.State, result.ExitCode, result.Error = false, "failed", 1, "encode durable result: "+err.Error()
+			code = 1
+		} else if err := c.FinishExternalAgentRun(context.Background(), opts.RunID, result.Attempt, result.State, string(raw), result.Error); err != nil {
+			result.OK, result.State, result.ExitCode, result.Error = false, "failed", 1, "persist durable result: "+err.Error()
+			code = 1
+		}
+	}
+	_ = writeAgentResult(opts.Output, result)
+	return code
+}
+
+type agentStatusOptions struct {
+	RunID           string
+	Output          string
+	DBPasswordStdin bool
+}
+
+type agentStatusResult struct {
+	Schema      string          `json:"schema"`
+	OK          bool            `json:"ok"`
+	RunID       string          `json:"runId"`
+	State       string          `json:"state,omitempty"`
+	AgentID     string          `json:"agentId,omitempty"`
+	CLI         string          `json:"cli,omitempty"`
+	Runtime     string          `json:"runtime,omitempty"`
+	Kind        string          `json:"kind,omitempty"`
+	Attempt     int             `json:"attempt,omitempty"`
+	CreatedAt   string          `json:"createdAt,omitempty"`
+	UpdatedAt   string          `json:"updatedAt,omitempty"`
+	CompletedAt string          `json:"completedAt,omitempty"`
+	Result      json.RawMessage `json:"result,omitempty"`
+	Error       string          `json:"error,omitempty"`
+}
+
+func runAgentStatus(opts agentStatusOptions) int {
+	opts.Output = strings.ToLower(strings.TrimSpace(opts.Output))
+	if opts.Output == "" {
+		opts.Output = "json"
+	}
+	if opts.Output != "json" && opts.Output != "text" {
+		return writeStatusResult("json", agentStatusResult{Schema: "praimate.agent-run-status/v1", Error: "--output must be json or text"}, 2)
+	}
+	opts.RunID = strings.TrimSpace(opts.RunID)
+	if opts.RunID == "" {
+		return writeStatusResult(opts.Output, agentStatusResult{Schema: "praimate.agent-run-status/v1", Error: "agent status requires --run-id"}, 2)
+	}
+	c, cleanup, err := openAgentUtilityCore(opts.DBPasswordStdin)
+	if err != nil {
+		return writeStatusResult(opts.Output, agentStatusResult{Schema: "praimate.agent-run-status/v1", RunID: opts.RunID, Error: err.Error()}, 1)
+	}
+	defer cleanup()
+	run, err := c.GetExternalAgentRun(context.Background(), opts.RunID)
+	if err != nil {
+		return writeStatusResult(opts.Output, agentStatusResult{Schema: "praimate.agent-run-status/v1", RunID: opts.RunID, Error: err.Error()}, 1)
+	}
+	result := agentStatusResult{
+		Schema: "praimate.agent-run-status/v1", OK: true, RunID: run.ID, State: run.State,
+		AgentID: run.AgentID, CLI: run.CLI, Runtime: run.Runtime, Kind: run.Kind, Attempt: run.Attempt,
+		CreatedAt: run.CreatedAt.Format(time.RFC3339Nano), UpdatedAt: run.UpdatedAt.Format(time.RFC3339Nano),
+	}
+	if run.CompletedAt != nil {
+		result.CompletedAt = run.CompletedAt.Format(time.RFC3339Nano)
+	}
+	if run.ResultJSON != "" {
+		result.Result = json.RawMessage(run.ResultJSON)
+	}
+	result.Error = run.Error
+	return writeStatusResult(opts.Output, result, 0)
+}
+
+func writeStatusResult(output string, result agentStatusResult, code int) int {
+	if output == "text" {
+		if result.Error != "" && !result.OK {
+			fmt.Fprintln(agentRunError, "praimate:", result.Error)
+		} else {
+			fmt.Fprintf(agentRunOutput, "%s %s attempt=%d\n", result.RunID, result.State, result.Attempt)
+		}
+		return code
+	}
+	_ = json.NewEncoder(agentRunOutput).Encode(result)
+	return code
+}
+
+type modelCheckOptions struct {
+	CLI             string
+	Folder          string
+	Model           string
+	Endpoint        string
+	Output          string
+	Timeout         time.Duration
+	Probe           bool
+	DBPasswordStdin bool
+}
+
+type modelCheckResult struct {
+	Schema     string   `json:"schema"`
+	OK         bool     `json:"ok"`
+	Endpoint   string   `json:"endpoint,omitempty"`
+	Model      string   `json:"model,omitempty"`
+	Present    bool     `json:"present"`
+	Responding bool     `json:"responding,omitempty"`
+	CLI        string   `json:"cli,omitempty"`
+	Models     []string `json:"models,omitempty"`
+	DurationMs int64    `json:"durationMs"`
+	Error      string   `json:"error,omitempty"`
+}
+
+func runModelCheck(opts modelCheckOptions) int {
+	opts.Output = strings.ToLower(strings.TrimSpace(opts.Output))
+	if opts.Output == "" {
+		opts.Output = "json"
+	}
+	started := time.Now()
+	result := modelCheckResult{Schema: "praimate.model-check/v1", Model: strings.TrimSpace(opts.Model)}
+	write := func(code int, err error) int {
+		result.DurationMs = time.Since(started).Milliseconds()
+		if err != nil {
+			result.Error = err.Error()
+		} else {
+			result.OK = true
+		}
+		if opts.Output == "text" {
+			if err != nil {
+				fmt.Fprintln(agentRunError, "praimate:", err)
+			} else {
+				fmt.Fprintf(agentRunOutput, "%s present=%t responding=%t\n", result.Model, result.Present, result.Responding)
+			}
+		} else {
+			_ = json.NewEncoder(agentRunOutput).Encode(result)
+		}
+		return code
+	}
+	if opts.Output != "json" && opts.Output != "text" {
+		return write(2, errors.New("--output must be json or text"))
+	}
+	if result.Model == "" {
+		return write(2, errors.New("model check requires --model"))
+	}
+	endpoint, err := resolveAgentEndpoint(opts.Endpoint)
+	if err != nil {
+		return write(2, err)
+	}
+	if endpoint == "" {
+		return write(2, errors.New("model check requires --endpoint saved"))
+	}
+	result.Endpoint = endpoint
+	c, cleanup, err := openAgentUtilityCore(opts.DBPasswordStdin)
+	if err != nil {
+		return write(1, err)
+	}
+	defer cleanup()
+	ctx := context.Background()
+	if opts.Timeout < 0 {
+		return write(2, errors.New("--timeout cannot be negative"))
+	}
+	if opts.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, opts.Timeout)
+		defer cancel()
+	}
+	key, err := localLLMAPIKey(ctx, c)
+	if err != nil {
+		return write(1, err)
+	}
+	result.Models, err = ollama.ListModels(ctx, ollama.NormalizeEndpoint(endpoint), key)
+	if err != nil {
+		return write(1, fmt.Errorf("list models: %w", err))
+	}
+	for _, candidate := range result.Models {
+		result.Present = result.Present || candidate == result.Model
+	}
+	if !result.Present {
+		return write(1, fmt.Errorf("model %q is not listed by the saved endpoint", result.Model))
+	}
+	if opts.Probe {
+		folder := strings.TrimSpace(opts.Folder)
+		if folder == "" {
+			folder, err = os.Getwd()
+		} else {
+			folder, err = resolveAgentFolder(folder)
+		}
+		if err != nil {
+			return write(2, err)
+		}
+		cli := strings.TrimSpace(opts.CLI)
+		if cli == "" {
+			cli = "praimate-code"
+		}
+		result.CLI = cli
+		adapter, err := core.GetCLIAdapter(cli)
+		if err != nil {
+			return write(1, err)
+		}
+		if err := adapter.Available(ctx); err != nil {
+			return write(1, err)
+		}
+		cfg, err := c.ResolveExecutionConfig(ctx, core.ExecutionRequest{
+			Surface: core.SurfaceWorkflow, CLI: cli, Cwd: folder, ToolsConfigured: true,
+			Local: &core.ChatLocalEndpoint{Endpoint: endpoint, Model: result.Model},
+		})
+		if err != nil {
+			return write(1, err)
+		}
+		if err := c.PrepareExecution(ctx, cfg); err != nil {
+			return write(1, err)
+		}
+		reply, err := adapter.SingleShot(ctx, core.SingleShotOpts{
+			Cwd: folder, Message: "Reply exactly PRAIMATE_MODEL_READY", Model: cfg.Model, Tools: "", Env: cfg.Env,
+		})
+		if err != nil {
+			return write(1, err)
+		}
+		if reply.ExitCode != 0 {
+			return write(1, fmt.Errorf("%s exited with code %d: %s", cli, reply.ExitCode, reply.Text))
+		}
+		result.Responding = strings.TrimSpace(reply.Text) != ""
+		if !result.Responding {
+			return write(1, errors.New("model probe returned an empty response"))
+		}
+	}
+	return write(0, nil)
+}
+
+func openAgentUtilityCore(dbPasswordStdin bool) (*core.Core, func(), error) {
+	password := strings.TrimSpace(os.Getenv("PRAIMATE_DB_PASSWORD"))
+	_ = os.Unsetenv("PRAIMATE_DB_PASSWORD")
+	var err error
+	if dbPasswordStdin {
+		if agentRunTerminalAvailable() {
+			password, err = readAgentRunTerminalPassword()
+		} else {
+			password, err = readPasswordLine(agentRunInput)
+		}
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	c, cleanup, err := openAgentRunCore(password)
+	if err != nil && password == "" && errors.Is(err, store.ErrPasswordRequired) && agentRunTerminalAvailable() {
+		password, err = readAgentRunTerminalPassword()
+		if err == nil {
+			c, cleanup, err = openAgentRunCore(password)
+		}
+	}
+	password = ""
+	if errors.Is(err, store.ErrPasswordRequired) {
+		err = errors.New("database password required: enable Remember password, set PRAIMATE_DB_PASSWORD, or use --db-password-stdin")
+	}
+	return c, cleanup, err
 }
 
 func readAgentPrompt(opts agentPromptOptions) (string, error) {
@@ -375,16 +902,9 @@ func resolveAgentEndpoint(value string) (string, error) {
 }
 
 func writeAgentFailure(opts agentPromptOptions, code int, message string) int {
-	return writeAgentFailureWithMeta(opts, code, nil, opts.CLI, "", "", 0, message)
-}
-
-func writeAgentFailureWithMeta(opts agentPromptOptions, code int, agent *core.Agent, cli, runtime, chatID string, duration int64, message string) int {
-	result := agentRunResult{Schema: agentRunSchema, AgentID: opts.AgentID, CLI: cli, Runtime: runtime, DurationMs: duration, Error: message}
-	if agent != nil {
-		result.AgentID, result.AgentName = agent.ID, agent.Name
-	}
-	if opts.Persist {
-		result.ChatID = chatID
+	result := agentRunResult{
+		Schema: agentRunSchema, AgentID: opts.AgentID, CLI: opts.CLI,
+		RunID: opts.RunID, State: "failed", ExitCode: code, Error: message,
 	}
 	output := opts.Output
 	if output == "" {

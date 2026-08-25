@@ -391,6 +391,12 @@ The compact spelling below is equivalent:
 praimate --agent project-reviewer --cli praimate-code --folder /srv/source --prompt "Review this code"
 ```
 
+To execute a named workflow through the same machine API, use `--workflow` and
+repeat `--input key=value` for its declared inputs. `--run-id` enables encrypted
+status lookup and idempotent completed-result replay. The complete protocol,
+model preflight command, retry semantics, and Python capture example are in the
+[CLI agent API guide](CLI_AGENT_API.md).
+
 The default `--output json` writes exactly one
 `praimate.agent-run/v1` object to stdout. A successful result contains
 `ok`, `agentId`, `agentName`, `cli`, `runtime`, `reply`, and `durationMs`.
@@ -406,11 +412,14 @@ Useful options:
 | `--model NAME` | Pin a cloud model, or the model served by `--endpoint`. |
 | `--endpoint URL` | Use a local/OpenAI-compatible route; requires `--model` and loads its API key from encrypted settings. |
 | `--prompt-file PATH` | Read the prompt from a file; `-` means stdin. With no prompt flag, piped stdin is used automatically. |
+| `--workflow NAME` | Execute an exact named agent workflow instead of a prompt. |
+| `--input KEY=VALUE` | Supply one workflow input; repeat for multiple values. |
 | `--timeout 30m` | Cancel the run at the deadline; `0` disables it. Timeout exits with status 124. |
 | `--tools safe` | Default. Explicit read/answer-only policy, even when the agent manifest has a wider default. |
 | `--tools edits` | Permit declared project-file writes when the selected runtime/CLI can enforce that level; otherwise it degrades to Safe. |
 | `--tools full` | Approve every capability declared by the agent. Use only for a trusted agent and folder. |
 | `--persist` | Keep the backing chat and return `chatId`; otherwise the temporary chat/messages are deleted after the result. |
+| `--run-id ID` | Enable encrypted durable status and exact-request result replay. |
 
 For secure-storage unlock, the command first uses a password remembered in the
 OS credential store. If it is not remembered and stdin is a terminal, PrAImate

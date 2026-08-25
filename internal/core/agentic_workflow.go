@@ -55,6 +55,7 @@ func (c *Core) runManagedWorkflowSequence(ctx context.Context, cfg workflowRunCo
 		c.maybeEndChat(ctx, chatID, res.Outcome)
 		return res
 	}
+	res.RunID = managed.ID
 	final := redaction.Reveal(managed.Final)
 	reply := &Reply{Text: final, SessionID: managed.SessionID}
 	turn := TurnResult{

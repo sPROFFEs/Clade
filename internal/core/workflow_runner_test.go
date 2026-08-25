@@ -149,6 +149,31 @@ func TestRunWorkflow_PreservesExplicitPermissionLevel(t *testing.T) {
 	}
 }
 
+func TestRunWorkflow_ExplicitSafeDoesNotInheritAgentDefaultTools(t *testing.T) {
+	t.Setenv("PRAIMATE_HOME", t.TempDir())
+	mock := &mockAdapter{name: "safe-workflow", replies: []string{"ok"}}
+	withMockAdapter(t, mock)
+	c, _ := New(Options{Store: openTempStore(t)})
+	agent := &Agent{ID: "safe-agent", Name: "Safe", Instructions: "x", Supports: []string{mock.name}, Workflows: []Workflow{{
+		Name: "go", Steps: []WorkflowStep{{Kind: StepUserMessage, Template: "inspect"}},
+	}}}
+	if err := SaveAgentRuntime(agent.ID, &AgentRuntimeManifest{
+		Schema: AgentRuntimeSchema, Mode: RuntimeNative,
+		Permissions: AgentRuntimePermissions{DefaultTools: "edits"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	res := c.RunWorkflow(context.Background(), RunOptions{
+		Agent: agent, WorkflowName: "go", CLI: mock.name, Cwd: t.TempDir(), Tools: "",
+	})
+	if res.Err != nil {
+		t.Fatal(res.Err)
+	}
+	if got := mock.shots[0].Tools; got != "" {
+		t.Fatalf("explicit workflow Safe inherited %q", got)
+	}
+}
+
 func TestRunWorkflow_PersistOptionSavesChat(t *testing.T) {
 	mock := &mockAdapter{name: "mockcli", replies: []string{"reply text content"}}
 	withMockAdapter(t, mock)
