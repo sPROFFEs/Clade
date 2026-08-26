@@ -5,8 +5,50 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"git.jtsec.local/lab/PrAImate/internal/launcher"
 )
+
+func TestResolveExecutionConfigRejectsClaudeLocalRouting(t *testing.T) {
+	c, _ := New(Options{Store: openTempStore(t)})
+	if CapabilitiesForCLI("claude").LocalRouting {
+		t.Fatal("Claude Code must not advertise local routing")
+	}
+	_, err := c.ResolveExecutionConfig(context.Background(), ExecutionRequest{
+		Surface: SurfaceChat, CLI: "claude", Cwd: t.TempDir(),
+		Local: &ChatLocalEndpoint{Endpoint: "http://127.0.0.1:11434", Model: "qwen3"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "OpenClaude") {
+		t.Fatalf("Claude local routing error = %v, want OpenClaude migration guidance", err)
+	}
+}
+
+func TestResolveExecutionConfigRestoresSavedOpenClaudeTokenLimits(t *testing.T) {
+	t.Setenv("PRAIMATE_HOME", t.TempDir())
+	if err := launcher.SaveConfig(&launcher.Config{
+		DefaultLocalEndpoint:      "https://llm.example/v1",
+		DefaultLocalContextTokens: 32768,
+		DefaultLocalOutputTokens:  4096,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	c, _ := New(Options{Store: openTempStore(t)})
+	cfg, err := c.ResolveExecutionConfig(context.Background(), ExecutionRequest{
+		Surface: SurfaceChat, CLI: "openclaude", Cwd: t.TempDir(),
+		Local: &ChatLocalEndpoint{Endpoint: "https://llm.example/v1", Model: "qwen3"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(cfg.Env["CLAUDE_CODE_OPENAI_CONTEXT_WINDOWS"], `"qwen3":32768`) {
+		t.Fatalf("context limits = %q", cfg.Env["CLAUDE_CODE_OPENAI_CONTEXT_WINDOWS"])
+	}
+	if !strings.Contains(cfg.Env["CLAUDE_CODE_OPENAI_MAX_OUTPUT_TOKENS"], `"qwen3":4096`) {
+		t.Fatalf("output limits = %q", cfg.Env["CLAUDE_CODE_OPENAI_MAX_OUTPUT_TOKENS"])
+	}
+}
 
 func TestResolveExecutionConfigLocalRouteIsSurfaceIndependent(t *testing.T) {
 	c, err := New(Options{Store: openTempStore(t)})
@@ -63,7 +105,7 @@ func TestPreflightWarnsOnlyForRemotePlaintextHTTP(t *testing.T) {
 		{"https://llm.example", false},
 	} {
 		cfg, err := c.ResolveExecutionConfig(context.Background(), ExecutionRequest{
-			Surface: SurfaceChat, CLI: "claude", Cwd: t.TempDir(),
+			Surface: SurfaceChat, CLI: "openclaude", Cwd: t.TempDir(),
 			Local: &ChatLocalEndpoint{Endpoint: tc.endpoint, Model: "qwen3"},
 		})
 		if err != nil {

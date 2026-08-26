@@ -103,42 +103,22 @@ func TestListModels_DoesNotDuplicateSavedV1(t *testing.T) {
 	}
 }
 
-func TestClaudeEnv(t *testing.T) {
-	env := ClaudeEnv(Settings{Endpoint: "192.168.1.10:11434", Model: "qwen"})
-	if env["ANTHROPIC_BASE_URL"] != "http://192.168.1.10:11434" {
-		t.Errorf("ANTHROPIC_BASE_URL = %q", env["ANTHROPIC_BASE_URL"])
-	}
-	if env["ANTHROPIC_AUTH_TOKEN"] != "ollama" {
-		t.Error("ANTHROPIC_AUTH_TOKEN not set")
-	}
-	if env["OPENAI_API_KEY"] != "ollama" {
-		t.Error("OPENAI_API_KEY not set")
-	}
-}
-
-func TestClaudeEnv_EmptyOnIncomplete(t *testing.T) {
-	if e := ClaudeEnv(Settings{}); e != nil {
-		t.Errorf("expected nil for empty settings, got %v", e)
-	}
-}
-
-func TestClaudeEnv_UsesAPIKeyWhenSet(t *testing.T) {
-	env := ClaudeEnv(Settings{Endpoint: "h:1", Model: "m", APIKey: "sk-gpustack-xyz"})
-	if env["ANTHROPIC_AUTH_TOKEN"] != "sk-gpustack-xyz" {
-		t.Errorf("ANTHROPIC_AUTH_TOKEN = %q, want sk-gpustack-xyz", env["ANTHROPIC_AUTH_TOKEN"])
-	}
-	if env["OPENAI_API_KEY"] != "sk-gpustack-xyz" {
-		t.Errorf("OPENAI_API_KEY = %q, want sk-gpustack-xyz", env["OPENAI_API_KEY"])
-	}
-}
-
 func TestOpenClaudeEnvUsesOpenAICompatibleRoute(t *testing.T) {
-	env := OpenClaudeEnv(Settings{Endpoint: "https://llm.example/v1/", Model: "qwen3", APIKey: "secret"})
+	env := OpenClaudeEnv(Settings{
+		Endpoint: "https://llm.example/v1/", Model: "qwen3", APIKey: "secret",
+		ContextTokens: 4096, OutputTokens: 1024,
+	})
 	if env["CLAUDE_CODE_USE_OPENAI"] != "1" || env["OPENAI_MODEL"] != "qwen3" {
 		t.Fatalf("OpenClaude mode variables = %#v", env)
 	}
 	if env["OPENAI_BASE_URL"] != "https://llm.example/v1" || env["OPENAI_API_KEY"] != "secret" {
 		t.Fatalf("OpenClaude route variables = %#v", env)
+	}
+	if !strings.Contains(env["CLAUDE_CODE_OPENAI_CONTEXT_WINDOWS"], `"qwen3":4096`) {
+		t.Fatalf("OpenClaude context limit = %q", env["CLAUDE_CODE_OPENAI_CONTEXT_WINDOWS"])
+	}
+	if !strings.Contains(env["CLAUDE_CODE_OPENAI_MAX_OUTPUT_TOKENS"], `"qwen3":1024`) {
+		t.Fatalf("OpenClaude output limit = %q", env["CLAUDE_CODE_OPENAI_MAX_OUTPUT_TOKENS"])
 	}
 }
 

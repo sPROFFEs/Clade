@@ -248,6 +248,11 @@ func runAgentPrompt(opts agentPromptOptions) int {
 		}
 		cli = agent.Supports[0]
 	}
+	if endpoint != "" {
+		if err := core.ValidateLocalRoutingCLI(cli); err != nil {
+			return writeAgentFailure(opts, 1, err.Error())
+		}
+	}
 
 	// Managed tools fail closed unless the caller explicitly selected an
 	// automation policy. "edits" approves only project writes; "full"

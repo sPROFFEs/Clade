@@ -71,7 +71,7 @@ func TestPrepareSandbox_CompilesClaudeTarget(t *testing.T) {
 	}
 }
 
-func TestPlan_AppendsModelArgForClaudeWhenOllamaConfigured(t *testing.T) {
+func TestPlan_RejectsClaudeWhenOllamaConfigured(t *testing.T) {
 	chat := chatFromSeededReversing(t)
 	chat.Settings = WorkspaceSettings{
 		Ollama: OllamaSettings{Endpoint: "http://10.0.0.1:11434", Model: "qwen3"},
@@ -82,16 +82,9 @@ func TestPlan_AppendsModelArgForClaudeWhenOllamaConfigured(t *testing.T) {
 	loaded, _ := LoadChat(filepath.Dir(filepath.Dir(chat.Root)), chat.ID)
 	ws := loaded.AsWorkspace()
 	agent := Agent{ID: AgentClaude, Binary: "claude", WpcTarget: "claude", Available: true}
-	plan, err := Plan(ws, agent)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := []string{"--model", "qwen3"}
-	if !equalStrings(plan.Args, want) {
-		t.Errorf("Args = %v, want %v", plan.Args, want)
-	}
-	if plan.Env["ANTHROPIC_BASE_URL"] != "http://10.0.0.1:11434" {
-		t.Errorf("ANTHROPIC_BASE_URL = %q", plan.Env["ANTHROPIC_BASE_URL"])
+	_, err := Plan(ws, agent)
+	if err == nil || !strings.Contains(err.Error(), "OpenClaude") {
+		t.Fatalf("Claude local routing error = %v, want OpenClaude migration guidance", err)
 	}
 }
 

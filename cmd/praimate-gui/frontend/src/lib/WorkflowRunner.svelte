@@ -2,6 +2,7 @@
   import { createEventDispatcher, onDestroy, onMount } from 'svelte'
   import { api, onTurn, onWorkflowStream, onChatStream } from './api.js'
   import { renderMarkdown } from './markdown.js'
+  import { localRoutingUnavailableMessage, supportsLocalRouting } from './localRouting.js'
 
   export let agent
   export let localOpt = null
@@ -35,7 +36,7 @@
   let unsubscribe = () => {}
   let unsubscribeWorkflow = () => {}
   let unsubscribeRunChat = () => {}
-  $: runLocalRoutable = ['claude', 'openclaude', 'opencode', 'praimate-code'].includes(cli)
+  $: runLocalRoutable = supportsLocalRouting(cli)
 
   onMount(() => {
     init(agent)
@@ -437,7 +438,7 @@
           <span>Use the local LLM from Settings <span class="card-sub mono">{runLocalOpt.endpoint}</span></span>
         </label>
       {:else if runLocalOpt?.configured}
-        <div class="card-sub" style="margin-top:10px">{cli} cannot use a PrAImate-managed local route.</div>
+        <div class="card-sub" style="margin-top:10px">{localRoutingUnavailableMessage(cli)}</div>
       {/if}
       {#if preflight?.issues?.length}
         {#each preflight.issues as issue}

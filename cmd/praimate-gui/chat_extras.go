@@ -87,6 +87,11 @@ func (a *App) UpdateChatConfig(chatID, cli, model, tools, localEndpoint, _ strin
 	default:
 		return fmt.Errorf("unknown tools level %q", tools)
 	}
+	if strings.TrimSpace(localEndpoint) != "" {
+		if err := core.ValidateLocalRoutingCLI(cli); err != nil {
+			return err
+		}
+	}
 	c, err := a.requireCore()
 	if err != nil {
 		return err

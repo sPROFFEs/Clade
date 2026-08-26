@@ -17,6 +17,7 @@ import (
 	"slices"
 	"strings"
 
+	"git.jtsec.local/lab/PrAImate/internal/launcher"
 	"git.jtsec.local/lab/PrAImate/internal/ollama"
 )
 
@@ -106,7 +107,13 @@ type EffectiveExecutionConfig struct {
 func CapabilitiesForCLI(cli string) CLICapabilities {
 	cap := CLICapabilities{CLI: cli, ToolLevels: []string{""}}
 	switch cli {
-	case "claude", "openclaude":
+	case "claude":
+		cap.Streaming = true
+		cap.Resume = true
+		cap.MCP = true
+		cap.ManagedApproval = true
+		cap.ToolLevels = []string{"", "ask", "edits", "full"}
+	case "openclaude":
 		cap.Streaming = true
 		cap.Resume = true
 		cap.MCP = true
@@ -133,6 +140,20 @@ func CapabilitiesForCLI(cli string) CLICapabilities {
 		}
 	}
 	return cap
+}
+
+// ValidateLocalRoutingCLI enforces the product support boundary before any
+// chat or project state is written. Claude Code deliberately stays on its
+// supported Anthropic transport; OpenClaude owns Claude-style local routing.
+func ValidateLocalRoutingCLI(cli string) error {
+	cli = strings.TrimSpace(cli)
+	if CapabilitiesForCLI(cli).LocalRouting {
+		return nil
+	}
+	if cli == "claude" {
+		return errors.New("Claude Code local-LLM routing is not supported; choose OpenClaude for local OpenAI-compatible models, or clear the local endpoint to use Claude Code with Anthropic")
+	}
+	return fmt.Errorf("%s local-LLM routing is not supported by PrAImate", cli)
 }
 
 func (c *Core) ResolveExecutionConfig(ctx context.Context, req ExecutionRequest) (*EffectiveExecutionConfig, error) {
@@ -199,8 +220,8 @@ func (c *Core) ResolveExecutionConfig(ctx context.Context, req ExecutionRequest)
 	}
 
 	if req.Local != nil && strings.TrimSpace(req.Local.Endpoint) != "" {
-		if !cap.LocalRouting {
-			return nil, fmt.Errorf("%s local-LLM routing is not supported by PrAImate", req.CLI)
+		if err := ValidateLocalRoutingCLI(req.CLI); err != nil {
+			return nil, err
 		}
 		local := *req.Local
 		local.Endpoint = ollama.NormalizeEndpoint(local.Endpoint)
@@ -219,11 +240,25 @@ func (c *Core) ResolveExecutionConfig(ctx context.Context, req ExecutionRequest)
 			}
 			local.APIKey = key
 		}
-		settings := ollama.Settings{Endpoint: local.Endpoint, Model: local.Model, APIKey: local.APIKey}
+		settings := ollama.Settings{
+			Endpoint: local.Endpoint, Model: local.Model, APIKey: local.APIKey,
+			ContextTokens: local.ContextTokens, OutputTokens: local.OutputTokens,
+		}
+		// Older GUI chats predate per-chat token hints. For the saved endpoint,
+		// inherit the global defaults without rewriting the chat row.
+		if req.CLI == "openclaude" && settings.ContextTokens == 0 && settings.OutputTokens == 0 {
+			global, err := launcher.LoadConfig()
+			if err != nil {
+				return nil, fmt.Errorf("load local LLM token limits: %w", err)
+			}
+			if global != nil && ollama.NormalizeEndpoint(global.DefaultLocalEndpoint) == local.Endpoint {
+				settings.ContextTokens = global.DefaultLocalContextTokens
+				settings.OutputTokens = global.DefaultLocalOutputTokens
+				local.ContextTokens = settings.ContextTokens
+				local.OutputTokens = settings.OutputTokens
+			}
+		}
 		switch req.CLI {
-		case "claude":
-			out.Model = local.Model
-			out.Env = ollama.ClaudeEnv(settings)
 		case "openclaude":
 			out.Model = local.Model
 			out.Env = ollama.OpenClaudeEnv(settings)

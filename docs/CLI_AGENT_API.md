@@ -49,8 +49,9 @@ praimate agent run \
 URL is accepted only when it matches that saved endpoint. This prevents a
 headless caller from redirecting the encrypted API key to another server. The
 key is loaded from encrypted settings and is deliberately not accepted in
-argv. Local routing is available for Claude, OpenClaude, OpenCode, and PrAImate
-Code. Codex local routing remains unsupported.
+argv. Local routing is available for OpenClaude, OpenCode, and PrAImate Code.
+Claude Code stays on Anthropic routing, and Codex local routing remains
+unsupported. A Claude-style local run must select `--cli openclaude`.
 
 Local runs perform an authenticated model-list preflight before launching the
 CLI. This catches unloaded, renamed, and unauthorized models without starting

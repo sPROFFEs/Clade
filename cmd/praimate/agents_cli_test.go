@@ -80,7 +80,7 @@ type agentPromptTestAdapter struct {
 	expectedToken string
 }
 
-func (agentPromptTestAdapter) Name() string                    { return "claude" }
+func (agentPromptTestAdapter) Name() string                    { return "openclaude" }
 func (agentPromptTestAdapter) Available(context.Context) error { return nil }
 func (agentPromptTestAdapter) SupportsResume() bool            { return false }
 func (agentPromptTestAdapter) Resume(context.Context, string, core.ResumeOpts) (*core.Reply, error) {
@@ -93,11 +93,11 @@ func (a agentPromptTestAdapter) SingleShot(_ context.Context, opts core.SingleSh
 	if opts.Model != a.expectedModel {
 		a.t.Fatalf("model = %q, want %q", opts.Model, a.expectedModel)
 	}
-	if opts.Env["ANTHROPIC_BASE_URL"] != a.expectedURL {
-		a.t.Fatalf("endpoint = %q, want %q", opts.Env["ANTHROPIC_BASE_URL"], a.expectedURL)
+	if opts.Env["OPENAI_BASE_URL"] != a.expectedURL {
+		a.t.Fatalf("endpoint = %q, want %q", opts.Env["OPENAI_BASE_URL"], a.expectedURL)
 	}
-	if opts.Env["ANTHROPIC_AUTH_TOKEN"] != a.expectedToken {
-		a.t.Fatalf("endpoint token = %q, want encrypted setting", opts.Env["ANTHROPIC_AUTH_TOKEN"])
+	if opts.Env["OPENAI_API_KEY"] != a.expectedToken {
+		a.t.Fatalf("endpoint token = %q, want encrypted setting", opts.Env["OPENAI_API_KEY"])
 	}
 	return &core.Reply{Text: "reviewed: " + opts.Message, ExitCode: 0}, nil
 }
@@ -126,7 +126,7 @@ id: dev-team
 name: Dev Team
 description: Reviews code
 instructions: Review carefully.
-supports: [codex, claude]
+supports: [codex, claude, openclaude]
 tools: []
 mcp_servers: []
 workflows: []
@@ -143,7 +143,7 @@ surfaces: [chat]
 	core.RegisterCLIAdapter(agentPromptTestAdapter{
 		t: t, expectedModel: "qwen3-coder", expectedURL: "https://llm.example/v1", expectedToken: "db-secret",
 	})
-	t.Cleanup(func() { core.RegisterCLIAdapter(core.NewClaudeAdapter()) })
+	t.Cleanup(func() { core.RegisterCLIAdapter(core.NewOpenClaudeAdapter()) })
 
 	oldOpen, oldInput, oldOutput, oldError := openAgentRunCore, agentRunInput, agentRunOutput, agentRunError
 	oldReadPassword, oldTerminalAvailable := readAgentRunTerminalPassword, agentRunTerminalAvailable
@@ -171,7 +171,7 @@ surfaces: [chat]
 
 	code := runAgentPrompt(agentPromptOptions{
 		AgentID: "dev-team", Folder: root, Prompt: "review this code",
-		CLI: "claude", Model: "qwen3-coder", Endpoint: "saved",
+		CLI: "openclaude", Model: "qwen3-coder", Endpoint: "saved",
 		Output: "json", Tools: "safe", SkipModelPreflight: true,
 	})
 	if code != 0 {
@@ -181,7 +181,7 @@ surfaces: [chat]
 	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
 		t.Fatalf("invalid JSON: %v\n%s", err, stdout.String())
 	}
-	if !got.OK || got.Schema != agentRunSchema || got.AgentID != "dev-team" || got.CLI != "claude" || got.Reply != "reviewed: review this code" {
+	if !got.OK || got.Schema != agentRunSchema || got.AgentID != "dev-team" || got.CLI != "openclaude" || got.Reply != "reviewed: review this code" {
 		t.Fatalf("unexpected result: %#v", got)
 	}
 	if got.ChatID != "" {
@@ -196,6 +196,24 @@ surfaces: [chat]
 	}
 	if len(openPasswords) != 2 || openPasswords[0] != "" || openPasswords[1] != "correct horse battery staple" {
 		t.Fatalf("database open passwords = %#v, want remembered lookup then hidden terminal password", openPasswords)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = runAgentPrompt(agentPromptOptions{
+		AgentID: "dev-team", Folder: root, Prompt: "review this code",
+		CLI: "claude", Model: "qwen3-coder", Endpoint: "saved",
+		Output: "json", Tools: "safe", SkipModelPreflight: true,
+	})
+	if code != 1 {
+		t.Fatalf("Claude local exit = %d, stderr=%q stdout=%q", code, stderr.String(), stdout.String())
+	}
+	var rejected agentRunResult
+	if err := json.Unmarshal(stdout.Bytes(), &rejected); err != nil {
+		t.Fatalf("invalid rejection JSON: %v\n%s", err, stdout.String())
+	}
+	if rejected.OK || !strings.Contains(rejected.Error, "OpenClaude") {
+		t.Fatalf("Claude local rejection = %#v", rejected)
 	}
 }
 

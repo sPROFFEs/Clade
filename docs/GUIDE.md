@@ -358,7 +358,8 @@ obtain HTTPS.
 
 | CLI | Configuration |
 |---|---|
-| Claude/OpenClaude | Per-launch environment variables and selected model. |
+| Claude Code | Anthropic connection only; PrAImate does not inject local endpoints. |
+| OpenClaude | Per-launch OpenAI-compatible environment variables, model, and token limits. |
 | OpenCode/PrAImate Code | Provider configuration references `OPENAI_API_KEY`; PrAImate supplies the secret at launch. |
 | Codex | Not routed by PrAImate; Codex retains its own provider and authentication configuration. |
 

@@ -217,7 +217,7 @@ type LaunchPlan struct {
 	Args    []string
 	Dir     string
 	// Env, if non-empty, is merged on top of os.Environ() when spawning
-	// the agent. Used for Claude + Ollama: ANTHROPIC_BASE_URL, etc.
+	// the agent. Used for supported local routes and protected credentials.
 	Env map[string]string
 }
 
@@ -226,11 +226,9 @@ type LaunchPlan struct {
 // surfaces inside the UI), then quit the Bubble Tea program, then exec
 // the plan from main() while the terminal is no longer being driven.
 //
-// If the workspace has Ollama settings AND the picked agent is Claude,
-// Plan auto-injects the ANTHROPIC_* env vars so Claude routes to the
-// local endpoint instead of Anthropic. Codex and OpenCode get their
-// routing from their own config files (written via the Ollama screen);
-// the launcher doesn't override their env.
+// Local routing is supported only for agents whose upstream transport
+// accepts OpenAI-compatible endpoints. Claude Code remains on Anthropic;
+// OpenClaude is the supported Claude-style local route.
 func Plan(ws Workspace, agent Agent) (LaunchPlan, error) {
 	// Clear per-launch globals so a partial run on a prior chat
 	// doesn't leak state into this one.
@@ -268,24 +266,15 @@ func Plan(ws Workspace, agent Agent) (LaunchPlan, error) {
 	switch agent.ID {
 	case AgentClaude:
 		if ollamaConfigured && o.HasAgent(AgentClaude) {
-			plan.Env = map[string]string{
-				"ANTHROPIC_AUTH_TOKEN": authToken,
-				"ANTHROPIC_API_KEY":    "",
-				"ANTHROPIC_BASE_URL":   o.Endpoint,
-				"OPENAI_API_KEY":       authToken,
-			}
-			// Without --model Claude sends its default model name to
-			// the local proxy, which doesn't have it → request fails.
-			plan.Args = []string{"--model", o.Model}
+			return LaunchPlan{}, errors.New("Claude Code local-LLM routing is not supported; choose OpenClaude for local OpenAI-compatible models, or remove Claude from this chat's local route")
 		}
 	case AgentOpenClaude:
 		if ollamaConfigured && o.HasAgent(AgentOpenClaude) {
 			// OpenClaude exposes the OpenAI-compatible code path via
 			// CLAUDE_CODE_USE_OPENAI=1. Endpoint + key + model travel
 			// through both ~/.openclaude/.openclaude-profile.json and the
-			// OPENAI_* env block. OpenClaude expects the OpenAI-compatible
-			// base URL to include /v1, unlike Claude's ANTHROPIC_BASE_URL
-			// path above.
+			// OPENAI_* env block. OpenClaude expects its OpenAI-compatible
+			// base URL to include /v1.
 			openAIBaseURL := openAICompatibleBaseURL(o.Endpoint)
 			if err := writeOpenClaudeLocalProfile(o, authToken); err != nil {
 				return LaunchPlan{}, fmt.Errorf("openclaude local profile: %w", err)

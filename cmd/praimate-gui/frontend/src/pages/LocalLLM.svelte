@@ -59,8 +59,8 @@
     notice = 'Cleared the saved endpoint.'
   }
 
-  // Claude/OpenClaude route per launch. OpenCode and PrAImate Code share
-  // one managed provider block in opencode.json.
+  // OpenClaude routes per launch. OpenCode and PrAImate Code share one
+  // managed provider block in opencode.json. Claude Code stays on Anthropic.
   let cliStatus = { opencode: false }
   let applyModel = ''
   let applyBusy = ''
@@ -192,7 +192,7 @@
 
 <h1 style="font-size:16px; margin-top:24px">Route CLIs to the local model</h1>
 <p class="subtitle" style="margin-top:-6px">
-  <strong>claude</strong> and <strong>openclaude</strong> route by environment — just tick “Use the local LLM” when you start a chat/code/studio session, no setup here.
+  <strong>openclaude</strong> routes by environment — tick “Use the local LLM” when you start a chat/code/studio session. Claude Code stays on its supported Anthropic connection; use OpenClaude for Claude-style local agents.
   <strong>opencode / praimate-code</strong> share a managed provider in their config file. Codex keeps its own normal provider configuration and is not modified by PrAImate.
 </p>
 <div class="card">

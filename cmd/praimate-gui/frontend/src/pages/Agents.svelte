@@ -9,6 +9,7 @@
   import { activePage, pageRevision, openChatId, pendingTerm, agentStudio } from '../lib/stores.js'
   import CodeEditor from '../lib/CodeEditor.svelte'
   import WorkflowRunner from '../lib/WorkflowRunner.svelte'
+  import { LOCAL_ROUTABLE_CLIS, localRoutingUnavailableMessage, supportsLocalRouting } from '../lib/localRouting.js'
 
   let agents = []
   let runtimeModes = {}
@@ -84,11 +85,8 @@
   let dlg = null
   let allClis = []
   let localOpt = null // { configured, endpoint, hasApiKey, models[], error }
-  // The shared execution resolver supports local routing on every surface for
-  // these CLIs. Codex local routing is intentionally unsupported.
-  const LOCAL_ROUTABLE_CLIS = ['claude', 'openclaude', 'opencode', 'praimate-code']
   function isLocalRoutable(cli) {
-    return LOCAL_ROUTABLE_CLIS.includes(cli)
+    return supportsLocalRouting(cli)
   }
   $: dlgLocalRoutable = !!dlg && isLocalRoutable(dlg.cli)
 
@@ -599,7 +597,7 @@
           <span>Use the local LLM from Settings <span class="card-sub mono">{localOpt.endpoint}</span></span>
         </label>
       {:else if localOpt?.configured}
-        <div class="card-sub" style="margin-top:10px">{dlg.cli} can't use a PrAImate-managed local route.</div>
+        <div class="card-sub" style="margin-top:10px">{localRoutingUnavailableMessage(dlg.cli)}</div>
       {/if}
 
       {#if dlg.useLocal && localOpt?.configured && dlgLocalRoutable}

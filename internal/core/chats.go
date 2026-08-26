@@ -88,8 +88,8 @@ type ChatSettings struct {
 
 	// Local, if set, routes this chat through a self-hosted
 	// OpenAI-compatible endpoint instead of the CLI's cloud backend —
-	// resolved at launch for Claude, OpenClaude, OpenCode, and PrAImate
-	// Code. Codex local routing is deliberately unsupported.
+	// resolved at launch for OpenClaude, OpenCode, and PrAImate Code.
+	// Claude Code and Codex local routing are deliberately unsupported.
 	Local *ChatLocalEndpoint `json:"local,omitempty"`
 }
 
@@ -100,7 +100,9 @@ type ChatLocalEndpoint struct {
 	// Model is the backend model name at the endpoint (e.g.
 	// "qwen3-coder"). Used as the chat's model when no explicit model
 	// pin is set.
-	Model string `json:"model,omitempty"`
+	Model         string `json:"model,omitempty"`
+	ContextTokens int    `json:"context_tokens,omitempty"`
+	OutputTokens  int    `json:"output_tokens,omitempty"`
 }
 
 // Message is one stored turn. Role is "user" | "assistant" | "tool" |

@@ -6,6 +6,7 @@
   import { api } from '../lib/api.js'
   import SkillsPicker from '../lib/SkillsPicker.svelte'
   import { term, onTermData, onTermExit, decodeBase64Bytes } from '../lib/terminal.js'
+  import { localRoutingUnavailableMessage, supportsLocalRouting } from '../lib/localRouting.js'
   import { pendingTerm } from '../lib/stores.js'
   import { get } from 'svelte/store'
 
@@ -44,10 +45,8 @@
   let localOpt = null // { configured, endpoint, hasApiKey, models[], error }
   let useLocal = false
   let localModel = ''
-  // The shared Go execution resolver applies local routing for these CLIs.
-  // Codex local routing is deliberately unsupported.
-  const LOCAL_ROUTABLE = ['claude', 'openclaude', 'opencode', 'praimate-code']
-  $: localRoutable = LOCAL_ROUTABLE.includes(cli)
+  $: localRoutable = supportsLocalRouting(cli)
+  $: if (!localRoutable && useLocal) useLocal = false
 
   async function loadModels() {
     const seq = ++modelLoadSeq
@@ -453,14 +452,13 @@
           <option value={c.id} disabled={!c.available}>{c.label || c.id}{c.available ? '' : ' — not installed'}</option>
         {/each}
       </select>
-      {#if localOpt?.configured}
+      {#if localOpt?.configured && localRoutable}
         <label class="row" style="margin-top:12px; gap:8px; cursor:pointer">
-          <input type="checkbox" bind:checked={useLocal} disabled={!localRoutable} />
+          <input type="checkbox" bind:checked={useLocal} />
           <span>Use the local LLM from Settings <span class="card-sub mono">{localOpt.endpoint}</span></span>
         </label>
-        {#if useLocal && !localRoutable}
-          <div class="card-sub" style="color: var(--warn)">{cli} local-LLM routing is not supported by PrAImate.</div>
-        {/if}
+      {:else if localOpt?.configured}
+        <div class="card-sub" style="margin-top:10px">{localRoutingUnavailableMessage(cli)}</div>
       {/if}
 
       {#if useLocal && localOpt?.configured && localRoutable}

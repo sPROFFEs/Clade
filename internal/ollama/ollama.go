@@ -1,9 +1,5 @@
-// Package ollama configures the supported agent CLIs to talk to an
-// OpenAI-compatible Ollama endpoint. Ports the ollama-local-ai-toggle.*
-// scripts to Go, with one notable difference: Claude is configured per
-// launch (env injected by the launcher when it spawns the agent) instead
-// of by mutating the user's shell rc — keeps the launcher's effects
-// contained.
+// Package ollama configures supported agent CLIs to talk to an
+// OpenAI-compatible local endpoint.
 package ollama
 
 import (
@@ -14,6 +10,7 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -21,7 +18,7 @@ import (
 	"time"
 )
 
-// Settings is what the TUI hands to Apply / ClaudeEnv. Stored as a JSON
+// Settings is what callers hand to local-route configuration. Stored as a JSON
 // blob on the workspace (workspace.json's ollama field) so the choice
 // follows the workspace, not the user's shell.
 //
@@ -164,32 +161,6 @@ func tryOpenAIModels(ctx context.Context, cli *http.Client, endpoint, apiKey str
 	return out, nil
 }
 
-// ClaudeEnv returns the env vars the launcher should set when spawning
-// Claude Code so it routes to the local endpoint instead of Anthropic.
-// Empty Settings returns an empty map (no env applied).
-//
-// When s.APIKey is set, it's used as the Bearer token for both Anthropic-
-// and OpenAI-shaped requests; that covers GPUStack and any other gated
-// OpenAI-compatible backend. When empty, we fall back to the literal
-// "ollama" — vanilla Ollama accepts (and ignores) any token, so this
-// keeps the no-auth path unchanged.
-func ClaudeEnv(s Settings) map[string]string {
-	if s.Endpoint == "" || s.Model == "" {
-		return nil
-	}
-	ep := NormalizeEndpoint(s.Endpoint)
-	token := s.APIKey
-	if token == "" {
-		token = "ollama"
-	}
-	return map[string]string{
-		"ANTHROPIC_AUTH_TOKEN": token,
-		"ANTHROPIC_API_KEY":    "",
-		"ANTHROPIC_BASE_URL":   ep,
-		"OPENAI_API_KEY":       token,
-	}
-}
-
 // OpenClaudeEnv returns the OpenAI-compatible environment expected by
 // OpenClaude. Unlike Claude Code, OpenClaude does not speak the Anthropic
 // protocol when routed to a local backend.
@@ -200,7 +171,28 @@ func OpenClaudeEnv(s Settings) map[string]string {
 	env := OpenAIEnv(s)
 	env["CLAUDE_CODE_USE_OPENAI"] = "1"
 	env["OPENAI_MODEL"] = s.Model
+	if raw := openClaudeLimitJSON(s.Model, env["OPENAI_BASE_URL"], s.ContextTokens); raw != "" {
+		env["CLAUDE_CODE_OPENAI_CONTEXT_WINDOWS"] = raw
+	}
+	if raw := openClaudeLimitJSON(s.Model, env["OPENAI_BASE_URL"], s.OutputTokens); raw != "" {
+		env["CLAUDE_CODE_OPENAI_MAX_OUTPUT_TOKENS"] = raw
+	}
 	return env
+}
+
+func openClaudeLimitJSON(model, baseURL string, limit int) string {
+	if strings.TrimSpace(model) == "" || limit <= 0 {
+		return ""
+	}
+	entries := map[string]int{model: limit}
+	if parsed, err := url.Parse(baseURL); err == nil && parsed.Host != "" {
+		entries[parsed.Host+":"+model] = limit
+	}
+	raw, err := json.Marshal(entries)
+	if err != nil {
+		return ""
+	}
+	return string(raw)
 }
 
 // OpenAIEnv returns the standard environment used by OpenAI-compatible CLI

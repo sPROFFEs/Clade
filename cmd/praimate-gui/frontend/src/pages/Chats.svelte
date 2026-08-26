@@ -5,6 +5,7 @@
   import SkillsPicker from '../lib/SkillsPicker.svelte'
   import { renderMarkdown } from '../lib/markdown.js'
   import { findTerminalForChat } from '../lib/terminal.js'
+  import { localRoutingUnavailableMessage, supportsLocalRouting } from '../lib/localRouting.js'
 
   let skillsPickerOpen = false
 
@@ -283,7 +284,7 @@
   $: newToolLevels = toolLevelsForCli(newCli)
   $: if (newTools !== normalizeToolsForCli(newCli, newTools)) newTools = normalizeToolsForCli(newCli, newTools)
   // Per-chat local routing is resolved by the shared execution backend.
-  $: newLocalRoutable = ['claude', 'openclaude', 'opencode', 'praimate-code'].includes(newCli)
+  $: newLocalRoutable = supportsLocalRouting(newCli)
   $: if (!newLocalRoutable && newUseLocal) newUseLocal = false
 
   async function startClean() {
@@ -588,14 +589,20 @@
           <button class="btn sm" class:primary={cfg.tools === lvl.id} title={lvl.hint} on:click={() => (cfg.tools = lvl.id)}>{lvl.label}</button>
         {/each}
     </div>
-    {#if ['claude', 'openclaude', 'opencode', 'praimate-code'].includes(cfg.cli)}
+    {#if supportsLocalRouting(cfg.cli)}
       <label class="lbl" style="margin-top:10px">Local endpoint (optional — routes THIS chat through a self-hosted backend)</label>
       <div class="row">
         <input class="field grow mono" placeholder="http://localhost:11434 (blank = cloud)" bind:value={cfg.localEndpoint} />
         <input class="field mono" style="max-width:180px" placeholder="backend model" bind:value={cfg.localModel} />
       </div>
     {:else if cfg.localEndpoint}
-      <div class="card-sub" style="margin-top:8px">This CLI cannot use a PrAImate-managed local route. Codex is not modified.</div>
+      <div class="card-sub" style="margin-top:8px">{localRoutingUnavailableMessage(cfg.cli)}</div>
+      <div class="row" style="margin-top:8px">
+        {#if cfg.cli === 'claude' && clis.some((c) => c.id === 'openclaude' && c.available)}
+          <button class="btn sm" on:click={() => { cfg.cli = 'openclaude'; cfgCliChanged() }}>Switch to OpenClaude</button>
+        {/if}
+        <button class="btn sm" on:click={() => { cfg.localEndpoint = ''; cfg.localModel = ''; cfg = cfg }}>Clear local route</button>
+      </div>
     {/if}
 
     <label class="lbl" style="margin-top:10px">Skills <span class="card-sub" style="font-weight:400">— prepended to the chat's system prompt. Designed per-CLI; mixing across CLIs may produce odd output.</span></label>
@@ -839,7 +846,7 @@
           <span>Use the local LLM from Settings <span class="card-sub mono">{localOpt.endpoint}</span></span>
         </label>
       {:else if localOpt?.configured}
-        <div class="card-sub" style="margin-top:10px">This CLI cannot use a PrAImate-managed local route. Codex is not modified.</div>
+        <div class="card-sub" style="margin-top:10px">{localRoutingUnavailableMessage(newCli)}</div>
       {/if}
 
       {#if newUseLocal && localOpt?.configured && newLocalRoutable}

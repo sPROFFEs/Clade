@@ -38,9 +38,9 @@ type WorkspaceSettings struct {
 	// MemoryEnabled, when true, ensures the workspace has a MEMORY.md
 	// file the agent can read/write across sessions.
 	MemoryEnabled bool `json:"memoryEnabled,omitempty"`
-	// Ollama, when populated, makes the launcher inject per-launch env
-	// vars for Claude so it routes to the local Ollama endpoint instead
-	// of Anthropic. Stored here so the choice follows the workspace.
+	// Ollama, when populated, records an OpenAI-compatible local route for
+	// supported agents. Claude Code remains on Anthropic; OpenClaude owns
+	// the Claude-style local path. Stored here so the choice follows the workspace.
 	Ollama OllamaSettings `json:"ollama,omitempty"`
 	// MirrorAgentState, when true, opts the chat into Step 3's
 	// mirror-in / mirror-out semantics: before launch the chat's

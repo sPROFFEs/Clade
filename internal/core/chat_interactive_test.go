@@ -172,8 +172,8 @@ func TestContinueChat_PrAImateCodeInjectsEncryptedLocalLLMKey(t *testing.T) {
 	}
 }
 
-func TestContinueChat_ClaudeResolvesLocalKeyFromEncryptedSetting(t *testing.T) {
-	mock := &mockAdapter{name: "claude", replies: []string{"connected"}}
+func TestContinueChat_OpenClaudeResolvesLocalKeyFromEncryptedSetting(t *testing.T) {
+	mock := &mockAdapter{name: "openclaude", replies: []string{"connected"}}
 	withMockAdapter(t, mock)
 
 	c, _ := New(Options{Store: openTempStore(t)})
@@ -183,7 +183,7 @@ func TestContinueChat_ClaudeResolvesLocalKeyFromEncryptedSetting(t *testing.T) {
 	}
 	chat, err := c.CreateChat(ctx, CreateChatRequest{
 		Title:    "local",
-		CLIAgent: "claude",
+		CLIAgent: "openclaude",
 		Settings: ChatSettings{Local: &ChatLocalEndpoint{
 			Endpoint: "https://llm.example", Model: "qwen3",
 		}},
@@ -194,8 +194,8 @@ func TestContinueChat_ClaudeResolvesLocalKeyFromEncryptedSetting(t *testing.T) {
 	if _, err := c.ContinueChat(ctx, chat.ID, "hello", t.TempDir(), ""); err != nil {
 		t.Fatal(err)
 	}
-	if got := mock.shots[0].Env["ANTHROPIC_AUTH_TOKEN"]; got != "db-secret" {
-		t.Fatalf("ANTHROPIC_AUTH_TOKEN = %q, want encrypted DB credential", got)
+	if got := mock.shots[0].Env["OPENAI_API_KEY"]; got != "db-secret" {
+		t.Fatalf("OPENAI_API_KEY = %q, want encrypted DB credential", got)
 	}
 }
 

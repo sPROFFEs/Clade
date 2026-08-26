@@ -1,7 +1,7 @@
 package main
 
 // Apply the saved local endpoint to OpenCode-compatible CLIs from the GUI.
-// Claude/OpenClaude route per launch through environment variables.
+// OpenClaude routes per launch; Claude Code remains on Anthropic.
 
 import (
 	"fmt"
@@ -61,7 +61,7 @@ func (a *App) ApplyLocalToCLI(cli, model string) (string, error) {
 		}
 		return "opencode + praimate-code routed to the local model — wrote " + path, nil
 	default:
-		return "", fmt.Errorf("apply-to-local supports only opencode/praimate-code — claude/openclaude use the per-launch toggle")
+		return "", fmt.Errorf("apply-to-local supports only opencode/praimate-code — OpenClaude uses the per-launch toggle and Claude Code stays on Anthropic")
 	}
 }
 

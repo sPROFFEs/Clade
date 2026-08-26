@@ -205,12 +205,14 @@ LocalAI, and similar OpenAI-compatible endpoints.
 
 PrAImate can configure:
 
-- Claude/OpenClaude through per-launch environment variables;
+- OpenClaude through per-launch OpenAI-compatible environment variables;
 - OpenCode/PrAImate Code through their provider configuration plus
   environment-based secrets.
 
-PrAImate does not modify Codex provider configuration. Codex uses whatever
-provider and authentication the user configured directly in Codex.
+Claude Code stays on its supported Anthropic transport. Use OpenClaude for
+Claude-style agents backed by a local model. PrAImate also does not modify
+Codex provider configuration; Codex uses whatever provider and authentication
+the user configured directly in Codex.
 
 If an endpoint uses `http://`, the GUI warns that the underlying CLI will send
 model traffic over unencrypted HTTP. PrAImate cannot add HTTPS to a server that
