@@ -14,12 +14,45 @@
   let chosen = {} // cli → method id
   let installing = '' // cli currently installing
   let log = []
+  let installModal = null // { id, label, kind, status, lines, path, message }
   let unsub = () => {}
 
   // managed helper tools (graphify, gstack, scrapegraph)
   let tools = []
   let toolMethods = {}
   let toolChosen = {}
+
+  function appendInstallLine(line) {
+    if (!line) return
+    log = [...log.slice(-300), line]
+    if (installModal) {
+      installModal = { ...installModal, lines: [...installModal.lines.slice(-300), line] }
+    }
+  }
+
+  async function finishInstall(kind, id) {
+    installModal = { ...installModal, status: 'refreshing', message: 'Refreshing PATH and checking the installed executable…' }
+    appendInstallLine('✓ installer finished')
+    appendInstallLine('→ refreshing PATH and re-detecting…')
+    await api.refreshPATH()
+    await load()
+    const detected = kind === 'cli' ? clis.find((x) => x.id === id) : tools.find((x) => x.id === id)
+    if (detected?.installed) {
+      installModal = {
+        ...installModal,
+        status: 'success',
+        path: detected.binary || '',
+        message: 'Installation complete. PATH was refreshed and the executable was detected.',
+      }
+      appendInstallLine(`✓ detected${detected.binary ? ` at ${detected.binary}` : ''}${detected.version ? ` · ${detected.version}` : ''}`)
+      return
+    }
+    installModal = {
+      ...installModal,
+      status: 'error',
+      message: 'The installer finished, but PrAImate could not detect the executable after refreshing PATH.',
+    }
+  }
 
   async function load() {
     loading = true
@@ -50,15 +83,21 @@
   async function installTool(t) {
     const methodID = toolChosen[t.id]
     if (!methodID) return
+    if (methodID === 'npm' || methodID === 'pnpm') {
+      if (!confirm(`SECURITY WARNING\n\nnpm packages can execute arbitrary code during installation via postinstall scripts.\n\nOnly install packages you trust.\n\nProceed with installing ${t.label}?`)) {
+        return
+      }
+    }
     installing = t.id
     log = []
     error = ''
+    installModal = { id: t.id, label: t.label, kind: 'tool', status: 'running', lines: [], path: '', message: 'Installing… live output appears below.' }
     try {
       await api.installManagedTool(t.id, methodID)
-      log = [...log, '✓ install finished — re-probing…']
-      await load()
+      await finishInstall('tool', t.id)
     } catch (e) {
-      error = String(e)
+      installModal = { ...installModal, status: 'error', message: String(e) }
+      appendInstallLine(`✗ ${String(e)}`)
     } finally {
       installing = ''
     }
@@ -78,15 +117,21 @@
   async function install(cli) {
     const methodID = chosen[cli.id]
     if (!methodID) return
+    if (methodID === 'npm' || methodID === 'pnpm') {
+      if (!confirm(`SECURITY WARNING\n\nnpm packages can execute arbitrary code during installation via postinstall scripts.\n\nOnly install packages you trust.\n\nProceed with installing ${cli.label}?`)) {
+        return
+      }
+    }
     installing = cli.id
     log = []
     error = ''
+    installModal = { id: cli.id, label: cli.label, kind: 'cli', status: 'running', lines: [], path: '', message: 'Installing… live output appears below.' }
     try {
       await api.installCLI(cli.id, methodID)
-      log = [...log, '✓ install finished — re-probing…']
-      await load()
+      await finishInstall('cli', cli.id)
     } catch (e) {
-      error = String(e)
+      installModal = { ...installModal, status: 'error', message: String(e) }
+      appendInstallLine(`✗ ${String(e)}`)
     } finally {
       installing = ''
     }
@@ -95,7 +140,7 @@
   onMount(async () => {
     if (typeof window !== 'undefined' && window.runtime?.EventsOn) {
       window.runtime.EventsOn('praimate:install', (ev) => {
-        log = [...log.slice(-300), ev.line]
+        if (!installModal || !ev?.cli || ev.cli === installModal.id) appendInstallLine(ev?.line)
       })
       unsub = () => window.runtime.EventsOff('praimate:install')
     }
@@ -167,6 +212,31 @@
   {:else}
     <div class="banner">{error}</div>
   {/if}
+{/if}
+
+{#if installModal}
+  <!-- svelte-ignore a11y-click-events-have-key-events -->
+  <!-- svelte-ignore a11y-no-static-element-interactions -->
+  <div class="modal-backdrop" on:click|self={() => !['running', 'refreshing'].includes(installModal.status) && (installModal = null)}>
+    <div class="modal-content install-modal" role="dialog" aria-modal="true" aria-labelledby="install-title">
+      <div class="row">
+        <div class="grow">
+          <h2 id="install-title">{installModal.status === 'success' ? 'Installation complete' : installModal.status === 'error' ? 'Installation failed' : `Installing ${installModal.label}`}</h2>
+          <div class="card-sub">{installModal.message}</div>
+        </div>
+        <span class="pill" class:ok={installModal.status === 'success'} class:err={installModal.status === 'error'} class:warn={installModal.status === 'running' || installModal.status === 'refreshing'}>
+          {installModal.status === 'refreshing' ? 'refreshing PATH' : installModal.status}
+        </span>
+      </div>
+      {#if installModal.path}<div class="detected-path mono">{installModal.path}</div>{/if}
+      <pre class="install-log modal-log">{installModal.lines.join('\n') || 'Waiting for installer output…'}</pre>
+      <div class="row" style="justify-content:flex-end; margin-top:14px">
+        <button class="btn" on:click={() => (installModal = null)} disabled={installModal.status === 'running' || installModal.status === 'refreshing'}>
+          {installModal.status === 'success' ? 'Done' : 'Close'}
+        </button>
+      </div>
+    </div>
+  </div>
 {/if}
 
 {#if loading && clis.length === 0}<div class="empty">Probing installed CLIs…</div>{/if}
@@ -257,13 +327,6 @@
   {/each}
 {/if}
 
-{#if log.length > 0}
-  <div class="card">
-    <div class="card-title">Install output</div>
-    <pre class="install-log">{log.join('\n')}</pre>
-  </div>
-{/if}
-
 <style>
   .install-log {
     margin: 6px 0 0;
@@ -274,5 +337,24 @@
     white-space: pre-wrap;
     word-break: break-word;
     color: var(--text-dim);
+  }
+  .install-modal { max-width: 720px; }
+  .modal-log {
+    min-height: 120px;
+    max-height: 360px;
+    margin-top: 14px;
+    padding: 10px 12px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+  }
+  .detected-path {
+    margin-top: 12px;
+    padding: 8px 10px;
+    color: var(--ok);
+    background: color-mix(in oklch, var(--ok) 8%, transparent);
+    border: 1px solid color-mix(in oklch, var(--ok) 30%, transparent);
+    border-radius: var(--radius-sm);
+    overflow-wrap: anywhere;
   }
 </style>

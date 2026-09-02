@@ -173,7 +173,7 @@ func TestApplyOpenCode_ReferencesAPIKeyEnvironment(t *testing.T) {
 	var cfg map[string]any
 	_ = json.Unmarshal(raw, &cfg)
 	prov := cfg["provider"].(map[string]any)
-	entry := prov["ollama_remote"].(map[string]any)
+	entry := prov["praimate_local"].(map[string]any)
 	opts := entry["options"].(map[string]any)
 	if opts["apiKey"] != "{env:OPENAI_API_KEY}" {
 		t.Errorf("options.apiKey = %v, want environment reference", opts["apiKey"])
@@ -188,7 +188,7 @@ func TestOpenCodeUsesManagedLocalRoute(t *testing.T) {
 	redirectHome(t, tmp)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(tmp, "xdg"))
 
-	if got, err := OpenCodeUsesManagedLocalRoute("ollama_remote/qwen3"); err != nil || !got {
+	if got, err := OpenCodeUsesManagedLocalRoute("praimate_local/qwen3"); err != nil || !got {
 		t.Fatalf("explicit managed model: got %v, err %v", got, err)
 	}
 	if got, err := OpenCodeUsesManagedLocalRoute("openai/gpt-5"); err != nil || got {
@@ -220,7 +220,7 @@ func TestApplyOpenCode_WritesModelTokenLimits(t *testing.T) {
 	var cfg map[string]any
 	_ = json.Unmarshal(raw, &cfg)
 	prov := cfg["provider"].(map[string]any)
-	entry := prov["ollama_remote"].(map[string]any)
+	entry := prov["praimate_local"].(map[string]any)
 	models := entry["models"].(map[string]any)
 	model := models["qwen3"].(map[string]any)
 	limit := model["limit"].(map[string]any)
@@ -284,15 +284,15 @@ func TestDisableCodex_RemovesBlocks(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	body := `model_provider = "ollama_remote"
+	body := `model_provider = "praimate_local"
 model = "qwen3"
 approval_policy = "on-request"
 
-[model_providers.ollama_remote]
+[model_providers.praimate_local]
 base_url = "http://x/v1"
 
-[profiles.ollama_remote]
-model_provider = "ollama_remote"
+[profiles.praimate_local]
+model_provider = "praimate_local"
 
 [profiles.keep]
 model = "gpt-5"
@@ -304,8 +304,8 @@ model = "gpt-5"
 		t.Fatal(err)
 	}
 	raw, _ := os.ReadFile(path)
-	if strings.Contains(string(raw), "ollama_remote") {
-		t.Errorf("disable left ollama_remote:\n%s", raw)
+	if strings.Contains(string(raw), "praimate_local") {
+		t.Errorf("disable left praimate_local:\n%s", raw)
 	}
 	if strings.Contains(string(raw), `model = "qwen3"`) {
 		t.Errorf("disable left managed top-level model:\n%s", raw)
@@ -335,12 +335,12 @@ func TestApplyOpenCode_WritesProviderJSON(t *testing.T) {
 	if cfg["$schema"] != "https://opencode.ai/config.json" {
 		t.Errorf("missing $schema")
 	}
-	if cfg["model"] != "ollama_remote/qwen3" {
+	if cfg["model"] != "praimate_local/qwen3" {
 		t.Errorf("model = %v", cfg["model"])
 	}
 	provider := cfg["provider"].(map[string]any)
-	if _, ok := provider["ollama_remote"]; !ok {
-		t.Error("ollama_remote provider not added")
+	if _, ok := provider["praimate_local"]; !ok {
+		t.Error("praimate_local provider not added")
 	}
 }
 
@@ -369,8 +369,8 @@ func TestApplyOpenCode_PreservesOtherProviders(t *testing.T) {
 	if _, ok := prov["my_provider"]; !ok {
 		t.Error("my_provider removed")
 	}
-	if _, ok := prov["ollama_remote"]; !ok {
-		t.Error("ollama_remote not added")
+	if _, ok := prov["praimate_local"]; !ok {
+		t.Error("praimate_local not added")
 	}
 	// makeDefault=false → existing model untouched.
 	if cfg["model"] != "openai/gpt-5" {
@@ -411,8 +411,8 @@ func TestDisableOpenCode_RemovesProvider(t *testing.T) {
 	}
 	path, _ := OpenCodeConfigPath()
 	raw, _ := os.ReadFile(path)
-	if strings.Contains(string(raw), "ollama_remote") {
-		t.Errorf("disable left ollama_remote:\n%s", raw)
+	if strings.Contains(string(raw), "praimate_local") {
+		t.Errorf("disable left praimate_local:\n%s", raw)
 	}
 }
 

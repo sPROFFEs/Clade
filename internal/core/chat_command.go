@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -45,8 +46,13 @@ func (c *Core) RunChatCommand(ctx context.Context, chatID, command string) (*Cha
 		return nil, err
 	}
 	cwd := chat.WorkspacePath
-	if cwd == "" {
-		cwd = "."
+	if cwd == "" || cwd == "." {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			cwd = home
+		} else {
+			cwd = "."
+		}
 	}
 
 	if _, err := c.AddMessage(ctx, chatID, "user", "! "+command, map[string]any{"kind": "command"}); err != nil {

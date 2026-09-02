@@ -6,6 +6,7 @@
   import logo from './assets/monke-icon.png'
   import mascot from './assets/monke-mascot.png'
   import Chats from './pages/Chats.svelte'
+  import Studio from './pages/Studio.svelte'
   import Code from './pages/Code.svelte'
   import Agents from './pages/Agents.svelte'
   import CLIs from './pages/CLIs.svelte'
@@ -20,11 +21,13 @@
   import SessionPanel from './lib/SessionPanel.svelte'
   import PrivacyNotice from './lib/PrivacyNotice.svelte'
   import DatabaseUnlock from './lib/DatabaseUnlock.svelte'
+  import Toast from './lib/Toast.svelte'
 
   // Lucide-style outline icon paths (24x24 viewBox, stroke-based).
   const icons = {
     code: 'M8 9l-4 3 4 3M16 9l4 3-4 3M13 5l-2 14',
     chats: 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z',
+    studio: 'M4 4h16v12H4zM8 20h8M12 16v4M8 8h8M8 12h5',
     run: 'M12 8V4m0 0h4m-4 0H8m-4 9a8 8 0 0 1 16 0v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM9 14h.01M15 14h.01',
     agents: 'M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7',
     mcp: 'M12 22v-5M9 8V2M15 8V2M6 8h12v5a6 6 0 0 1-12 0z',
@@ -56,6 +59,7 @@
   const pages = [
     { id: 'code', label: 'Code', icon: icons.code, component: Code },
     { id: 'chats', label: 'Chats', icon: icons.chats, component: Chats },
+    { id: 'studio', label: 'Studio', icon: icons.studio, component: Studio },
     { id: 'agents', label: 'Agents', icon: icons.run, component: Agents },
     { id: 'skills', label: 'Skills', icon: icons.mcp, component: Skills },
     { id: 'clis', label: 'CLI & Tools', icon: icons.agents, component: CLIs },
@@ -213,6 +217,8 @@
   </main>
 </div>
 {/if}
+
+<Toast />
 
 {#if databaseLock?.unlocked && privacyNotice?.required && !editorMode?.active}
   <PrivacyNotice on:accepted={privacyAccepted} />

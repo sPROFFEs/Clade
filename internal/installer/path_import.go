@@ -39,6 +39,19 @@ func ImportUserBinDirs() {
 	prependIfPresent(dirs)
 }
 
+// ImportManagedAgentsToPath prepends the executable directories for agents
+// installed into PrAImate-owned prefixes. OpenClaude currently uses this
+// layout because its dependency tree must be installed locally rather than as
+// a global npm package. Keeping the prefix on PATH makes the CLI adapters,
+// terminal launcher, and picker detection agree with DetectAgents.
+func ImportManagedAgentsToPath() {
+	dir, err := ManagedAgentBinDir("openclaude")
+	if err != nil {
+		return
+	}
+	prependIfPresent([]string{dir})
+}
+
 func candidateUserBinDirs(home string) []string {
 	switch runtime.GOOS {
 	case "windows":

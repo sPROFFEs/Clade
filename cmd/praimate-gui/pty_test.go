@@ -47,12 +47,17 @@ func TestTerminalSnapshotKeepsBoundedTail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if snapshot.StartOffset != 32 || snapshot.EndOffset != int64(len(payload)) {
-		t.Fatalf("bounded offsets = %+v (chunk=%+v)", snapshot, chunk)
-	}
 	raw, _ := base64.StdEncoding.DecodeString(snapshot.Data)
-	if len(raw) != terminalHistoryLimit {
-		t.Fatalf("snapshot bytes = %d, want %d", len(raw), terminalHistoryLimit)
+	if len(raw) == 0 || len(raw) > terminalHistoryLimit {
+		t.Fatalf("snapshot bytes = %d, want 1..%d", len(raw), terminalHistoryLimit)
+	}
+	wantStart := int64(len(payload) - len(raw))
+	if snapshot.StartOffset != wantStart || snapshot.EndOffset != int64(len(payload)) {
+		t.Fatalf("bounded offsets = start %d end %d, want start %d end %d (chunk start %d end %d)",
+			snapshot.StartOffset, snapshot.EndOffset, wantStart, len(payload), chunk.StartOffset, chunk.EndOffset)
+	}
+	if string(raw) != string(payload[len(payload)-len(raw):]) {
+		t.Fatal("snapshot does not contain the retained payload tail")
 	}
 }
 

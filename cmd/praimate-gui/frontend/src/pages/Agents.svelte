@@ -6,7 +6,7 @@
   // same parser `praimate agent import` uses.
   import { onDestroy, onMount, tick } from 'svelte'
   import { api, onRequirementsProgress } from '../lib/api.js'
-  import { activePage, pageRevision, openChatId, pendingTerm, agentStudio } from '../lib/stores.js'
+  import { activePage, pageRevision, openChatId, pendingTerm, agentStudio, showToast } from '../lib/stores.js'
   import CodeEditor from '../lib/CodeEditor.svelte'
   import WorkflowRunner from '../lib/WorkflowRunner.svelte'
   import { LOCAL_ROUTABLE_CLIS, localRoutingUnavailableMessage, supportsLocalRouting } from '../lib/localRouting.js'
@@ -213,11 +213,19 @@
         if ((check?.issues || []).length > 0) return
         dlg.busy = true
       }
+      const agentLabel = agent?.name || cli
+      const surfaceLabel = surface === 'chat' ? 'chat' : surface === 'terminal' ? 'terminal' : 'Studio'
+      showToast({
+        title: `Opening ${surfaceLabel}`,
+        message: `Starting ${agentLabel} with ${cli} in ${folder}`,
+        tone: 'busy', duration: 0, dismissible: false,
+      })
       if (surface === 'chat') {
         const c = await api.startChat(agent.id, cli, folder)
         if (local) await api.updateChatConfig(c.ID, cli, '', '', lEnd, lKey, lModel)
         else if (model) await api.updateChatConfig(c.ID, cli, model, '', '', '', '')
         dlg = null
+        showToast({ title: 'Chat ready', message: `${agentLabel} is connected through ${cli}.`, tone: 'ok' })
         openChatId.set(c.ID)
         activePage.set('chats')
         return
@@ -230,6 +238,7 @@
           if (chatId) await api.bindChatToTerminal(termId, chatId)
         } catch { /* the live terminal remains usable even if persistence fails */ }
         dlg = null
+        showToast({ title: 'Terminal ready', message: `${agentLabel} is running through ${cli}.`, tone: 'ok' })
         pendingTerm.set({ termId, chatId, cli, cwd: folder, label: (agent ? agent.name : cli) + (local ? ' · local' : ''), note: '' })
         activePage.set('code')
         pageRevision.update((n) => n + 1)
@@ -239,8 +248,10 @@
       await api.openEditorWindow(folder, agent ? agent.id : '', cli, local ? '' : model, '', lEnd, lKey, lModel)
       dlg = null
       notice = 'Studio window opened.'
+      showToast({ title: 'Studio opened', message: `${agentLabel} is ready in a separate Studio window.`, tone: 'ok' })
     } catch (e) {
       error = String(e)
+      showToast({ title: 'Launch failed', message: String(e), tone: 'err', duration: 0 })
       if (dlg) dlg.busy = false
     }
   }
@@ -580,10 +591,15 @@
   {#if notice}<div class="card card-sub">{notice}</div>{/if}
 
   {#if dlg}
-    <div class="card" style="border-color: var(--accent, #888)">
+    <!-- svelte-ignore a11y-click-events-have-key-events -->
+    <!-- svelte-ignore a11y-no-static-element-interactions -->
+    <div class="modal-backdrop" on:click|self={() => !dlg.busy && (dlg = null)}>
+    <div class="modal-content launch-modal" role="dialog" aria-modal="true" aria-labelledby="agent-launch-title">
       <div class="card-title">
+        <span id="agent-launch-title">
         {dlg.surface === 'chat' ? 'New chat' : dlg.surface === 'terminal' ? 'Open terminal' : 'Open studio'}
         {dlg.agent ? ` — ${dlg.agent.name}` : ''}
+        </span>
       </div>
       <label class="lbl">CLI</label>
       <select class="field" style="max-width:320px" bind:value={dlg.cli} on:change={dlgCliChanged}>
@@ -635,8 +651,9 @@
       {/if}
       <div class="row" style="margin-top:12px">
         <button class="btn primary" on:click={dlgGo} disabled={dlg.busy}>{dlg.busy ? 'Starting…' : 'Launch'}</button>
-        <button class="btn" on:click={() => (dlg = null)}>Cancel</button>
+        <button class="btn" on:click={() => (dlg = null)} disabled={dlg.busy}>Cancel</button>
       </div>
+    </div>
     </div>
   {/if}
 
@@ -711,4 +728,5 @@
     font-size: 13px;
   }
   .chip-x:hover { color: var(--text); }
+  .launch-modal { max-width: 620px; max-height: 88vh; overflow-y: auto; }
 </style>

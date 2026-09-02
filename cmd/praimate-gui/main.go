@@ -71,6 +71,7 @@ func main() {
 	// user-level CLI install dir so exec.LookPath finds bun, pnpm,
 	// cargo, deno, claude, etc., without a shell relog.
 	installer.ImportPnpmPathIfPresent()
+	installer.ImportManagedAgentsToPath()
 	installer.ImportManagedToolsToPath()
 	installer.ImportPraimateBinToPath()
 	installer.ImportUserBinDirs()

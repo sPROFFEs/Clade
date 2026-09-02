@@ -88,26 +88,22 @@ func KnownAgents() []Agent {
 			// pnpm-only on purpose — npm has been the vector for the
 			// recent supply-chain attacks (chalk/debug Sept 2025,
 			// lottiefiles, etc.). pnpm + explicit registry pinning in
-			// the installer narrows the trust surface. NOTE: openclaude
-			// 0.13/0.14 has a phantom dep on @aws-sdk/client-bedrock-runtime
-			// that crashes under strict pnpm at launch; until upstream
-			// fixes it the user needs a hoisted global pnpm linker. See
-			// the installer's openclaudePnpm comment.
-			InstallHint: "pnpm add -g --registry=https://registry.npmjs.org/ @gitlawb/openclaude   (needs Node 20+ and pnpm; requires hoisted pnpm linker — see notes)",
+			// the installer narrows the trust surface.
+			InstallHint: "npm install -g --no-fund --no-audit --ignore-scripts @gitlawb/openclaude",
 		},
 		{
 			ID:          AgentCodex,
 			Label:       "Codex CLI",
 			Binary:      "codex",
 			WpcTarget:   "codex",
-			InstallHint: "pnpm add -g @openai/codex   (npm package; needs Node + pnpm)",
+			InstallHint: "npm install -g --no-fund --no-audit @openai/codex   (needs Node)",
 		},
 		{
 			ID:          AgentOpenCode,
 			Label:       "OpenCode",
 			Binary:      "opencode",
 			WpcTarget:   "codex",
-			InstallHint: "curl -fsSL https://opencode.ai/install | bash   |  pnpm add -g opencode-ai",
+			InstallHint: "curl -fsSL https://opencode.ai/install | bash   |  npm install -g --no-fund --no-audit opencode-ai",
 		},
 		{
 			ID:     AgentPraimateCode,

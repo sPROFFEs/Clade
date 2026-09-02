@@ -135,7 +135,10 @@ func (tm *termManager) recordOutput(id string, data []byte) (TerminalData, bool)
 	s.outputEnd += int64(len(data))
 	s.history = append(s.history, data...)
 	if len(s.history) > terminalHistoryLimit {
-		drop := len(s.history) - terminalHistoryLimit
+		// Drop a larger chunk (25% of the limit) when overflowing so we
+		// don't incur a 4MB allocation on every subsequent 8KB read.
+		dropChunk := terminalHistoryLimit / 4
+		drop := len(s.history) - terminalHistoryLimit + dropChunk
 		s.history = append([]byte(nil), s.history[drop:]...)
 		s.historyStart += int64(drop)
 	}
@@ -192,6 +195,16 @@ func (tm *termManager) snapshot(id string) (TerminalSnapshot, error) {
 // inherited environment. PTY output streams to the frontend over Wails
 // events on emitCtx until the child exits.
 func (tm *termManager) start(emitCtx context.Context, name string, args []string, cwd string, env []string) (string, error) {
+	if cwd == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			cwd = home
+		}
+	}
+	if cwd != "" {
+		if abs, err := filepath.Abs(cwd); err == nil {
+			cwd = abs
+		}
+	}
 	// Resolve to an absolute path BEFORE handing it to go-pty / Cmd.
 	// Go's exec on Windows joins Cmd.Dir + bare name first when
 	// resolving — so a bare `opencode` with Cmd.Dir set to the project

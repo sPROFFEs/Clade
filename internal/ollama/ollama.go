@@ -239,9 +239,9 @@ func OpenCodeConfigPath() (string, error) {
 	return filepath.Join(home, ".config", "opencode", "opencode.json"), nil
 }
 
-const codexProviderName = "ollama_remote"
+const codexProviderName = "praimate_local"
 
-// DisableCodex strips the ollama_remote blocks from ~/.codex/config.toml.
+// DisableCodex strips the praimate_local blocks from ~/.codex/config.toml.
 // No-op if the file doesn't exist.
 func DisableCodex() (string, error) {
 	configPath, err := CodexConfigPath()
@@ -294,8 +294,8 @@ func stripDeprecatedCodexRoute(body string) string {
 	return strings.Join(out, "\n")
 }
 
-// stripCodexBlocks removes the [model_providers.ollama_remote] and
-// [profiles.ollama_remote] tables from a TOML body. Stops when it hits
+// stripCodexBlocks removes the [model_providers.praimate_local] and
+// [profiles.praimate_local] tables from a TOML body. Stops when it hits
 // the next [section] header or EOF.
 func stripCodexBlocks(body string) string {
 	headers := []string{
@@ -333,10 +333,10 @@ func stripTomlTable(body, header string) string {
 // unknown fields by round-tripping through map[string]any.
 type opencodeConfig map[string]any
 
-const openCodeProviderName = "ollama_remote"
+const openCodeProviderName = "praimate_local"
 
 // OpenCodeUsesManagedLocalRoute reports whether an OpenCode-compatible
-// launch will use PrAImate's ollama_remote provider. An explicit model
+// launch will use PrAImate's praimate_local provider. An explicit model
 // wins; otherwise OpenCode's configured default model decides.
 func OpenCodeUsesManagedLocalRoute(model string) (bool, error) {
 	if model = strings.TrimSpace(model); model != "" {
@@ -427,7 +427,7 @@ func ApplyOpenCode(s Settings, makeDefault bool) (string, error) {
 	return configPath, atomicWrite(configPath, out)
 }
 
-// OpenCodeConfigured reports whether opencode.json has our ollama_remote
+// OpenCodeConfigured reports whether opencode.json has our praimate_local
 // provider entry.
 func OpenCodeConfigured() bool {
 	path, err := OpenCodeConfigPath()
@@ -443,7 +443,7 @@ func OpenCodeConfigured() bool {
 	return strings.Contains(string(raw), `"`+openCodeProviderName+`"`)
 }
 
-// DisableOpenCode removes the ollama_remote provider entry. No-op if the
+// DisableOpenCode removes the praimate_local provider entry. No-op if the
 // file doesn't exist.
 func DisableOpenCode() (string, error) {
 	configPath, err := OpenCodeConfigPath()

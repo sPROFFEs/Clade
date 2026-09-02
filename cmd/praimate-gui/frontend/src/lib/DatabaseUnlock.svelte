@@ -125,7 +125,20 @@
       {/if}
 
       {#if error}<div class="message error">{error}</div>{/if}
-      {#if warning}<div class="message warning">{warning}</div>{/if}
+      {#if warning}
+        <div class="message warning" style="text-align:left; line-height:1.4">
+          <div>{warning}</div>
+          {#if warning.includes('dial unix') || warning.includes('bus:') || warning.includes('dbus')}
+            <div style="margin-top: 12px; font-size: 0.9em; opacity: 0.95;">
+              <strong>Running in WSL?</strong> This environment lacks a desktop keyring (Secret Service). To use "Remember password", you can install one:
+              <pre class="mono" style="background: rgba(0,0,0,0.15); padding: 8px; border-radius: 4px; margin-top: 6px; margin-bottom: 6px; white-space: pre-wrap; font-size: 0.85em; user-select: text;">sudo apt install dbus-x11 gnome-keyring
+export $(dbus-launch)
+eval "$(echo '\n' | gnome-keyring-daemon --unlock)"</pre>
+              Or simply click <strong>Continue without remembering</strong> below.
+            </div>
+          {/if}
+        </div>
+      {/if}
 
       {#if unlockedWithWarning}
         <button class="primary" type="button" on:click={() => dispatch('unlocked', { unlocked: true, warning })}>

@@ -97,21 +97,21 @@ func TestCatalog_PnpmMethodsPinRegistry(t *testing.T) {
 	}
 }
 
-// TestCatalog_OpenClaudeIsPnpmOnly locks in the supply-chain decision
-// that openclaude only installs via pnpm — no npm fallback, no curl|
-// bash, no brew. If a future contributor adds an npm or curl method
+// TestCatalog_OpenClaudeIsNpmOnly locks in the managed-prefix decision
+// that openclaude only installs via npm — no global package, curl|
+// bash, or brew. If a future contributor adds another method
 // to AgentOpenClaude, this test fails so the choice gets revisited
 // explicitly.
-func TestCatalog_OpenClaudeIsPnpmOnly(t *testing.T) {
+func TestCatalog_OpenClaudeIsNpmOnly(t *testing.T) {
 	for _, o := range []OS{OSMacOS, OSLinux, OSWSL, OSWindows} {
 		for _, act := range []Action{ActionInstall, ActionUpdate} {
 			got := allMethods(AgentOpenClaude, act, o)
 			if len(got) != 1 {
-				t.Errorf("openclaude on %s/%s: got %d methods, want exactly 1 (pnpm-only)", o, act, len(got))
+				t.Errorf("openclaude on %s/%s: got %d methods, want exactly 1 (npm-only)", o, act, len(got))
 				continue
 			}
-			if got[0].ID != "pnpm" {
-				t.Errorf("openclaude on %s/%s: got method %q, want pnpm", o, act, got[0].ID)
+			if got[0].ID != "npm" {
+				t.Errorf("openclaude on %s/%s: got method %q, want npm", o, act, got[0].ID)
 			}
 		}
 	}
@@ -119,9 +119,10 @@ func TestCatalog_OpenClaudeIsPnpmOnly(t *testing.T) {
 
 // TestCatalog_OpenClaudeUsesManagedPrefix locks in the phantom-dep
 // workaround: openclaude installs into a PrAImate-managed prefix (hoisted
-// node-linker) rather than `pnpm add -g`. If a contributor "simplifies"
-// it back to a global install, openclaude crashes on launch under
-// strict pnpm — this test fails first so the reason gets re-checked.
+// node_modules) rather than an npm global install. If a contributor
+// "simplifies" it back to a global install, openclaude's undeclared
+// dependency can disappear — this test fails first so the reason gets
+// re-checked.
 func TestCatalog_OpenClaudeUsesManagedPrefix(t *testing.T) {
 	for _, o := range []OS{OSMacOS, OSLinux, OSWSL, OSWindows} {
 		for _, act := range []Action{ActionInstall, ActionUpdate} {
@@ -240,31 +241,32 @@ func TestAutoFixable_EmptyInputs(t *testing.T) {
 	}
 }
 
-// TestMethods_KeepsPnpmMethodsWhenPnpmMissing locks in the Windows-bug
-// fix: a fresh box without pnpm on PATH should still see the pnpm-based
-// methods, because pnpm is auto-fixable. Previously methodAvailable
+// TestMethods_KeepsNpmMethodsForWindowsAutoNodeInstall locks in the
+// Windows bootstrap path: a fresh box without npm on PATH should still
+// see npm methods because the GUI can install Node/npm with winget.
+// Previously methodAvailable
 // hid them, leaving every Node-based agent with "No install method
 // available on this OS".
-func TestMethods_KeepsPnpmMethodsWhenPnpmMissing(t *testing.T) {
-	// Build a minimal PATH that has neither pnpm nor any other runner.
+func TestMethods_KeepsNpmMethodsForWindowsAutoNodeInstall(t *testing.T) {
+	// Build a minimal PATH that has neither npm nor any other runner.
 	// We don't actually run anything — Methods() just looks them up.
 	t.Setenv("PATH", t.TempDir())
 
 	for _, agent := range []AgentID{AgentCodex} {
 		got := Methods(agent, ActionInstall, OSWindows)
 		if len(got) == 0 {
-			t.Errorf("%s/windows with empty PATH: got 0 methods, want pnpm method to survive (auto-fixable)", agent)
+			t.Errorf("%s/windows with empty PATH: got 0 methods, want npm method to survive for automatic Node installation", agent)
 			continue
 		}
-		foundPnpm := false
+		foundNpm := false
 		for _, m := range got {
-			if m.ID == "pnpm" {
-				foundPnpm = true
+			if m.ID == "npm" {
+				foundNpm = true
 				break
 			}
 		}
-		if !foundPnpm {
-			t.Errorf("%s/windows: pnpm method should be present despite missing pnpm; got %+v", agent, got)
+		if !foundNpm {
+			t.Errorf("%s/windows: npm method should be present despite missing npm; got %+v", agent, got)
 		}
 	}
 }

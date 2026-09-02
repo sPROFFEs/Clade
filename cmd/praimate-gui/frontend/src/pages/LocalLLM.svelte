@@ -183,8 +183,8 @@
 {#if models !== null}
   <div class="card">
     <div class="card-title">{models.length} model(s) at {d.endpoint}</div>
-    <div style="margin-top:6px">
-      {#each models as m}<span class="pill mono">{m}</span>{/each}
+    <div style="margin-top:6px; display:flex; flex-wrap:nowrap; overflow-x:auto; gap:4px; padding-bottom:8px;">
+      {#each models as m}<span class="pill mono" style="white-space:nowrap">{m}</span>{/each}
       {#if models.length === 0}<span class="card-sub">endpoint reachable, but the model list is empty</span>{/if}
     </div>
   </div>

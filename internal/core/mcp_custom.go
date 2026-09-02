@@ -123,6 +123,13 @@ func ParseEnvLines(s string) map[string]string {
 // mcpSlug normalises a display name to a stable id: lowercase, spaces
 // and runs of punctuation to single hyphens, [a-z0-9-] only.
 func mcpSlug(s string) string {
+	return MCPSlug(s)
+}
+
+// MCPSlug standardizes an MCP server name or ID into a predictable
+// kebab-case format. This helps resolve naming mismatches (e.g. "My Server"
+// vs "my-server") between UI components and agent configurations.
+func MCPSlug(s string) string {
 	b := make([]byte, 0, len(s))
 	prevDash := true
 	for i := 0; i < len(s); i++ {

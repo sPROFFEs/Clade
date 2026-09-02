@@ -433,7 +433,11 @@ func (a *App) StartChat(agentID, cli, cwd string) (*core.Chat, error) {
 		return nil, err
 	}
 	if cwd == "" {
-		cwd, _ = os.Getwd()
+		if home, err := os.UserHomeDir(); err == nil {
+			cwd = home
+		} else {
+			cwd = "."
+		}
 	}
 	chat, err := c.StartInteractiveChat(a.ctx, agentID, cli, cwd)
 	if err != nil {
@@ -523,6 +527,7 @@ var staticModelSuggestions = map[string][]string{
 // ListCLIs returns every launchable CLI with availability probed
 // concurrently (a --version run each, bounded at 5s total).
 func (a *App) ListCLIs() []CLIInfo {
+	refreshManagedPaths()
 	agents := launcher.KnownAgents()
 	out := make([]CLIInfo, len(agents))
 	// 5s was too tight: a slow `opencode --version` (Bun cold start)
@@ -638,7 +643,11 @@ func (a *App) StartCleanChat(cli, model, cwd string) (*core.Chat, error) {
 		return nil, err
 	}
 	if cwd == "" {
-		cwd, _ = os.Getwd()
+		if home, err := os.UserHomeDir(); err == nil {
+			cwd = home
+		} else {
+			cwd = "."
+		}
 	}
 	chat, err := c.StartCleanChat(a.ctx, cli, model, cwd)
 	if err != nil {

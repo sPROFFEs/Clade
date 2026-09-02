@@ -100,24 +100,13 @@
     }, 250)
   }
   $: shownChats = searchResults ?? chats
-  // Studio + Code sessions live in their own sections — they're
-  // folder-scoped, not regular conversations.
+  // Studio and Code sessions have dedicated tabs. A Studio transcript can
+  // still be opened here explicitly, but these rows never pollute Chats.
   $: regularChats = shownChats.filter((c) => c.Settings?.surface !== 'studio' && c.Settings?.surface !== 'code' && c.Settings?.surface !== 'agent-helper' && c.Settings?.surface !== 'workflow')
-  $: studioChats = shownChats.filter((c) => c.Settings?.surface === 'studio')
-  $: codeChats = shownChats.filter((c) => c.Settings?.surface === 'code')
 
   function agentName(chat) {
     if (!chat?.AgentID) return ''
     return agentNames.get(chat.AgentID) || chat.AgentID
-  }
-
-  async function reopenStudio(chat) {
-    error = ''
-    try {
-      await api.openEditorWindow(chat.WorkspacePath, chat.AgentID || '', '', '', chat.ID, '', '', '')
-    } catch (e) {
-      error = String(e)
-    }
   }
 
   // Reopen a code session: reattach its live PTY when possible. The Code
@@ -563,9 +552,15 @@
     title={`Skills for "${cfg.chat.Title}"`}
     on:change={(e) => (cfg.skills = e.detail)}
     on:close={(e) => (cfg.skills = e.detail)} />
-  <div class="card" style="border-color: var(--accent, #888)">
-    <div class="card-title">Chat settings — {cfg.chat.Title}</div>
-    <div class="card-sub">Switching the CLI starts a fresh session on the next message; the history stays.</div>
+  <!-- svelte-ignore a11y-no-static-element-interactions -->
+  <div class="picker-backdrop" on:click={() => (cfg = null)}>
+    <div class="picker" on:click|stopPropagation role="dialog" style="max-width:640px; max-height:90vh; overflow-y:auto; display:flex; flex-direction:column;">
+      <div class="picker-head">
+        <strong class="grow">Chat settings — {cfg.chat.Title}</strong>
+        <button class="picker-x" on:click={() => (cfg = null)}>×</button>
+      </div>
+      <div class="picker-body grow" style="padding:16px;">
+        <div class="card-sub" style="margin-bottom:12px;">Switching the CLI starts a fresh session on the next message; the history stays.</div>
     <label class="lbl">CLI</label>
     <select class="field" style="max-width:320px" bind:value={cfg.cli} on:change={cfgCliChanged}>
       {#if clis.length === 0}
@@ -589,12 +584,16 @@
           <button class="btn sm" class:primary={cfg.tools === lvl.id} title={lvl.hint} on:click={() => (cfg.tools = lvl.id)}>{lvl.label}</button>
         {/each}
     </div>
-    {#if supportsLocalRouting(cfg.cli)}
-      <label class="lbl" style="margin-top:10px">Local endpoint (optional — routes THIS chat through a self-hosted backend)</label>
-      <div class="row">
-        <input class="field grow mono" placeholder="http://localhost:11434 (blank = cloud)" bind:value={cfg.localEndpoint} />
-        <input class="field mono" style="max-width:180px" placeholder="backend model" bind:value={cfg.localModel} />
-      </div>
+    {#if localOpt?.configured && supportsLocalRouting(cfg.cli)}
+      <label class="row" style="margin-top:12px; gap:8px; cursor:pointer">
+        <input type="checkbox" checked={!!cfg.localEndpoint} on:change={(e) => { if (e.target.checked) { cfg.localEndpoint = localOpt.endpoint } else { cfg.localEndpoint = ''; cfg.localModel = '' } }} />
+        <span>Use the local LLM from Settings <span class="card-sub mono">{localOpt.endpoint}</span></span>
+      </label>
+      {#if cfg.localEndpoint}
+        <label class="lbl" style="margin-top:8px">Local model</label>
+        <input class="field mono" style="max-width:420px" list="cfg-local-models" bind:value={cfg.localModel} placeholder="model on your endpoint" />
+        <datalist id="cfg-local-models">{#each localOpt.models || [] as m}<option value={m}></option>{/each}</datalist>
+      {/if}
     {:else if cfg.localEndpoint}
       <div class="card-sub" style="margin-top:8px">{localRoutingUnavailableMessage(cfg.cli)}</div>
       <div class="row" style="margin-top:8px">
@@ -637,9 +636,11 @@
       </div>
     {/if}
 
-    <div class="row" style="margin-top:12px">
-      <button class="btn primary" on:click={saveConfig} disabled={cfgSaving}>{cfgSaving ? 'Saving…' : 'Save'}</button>
-      <button class="btn" on:click={() => (cfg = null)}>Cancel</button>
+      </div>
+      <div class="picker-foot" style="justify-content:flex-end;">
+        <button class="btn" on:click={() => (cfg = null)}>Cancel</button>
+        <button class="btn primary" on:click={saveConfig} disabled={cfgSaving}>{cfgSaving ? 'Saving…' : 'Save'}</button>
+      </div>
     </div>
   </div>
 {/if}
@@ -820,7 +821,7 @@
     bind:value={search}
     on:input={onSearchInput} />
   {#if searchResults !== null}
-    <div class="card-sub" style="margin-bottom:8px">{searchResults.length} match(es) for “{search.trim()}”</div>
+    <div class="card-sub" style="margin-bottom:8px">{regularChats.length} chat match(es) for “{search.trim()}”</div>
   {/if}
 
   {#if error}<div class="banner">{error}</div>{/if}
@@ -903,7 +904,7 @@
     </div>
   {/if}
 
-  {#if shownChats.length === 0 && !creating}
+  {#if regularChats.length === 0 && !creating}
     <div class="empty">{searchResults !== null ? 'No chats match the search.' : 'No chats yet — press “New chat”, or start one from an agent on the Agents page.'}</div>
   {/if}
   {#each regularChats as chat}
@@ -924,66 +925,7 @@
     </div>
   {/each}
 
-  {#if studioChats.length > 0}
-    <h1 style="font-size:16px; margin-top:24px">Studio sessions</h1>
-    <p class="subtitle">Document-studio chats, scoped to a folder. Reopen the studio window to continue co-editing, or open the transcript like any chat.</p>
-    {#each studioChats as chat}
-      <div class="card row">
-        <div class="grow">
-          <div class="card-title">{chat.Title}</div>
-          <div class="card-sub mono">
-            {chat.WorkspacePath} · {chat.CLIAgent}
-            {#if chat.AgentID} · Agent: {agentName(chat)}{/if}
-            {#if chat.Settings?.model} · {chat.Settings.model}{/if}
-            · {fmtDate(chat.UpdatedAt)}
-          </div>
-        </div>
-        <button class="btn primary" on:click={() => reopenStudio(chat)}>Reopen studio</button>
-        <button class="btn" on:click={() => open(chat)}>Transcript</button>
-        <button class="btn" on:click={() => openConfig(chat)}>Edit</button>
-        <button class="btn danger" on:click={() => remove(chat)}>Delete</button>
-      </div>
-    {/each}
   {/if}
-
-  {#if codeChats.length > 0}
-    <h1 style="font-size:16px; margin-top:24px">Code sessions</h1>
-    <p class="subtitle">Live CLI sessions in a project folder. Reopen reattaches the same running process and restores its terminal history; only ended processes start again.</p>
-    {#each codeChats as chat}
-      <div class="card row">
-        <div class="grow">
-          <div class="card-title mono">{chat.WorkspacePath}</div>
-          <div class="card-sub mono">
-            {chat.CLIAgent}
-            {#if chat.AgentID} · Agent: {agentName(chat)}{/if}
-            {#if chat.Settings?.local?.endpoint}· local {chat.Settings.local.model || chat.Settings.local.endpoint}
-            {:else if chat.Settings?.model}· {chat.Settings.model}{/if}
-            · {fmtDate(chat.UpdatedAt)}
-          </div>
-        </div>
-        <button class="btn primary" on:click={() => reopenCode(chat)}>Reopen</button>
-        <button class="btn" on:click={() => openConfig(chat)}>Edit</button>
-        <button class="btn danger" on:click={() => remove(chat)}>Delete</button>
-      </div>
-    {/each}
-  {/if}
-
-  {#if workspaceChats.length > 0}
-    <h1 style="font-size:16px; margin-top:24px">Workspace chats</h1>
-    <p class="subtitle">Existing workpath-based chats. Open one to resume its CLI session in the Code terminal — same sandbox, native resume where the CLI supports it.</p>
-    {#each workspaceChats as wc}
-      <div class="card row">
-        <div class="grow">
-          <div class="card-title">{wc.label}</div>
-          <div class="card-sub">
-            {wc.agent}{#if wc.template} · {wc.template}{/if} · {fmtDate(wc.lastUsed)}
-          </div>
-        </div>
-        <button class="btn" on:click={() => openWorkspace(wc)}>Open in Code</button>
-      </div>
-    {/each}
-  {/if}
-{/if}
 
 <style>
   .thread {

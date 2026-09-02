@@ -11,6 +11,25 @@ export const activePage = writable('code')
 export const pageRevision = writable(0)
 export const openChatId = writable(null)
 
+// App-wide operation feedback. Agent launches navigate away from the Agents
+// page immediately, so page-local notices disappear before the user can read
+// them. The shell owns this toast and keeps it visible across navigation.
+export const toast = writable(null)
+let toastTimer = null
+export function showToast({ title, message = '', tone = 'ok', duration = 4200, dismissible = true }) {
+  if (toastTimer) clearTimeout(toastTimer)
+  toast.set({ title, message, tone, dismissible })
+  toastTimer = duration > 0 ? setTimeout(() => {
+    toast.set(null)
+    toastTimer = null
+  }, duration) : null
+}
+export function dismissToast() {
+  if (toastTimer) clearTimeout(toastTimer)
+  toastTimer = null
+  toast.set(null)
+}
+
 // agentStudio, when set, opens the full-screen agent authoring studio.
 // Value: { id } for an existing agent, or { id: '' } / { new: true } for
 // a brand-new agent. null = studio closed (main shell shown).

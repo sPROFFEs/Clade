@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 )
@@ -176,8 +177,13 @@ func (c *Core) ContinueChatStream(ctx context.Context, chatID, userMessage, cwd,
 	if cwd == "" {
 		cwd = chat.WorkspacePath
 	}
-	if cwd == "" {
-		cwd = "."
+	if cwd == "" || cwd == "." {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			cwd = home
+		} else {
+			cwd = "."
+		}
 	}
 
 	// Redact outbound; the stored user message keeps the original text.

@@ -72,7 +72,7 @@ func (a *App) ListInstallMethods(cli string) ([]InstallMethod, error) {
 			Label:          m.Label,
 			Command:        m.Command,
 			Recommended:    m.Recommended,
-			MissingPrereqs: installer.PrereqsMissing(m),
+			MissingPrereqs: installer.BlockingPrereqs(m, installer.RunOptions{InstallNode: true}),
 		})
 	}
 	return out, nil
@@ -122,6 +122,7 @@ func refreshManagedPaths() {
 	defer pathRefreshMu.Unlock()
 
 	installer.ImportPnpmPathIfPresent()
+	installer.ImportManagedAgentsToPath()
 	installer.ImportManagedToolsToPath()
 	installer.ImportPraimateBinToPath()
 	installer.ImportUserBinDirs()
@@ -189,7 +190,7 @@ func (a *App) ListToolInstallMethods(tool string) ([]InstallMethod, error) {
 	for _, m := range methods {
 		out = append(out, InstallMethod{
 			ID: m.ID, Label: m.Label, Command: m.Command,
-			Recommended: m.Recommended, MissingPrereqs: installer.PrereqsMissing(m),
+			Recommended: m.Recommended, MissingPrereqs: installer.BlockingPrereqs(m, installer.RunOptions{}),
 		})
 	}
 	return out, nil

@@ -104,7 +104,7 @@ func (c *Core) resolveScheduleTarget(ctx context.Context, s Schedule, opts Sched
 		}
 		cwd := opts.Cwd
 		if cwd == "" {
-			cwd, err = os.Getwd()
+			cwd, err = os.UserHomeDir()
 			if err != nil {
 				cwd = "."
 			}
@@ -137,7 +137,7 @@ func (c *Core) resolveScheduleTarget(ctx context.Context, s Schedule, opts Sched
 		cwd = opts.Cwd
 	}
 	if cwd == "" {
-		cwd, err = os.Getwd()
+		cwd, err = os.UserHomeDir()
 		if err != nil {
 			cwd = "."
 		}

@@ -142,11 +142,19 @@ func (raw *agentYAML) toAgent() (*Agent, error) {
 		Instructions:    raw.Instructions,
 		Supports:        raw.Supports,
 		Tools:           raw.Tools,
-		MCPServers:      raw.MCPServers,
 		DefaultWorkflow: raw.DefaultWorkflow,
 		Surfaces:        raw.Surfaces,
 		Knowledge:       raw.Knowledge,
 		Requirements:    raw.Requirements,
+	}
+
+	// Standardize MCP Server IDs (snake_case, kebab-case, mixed-case -> kebab-case slug)
+	// so that user-written agent YAML resolves reliably to the correct backend IDs.
+	for _, id := range raw.MCPServers {
+		slug := MCPSlug(id)
+		if slug != "" {
+			a.MCPServers = append(a.MCPServers, slug)
+		}
 	}
 	for _, wy := range raw.Workflows {
 		w := Workflow{Name: wy.Name, Description: wy.Description}

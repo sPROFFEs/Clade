@@ -5,10 +5,45 @@
   import '@xterm/xterm/css/xterm.css'
   import { api } from '../lib/api.js'
   import SkillsPicker from '../lib/SkillsPicker.svelte'
-  import { term, onTermData, onTermExit, decodeBase64Bytes } from '../lib/terminal.js'
+  import { term, onTermData, onTermExit, decodeBase64Bytes, findTerminalForChat } from '../lib/terminal.js'
   import { localRoutingUnavailableMessage, supportsLocalRouting } from '../lib/localRouting.js'
   import { pendingTerm } from '../lib/stores.js'
   import { get } from 'svelte/store'
+
+
+  let chats = []
+  let workspaceChats = []
+  let agentNames = new Map()
+  $: codeChats = chats.filter((c) => c.Settings?.surface === 'code')
+
+  function fmtDate(s) {
+    if (!s || s.startsWith('0001-')) return ''
+    return new Date(s).toLocaleString()
+  }
+
+  function agentName(chat) {
+    return agentNames.get(chat.AgentID) || chat.AgentID
+  }
+
+  async function reopenCode(chat) {
+    const terms = (await api.listTerminalSessions().catch(() => [])) || []
+    const live = findTerminalForChat(terms, chat)
+    if (live) {
+      try { await api.bindChatToTerminal(live.id, chat.ID) } catch {}
+      attachPending({ termId: live.id, chat })
+      return
+    }
+    attachPending({ termId: '', chat, cli: chat.CLIAgent, cwd: chat.WorkspacePath })
+  }
+
+  async function openWorkspace(wc) {
+    attachPending({
+      termId: '',
+      chat: { ID: wc.id, Settings: { skills: [] } },
+      cli: wc.agent,
+      cwd: wc.sandbox,
+    })
+  }
 
   let agents = []
   let runtimeModes = {}
@@ -32,6 +67,55 @@
 
   // CLI + model pickers (shared by the clean-session card and the
   // agent-config view). clis: [{id, available, modelHint}].
+  let cfg = null
+  let cfgSaving = false
+  let mcpServers = []
+
+  function toolLevelsForCli(c) {
+    if (c === 'claude' || c === 'openclaude') return [{id:'',label:'Safe',hint:''}, {id:'ask',label:'Ask',hint:''}, {id:'edits',label:'Edits',hint:''}, {id:'full',label:'Full',hint:''}]
+    if (c === 'opencode' || c === 'praimate-code') return [{id:'plan',label:'Plan',hint:''}, {id:'',label:'Build',hint:''}, {id:'full',label:'Full',hint:''}]
+    return [{id:'',label:'Safe',hint:''}, {id:'ask',label:'Ask',hint:''}, {id:'edits',label:'Edits',hint:''}, {id:'full',label:'Full',hint:''}]
+  }
+  function normalizeToolsForCli(c, t) {
+    if (c === 'opencode' || c === 'praimate-code') return t === 'plan' || t === 'full' ? t : ''
+    return t || ''
+  }
+  function cfgCliChanged() {
+    cfg.tools = normalizeToolsForCli(cfg.cli, cfg.tools)
+    cfg.model = ''
+    cfg.suggestions = []
+    cfg.modelLoading = true
+    api.listCLIModels(cfg.cli).then(r => { if (cfg) { cfg.suggestions = r || []; cfg.modelLoading = false } }).catch(() => { if (cfg) { cfg.modelLoading = false } })
+  }
+  function openConfig(chat) {
+    error = ''
+    cfg = {
+      chat, cli: chat.CLIAgent, model: chat.Settings?.model || '',
+      tools: normalizeToolsForCli(chat.CLIAgent, chat.Settings?.tools),
+      localEndpoint: chat.Settings?.local?.endpoint || '',
+      localApiKey: chat.Settings?.local?.api_key || '',
+      localModel: chat.Settings?.local?.model || '',
+      suggestions: [], modelLoading: true,
+      skills: (chat.Settings?.skills || []).slice(), skillsCatalogue: [],
+      mcps: (chat.Settings?.mcp_servers || []).slice(),
+    }
+    if (clis.length === 0) api.listCLIs().then(r => clis = r || []).catch(() => {})
+    api.listCLIModels(chat.CLIAgent).then(r => { if (cfg && cfg.chat.ID === chat.ID) { cfg.suggestions = r || []; cfg.modelLoading = false } }).catch(() => {})
+    api.skillsList().then(r => { if (cfg && cfg.chat.ID === chat.ID) cfg.skillsCatalogue = r || [] }).catch(() => {})
+    api.mcpServers().then(r => { mcpServers = (r || []).filter(s => s.enabled) }).catch(() => {})
+  }
+  async function saveConfig() {
+    if (!cfg) return
+    cfgSaving = true; error = ''
+    try {
+      await api.updateChatConfig(cfg.chat.ID, cfg.cli, cfg.model.trim(), normalizeToolsForCli(cfg.cli, cfg.tools), cfg.localEndpoint.trim(), cfg.localApiKey, cfg.localModel.trim())
+      try { await api.setChatSkills(cfg.chat.ID, cfg.skills || []) } catch (e) {}
+      await api.setChatMCPServers(cfg.chat.ID, cfg.mcps || [])
+      cfg = null
+      await load()
+    } catch (e) { error = String(e) } finally { cfgSaving = false }
+  }
+
   let clis = []
   let modelSuggestions = []
   let modelLoading = false
@@ -126,15 +210,25 @@
 
   async function load() {
     try {
-      const loadedAgents = (await api.listAgents()) || []
+      const [loadedChats, loadedAgents] = await Promise.all([
+        api.listChats(),
+        api.listAgents().catch(() => []),
+      ])
+      chats = loadedChats || []
+      agents = loadedAgents || []
+      agentNames = new Map(agents.map((a) => [a.id, a.name || a.id]))
       const configs = await Promise.all(loadedAgents.map(async (agent) => {
         try { return [agent.id, await api.agentRuntimeConfig(agent.id)] }
         catch { return [agent.id, { mode: 'invalid' }] }
       }))
       runtimeModes = Object.fromEntries(configs)
-      agents = loadedAgents
     } catch (e) {
       error = String(e)
+    }
+    try {
+      workspaceChats = (await api.listWorkspaceChats()) || []
+    } catch {
+      workspaceChats = []
     }
     try {
       clis = (await api.listCLIs()) || []
@@ -241,6 +335,18 @@
     xterm.open(el)
     fit.fit()
     xterm.focus()
+
+    xterm.attachCustomKeyEventHandler((e) => {
+      if (e.type === 'keydown' && e.ctrlKey && (e.key === 'c' || e.key === 'C') && xterm.hasSelection()) {
+        const text = xterm.getSelection()
+        if (text && window.runtime?.ClipboardSetText) {
+          window.runtime.ClipboardSetText(text)
+          xterm.clearSelection()
+          return false
+        }
+      }
+      return true
+    })
 
     // keystrokes → PTY
     xterm.onData((d) => term.write(termId, d))
@@ -489,21 +595,43 @@
       </div>
     </div>
   {:else if !agent}
-    {#if terminalAgents.length === 0}
-      <div class="empty">No terminal-capable agents yet — press “New session” above, or create one on the Agents page.</div>
-    {:else}
-      <div class="section-label">Or launch from an agent</div>
-    {/if}
-    {#each terminalAgents as a}
+  {#if codeChats.length > 0}
+    <h1 style="font-size:16px; margin-top:24px">Code sessions</h1>
+    <p class="subtitle">Live CLI sessions in a project folder. Reopen reattaches the same running process and restores its terminal history.</p>
+    {#each codeChats as chat}
       <div class="card row">
         <div class="grow">
-          <div class="card-title">{a.name}</div>
-          <div class="card-sub">{a.description?.split('\n')[0]}</div>
-          <div style="margin-top:6px">{#each a.supports || [] as s}<span class="pill">{s}</span>{/each}</div>
+          <div class="card-title">{chat.Title || chat.WorkspacePath}</div>
+          <div class="card-sub mono">
+            {chat.WorkspacePath} <br/>
+            {chat.CLIAgent}
+            {#if chat.AgentID} · Agent: {agentName(chat)}{/if}
+            {#if chat.Settings?.local?.endpoint}· local {chat.Settings.local.model || chat.Settings.local.endpoint}
+            {:else if chat.Settings?.model}· {chat.Settings.model}{/if}
+            · {fmtDate(chat.UpdatedAt)}
+          </div>
         </div>
-        <button class="btn primary" on:click={() => pick(a)}>Use</button>
+        <button class="btn primary" on:click={() => reopenCode(chat)}>Reopen</button>
+        <button class="btn" on:click={() => openConfig(chat)}>Edit</button>
       </div>
     {/each}
+  {/if}
+
+  {#if workspaceChats.length > 0}
+    <h1 style="font-size:16px; margin-top:24px">Workspace chats</h1>
+    <p class="subtitle">Existing workpath-based chats. Open one to resume its CLI session in the Code terminal.</p>
+    {#each workspaceChats as wc}
+      <div class="card row">
+        <div class="grow">
+          <div class="card-title">{wc.label}</div>
+          <div class="card-sub">
+            {wc.agent}{#if wc.template} · {wc.template}{/if} · {fmtDate(wc.lastUsed)}
+          </div>
+        </div>
+        <button class="btn" on:click={() => openWorkspace(wc)}>Open in Code</button>
+      </div>
+    {/each}
+  {/if}
   {:else}
     <div class="row" style="margin-bottom:14px">
       <button class="btn" on:click={() => (agent = null)}>← Agents</button>
@@ -564,3 +692,93 @@
     overflow: hidden;
   }
 </style>
+
+
+{#if cfg}
+  <SkillsPicker
+    bind:open={skillsPickerOpen}
+    cli={cfg.cli}
+    selected={cfg.skills || []}
+    title={`Skills for "${cfg.chat.Title || cfg.chat.WorkspacePath}"`}
+    on:change={(e) => (cfg.skills = e.detail)}
+    on:close={(e) => (cfg.skills = e.detail)} />
+
+  <!-- svelte-ignore a11y-no-static-element-interactions -->
+  <div class="picker-backdrop" on:click={() => (cfg = null)}>
+    <div class="picker" on:click|stopPropagation role="dialog" style="max-width:640px; max-height:90vh; overflow-y:auto; display:flex; flex-direction:column;">
+      <div class="picker-head">
+        <strong class="grow">Settings — {cfg.chat.Title || cfg.chat.WorkspacePath}</strong>
+        <button class="picker-x" on:click={() => (cfg = null)}>×</button>
+      </div>
+      <div class="picker-body grow" style="padding:16px;">
+        <div class="card-sub" style="margin-bottom:12px;">Switching the CLI starts a fresh session on the next message; the history stays.</div>
+        <label class="lbl">CLI</label>
+        <select class="field" style="max-width:320px" bind:value={cfg.cli} on:change={cfgCliChanged}>
+          {#if clis.length === 0}<option value={cfg.cli}>{cfg.cli} (probing CLIs…)</option>{/if}
+          {#each clis as c}
+            <option value={c.id} disabled={!c.available && c.id !== cfg.chat.CLIAgent}>
+              {c.label}{c.available ? '' : ' — not installed'}
+            </option>
+          {/each}
+        </select>
+        <label class="lbl">Model (blank = CLI default)</label>
+        <input class="field mono" style="max-width:420px" list="cfg-model-suggestions" bind:value={cfg.model} />
+        <datalist id="cfg-model-suggestions">
+          {#each cfg.suggestions as m}<option value={m}></option>{/each}
+        </datalist>
+        {#if cfg.modelLoading}<div class="card-sub">Loading models...</div>{/if}
+        <label class="lbl">Tools</label>
+        <div class="row">
+            {#each toolLevelsForCli(cfg.cli) as lvl}
+              <button class="btn sm" class:primary={cfg.tools === lvl.id} title={lvl.hint} on:click={() => (cfg.tools = lvl.id)}>{lvl.label}</button>
+            {/each}
+        </div>
+        {#if localOpt?.configured && supportsLocalRouting(cfg.cli)}
+          <label class="row" style="margin-top:12px; gap:8px; cursor:pointer">
+            <input type="checkbox" checked={!!cfg.localEndpoint} on:change={(e) => { if (e.target.checked) { cfg.localEndpoint = localOpt.endpoint } else { cfg.localEndpoint = ''; cfg.localModel = '' } }} />
+            <span>Use the local LLM from Settings <span class="card-sub mono">{localOpt.endpoint}</span></span>
+          </label>
+          {#if cfg.localEndpoint}
+            <label class="lbl" style="margin-top:8px">Local model</label>
+            <input class="field mono" style="max-width:420px" list="cfg-local-models" bind:value={cfg.localModel} placeholder="model on your endpoint" />
+            <datalist id="cfg-local-models">{#each localOpt.models || [] as m}<option value={m}></option>{/each}</datalist>
+          {/if}
+        {:else if cfg.localEndpoint}
+          <div class="card-sub" style="margin-top:8px">{localRoutingUnavailableMessage(cfg.cli)}</div>
+          <div class="row" style="margin-top:8px">
+            {#if cfg.cli === 'claude' && clis.some((c) => c.id === 'openclaude' && c.available)}
+              <button class="btn sm" on:click={() => { cfg.cli = 'openclaude'; cfgCliChanged() }}>Switch to OpenClaude</button>
+            {/if}
+            <button class="btn sm" on:click={() => { cfg.localEndpoint = ''; cfg.localModel = ''; cfg = cfg }}>Clear local route</button>
+          </div>
+        {/if}
+        <label class="lbl" style="margin-top:10px">Skills</label>
+        <div class="row">
+          <button class="btn" on:click={() => (skillsPickerOpen = true)}>
+            {cfg.skills?.length ? `★ ${cfg.skills.length} skill${cfg.skills.length === 1 ? '' : 's'} enabled` : '+ Choose skills…'}
+          </button>
+          {#if cfg.skills?.length}
+            <button class="btn sm" on:click={() => (cfg.skills = [])} title="Clear all skills for this chat">Clear</button>
+          {/if}
+        </div>
+        <label class="lbl" style="margin-top:10px">MCP servers</label>
+        {#if mcpServers.length === 0}
+          <div class="card-sub">No enabled MCP servers.</div>
+        {:else}
+          <div class="mcp-grid">
+            {#each mcpServers as mcp}
+              <label class="mcp-choice">
+                <input type="checkbox" value={mcp.id} bind:group={cfg.mcps} />
+                <span><strong>{mcp.name}</strong> <span class="card-sub">{mcp.transport}</span></span>
+              </label>
+            {/each}
+          </div>
+        {/if}
+      </div>
+      <div class="picker-foot" style="justify-content:flex-end;">
+        <button class="btn" on:click={() => (cfg = null)}>Cancel</button>
+        <button class="btn primary" on:click={saveConfig} disabled={cfgSaving}>{cfgSaving ? 'Saving…' : 'Save'}</button>
+      </div>
+    </div>
+  </div>
+{/if}

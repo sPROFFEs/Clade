@@ -413,7 +413,7 @@ func ToolMethods(tool ToolID, action Action, current OS) []Method {
 	all := allToolMethods(tool, action, current)
 	var filtered []Method
 	for _, m := range all {
-		if !methodAvailable(m) {
+		if !methodAvailable(m, current) {
 			continue
 		}
 		filtered = append(filtered, m)

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"git.jtsec.local/lab/PrAImate/internal/core"
 )
 
 func TestListCLIBackendsRefreshesUserPATHBeforeDetection(t *testing.T) {
@@ -50,4 +52,40 @@ func TestListCLIBackendsRefreshesUserPATHBeforeDetection(t *testing.T) {
 		}
 	}
 	t.Fatal("Codex missing from CLI catalogue")
+}
+
+func TestListCLIsDetectsManagedOpenClaude(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("PRAIMATE_HOME", filepath.Join(home, "praimate"))
+	t.Setenv("PATH", "")
+	if runtime.GOOS == "windows" {
+		t.Setenv("PATHEXT", ".BAT;.CMD;.EXE")
+	}
+
+	binDir := filepath.Join(home, "praimate", "agents", "openclaude", "node_modules", ".bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	name := "openclaude"
+	body := "#!/bin/sh\necho openclaude 9.9.9\n"
+	if runtime.GOOS == "windows" {
+		name = "openclaude.bat"
+		body = "@echo off\r\necho openclaude 9.9.9\r\n"
+	}
+	if err := os.WriteFile(filepath.Join(binDir, name), []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp()
+	app.ctx = context.Background()
+	core.RegisterAllCLIAdapters()
+	for _, cli := range app.ListCLIs() {
+		if cli.ID == "openclaude" {
+			if !cli.Available {
+				t.Fatalf("managed OpenClaude was not available in launch pickers: %+v", cli)
+			}
+			return
+		}
+	}
+	t.Fatal("OpenClaude missing from launch picker catalogue")
 }

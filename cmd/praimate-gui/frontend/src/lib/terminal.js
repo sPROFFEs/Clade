@@ -65,7 +65,9 @@ export function onTermExit(id, handler) {
 }
 
 function normalizedPath(path) {
-  return String(path || '').replace(/[\\/]+$/, '').toLocaleLowerCase()
+  // Lowercasing breaks case-sensitive file systems (Linux, WSL, macOS).
+  // Rely on exact string match (minus trailing slashes) to prevent false mismatches.
+  return String(path || '').replace(/[\\/]+$/, '')
 }
 
 function terminalNameForCLI(cli) { return String(cli || '') }

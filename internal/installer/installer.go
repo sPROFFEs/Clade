@@ -140,7 +140,7 @@ func Methods(agent AgentID, action Action, current OS) []Method {
 	all := allMethods(agent, action, current)
 	var filtered []Method
 	for _, m := range all {
-		if !methodAvailable(m) {
+		if !methodAvailable(m, current) {
 			continue
 		}
 		filtered = append(filtered, m)
@@ -166,7 +166,7 @@ func Methods(agent AgentID, action Action, current OS) []Method {
 // Windows machine without pnpm sees "No install method available" for
 // every Node-based agent (codex, opencode, gemini, deepseek), even
 // though the launcher is capable of installing pnpm itself.
-func methodAvailable(m Method) bool {
+func methodAvailable(m Method, current OS) bool {
 	if m.DownloadAsset != "" {
 		return true // native Go downloader — no external runner needed
 	}
@@ -180,6 +180,13 @@ func methodAvailable(m Method) bool {
 		return err == nil
 	default:
 		if _, err := exec.LookPath(bin); err == nil {
+			return true
+		}
+		// The GUI opts into RunOptions.InstallNode. On Windows that lets
+		// winget install Node (and npm) before executing a Node-backed
+		// method, so keep npm methods visible even on a fresh PATH. The UI
+		// still reports/block missing prerequisites when winget is absent.
+		if current == OSWindows && bin == "npm" && methodNeedsNode(m) {
 			return true
 		}
 		// Keep the method visible if the missing runner is something the
@@ -251,6 +258,24 @@ func InstallNodePossible() bool {
 		}
 	}
 	return false
+}
+
+// BlockingPrereqs returns prerequisites that RunWithOptions cannot resolve
+// for the caller. The GUI uses this instead of PrereqsMissing so a Windows
+// npm method remains selectable when the user has winget and has opted into
+// automatic Node installation.
+func BlockingPrereqs(m Method, opts RunOptions) []string {
+	missing := UnfixableMissing(PrereqsMissing(m))
+	if !opts.InstallNode || runtime.GOOS != "windows" || !InstallNodePossible() || !methodNeedsNode(m) {
+		return missing
+	}
+	out := missing[:0]
+	for _, prerequisite := range missing {
+		if prerequisite != "node" && prerequisite != "npm" {
+			out = append(out, prerequisite)
+		}
+	}
+	return out
 }
 
 // AutoInstallNodeWindows installs Node.js LTS via winget. Opt-in:
@@ -842,9 +867,20 @@ func installIntoManagedPrefix(ctx context.Context, m Method, extraEnv []string, 
 	//   touch them). pnpm flags this with ERR_PNPM_IGNORED_BUILDS and a
 	//   non-zero exit; we treat that specific case as success below.
 	var cap bytes.Buffer
-	cmd := exec.CommandContext(ctx, "pnpm", "add",
-		"--config.node-linker=hoisted",
-		m.ManagedPrefixPkg)
+
+	// Prefer npm for local managed installs: it natively hoists (preventing
+	// the phantom dep issue) and bypasses Corepack pnpm v11 dynamic import
+	// bugs on Node 20.19+.
+	var cmd *exec.Cmd
+	if _, err := exec.LookPath("npm"); err == nil {
+		cmd = exec.CommandContext(ctx, "npm", "install", "--no-fund", "--no-audit", "--ignore-scripts", m.ManagedPrefixPkg)
+	} else {
+		cmd = exec.CommandContext(ctx, "pnpm", "add",
+			"--config.node-linker=hoisted",
+			"--ignore-scripts",
+			m.ManagedPrefixPkg)
+	}
+
 	hideConsole(cmd)
 	cmd.Dir = prefix
 	cmd.Stdout = io.MultiWriter(stdout, &cap)
@@ -870,13 +906,13 @@ func installIntoManagedPrefix(ctx context.Context, m Method, extraEnv []string, 
 	if runErr != nil {
 		ignoredBuildsOnly := strings.Contains(cap.String(), "ERR_PNPM_IGNORED_BUILDS")
 		if !(binPresent && ignoredBuildsOnly) {
-			return fmt.Errorf("pnpm add %s into %s: %w", m.ManagedPrefixPkg, prefix, runErr)
+			return fmt.Errorf("install %s into %s: %w\nOutput: %s", m.ManagedPrefixPkg, prefix, runErr, cap.String())
 		}
-		fmt.Fprintln(stdout, "  (pnpm blocked postinstall build scripts — left unbuilt by design; "+
+		fmt.Fprintln(stdout, "  (package manager blocked postinstall build scripts — left unbuilt by design; "+
 			m.ManagedPrefix+" does not need them at launch)")
 	}
 	if !binPresent {
-		return fmt.Errorf("pnpm add %s succeeded but %s binary not found under %s/node_modules/.bin",
+		return fmt.Errorf("install %s succeeded but %s binary not found under %s/node_modules/.bin",
 			m.ManagedPrefixPkg, m.ManagedPrefix, prefix)
 	}
 	fmt.Fprintf(stdout, "✓ %s installed; binary at %s\n", m.ManagedPrefix, bin)
@@ -910,11 +946,12 @@ const pnpmRegistryFlag = " --registry=https://registry.npmjs.org/"
 // allMethods is the static catalog, before filtering by what's installed.
 // Mirror of agent-cli-installer.sh but pnpm-first and Windows-aware.
 func allMethods(agent AgentID, action Action, current OS) []Method {
-	pnpmPkg := func(pkg string) string {
+	npmPkg := func(pkg string) string {
+		cmd := "npm install -g --no-fund --no-audit"
 		if action == ActionUpdate {
-			return "pnpm add -g" + pnpmRegistryFlag + " " + pkg + "@latest"
+			return cmd + " " + pkg + "@latest"
 		}
-		return "pnpm add -g" + pnpmRegistryFlag + " " + pkg
+		return cmd + " " + pkg
 	}
 
 	// OpenClaude is a single-maintainer npm package, which is a known
@@ -964,7 +1001,7 @@ func allMethods(agent AgentID, action Action, current OS) []Method {
 	// ManagedPrefix). The registry flag is shown for transparency and
 	// is also written into the prefix .npmrc.
 	const openclaudePkg = "@gitlawb/openclaude@latest"
-	openclaudeDisplayCmd := "pnpm add" + pnpmRegistryFlag + " " + openclaudePkg
+	openclaudeDisplayCmd := "npm install --no-fund --no-audit --ignore-scripts " + openclaudePkg
 
 	switch agent {
 	case AgentID("praimate-code"):
@@ -992,21 +1029,18 @@ func allMethods(agent AgentID, action Action, current OS) []Method {
 		}
 
 	case AgentOpenClaude:
-		// pnpm-only on every OS. OpenClaude has no brew formula,
-		// no winget package, no curl|bash installer — npm/pnpm is
-		// upstream's only distribution channel. We pick pnpm
-		// exclusively (skipping npm) for the registry-pinning +
-		// lockfile benefits, and install into a PrAImate-managed prefix
-		// with a hoisted .npmrc to work around the phantom aws-sdk
-		// dependency (see the openclaudePkg comment above).
+		// OpenClaude has no brew formula, winget package, or curl|bash
+		// installer. Install it with npm into a PrAImate-managed prefix;
+		// npm's hoisted layout works around the phantom aws-sdk dependency
+		// described above without relying on Corepack/pnpm.
 		return []Method{
-			{ID: "pnpm",
-				Label:            "pnpm into Clade-managed prefix (hoisted node-linker)",
+			{ID: "npm",
+				Label:            "npm into PrAImate-managed prefix",
 				Command:          openclaudeDisplayCmd,
 				ManagedPrefix:    "openclaude",
 				ManagedPrefixPkg: openclaudePkg,
 				Recommended:      true,
-				Prereqs:          []string{"node", "pnpm"}},
+				Prereqs:          []string{"node", "npm"}},
 		}
 
 	case AgentCodex:
@@ -1014,11 +1048,11 @@ func allMethods(agent AgentID, action Action, current OS) []Method {
 		case OSMacOS:
 			return []Method{
 				{ID: "brew", Label: "Homebrew formula", Command: formulaCmd(action, "codex"), Recommended: true},
-				{ID: "pnpm", Label: "pnpm global package", Command: pnpmPkg("@openai/codex"), Prereqs: []string{"node", "pnpm"}},
+				{ID: "npm", Label: "npm global package", Command: npmPkg("@openai/codex"), Prereqs: []string{"node", "npm"}},
 			}
 		case OSLinux, OSWSL, OSWindows:
 			return []Method{
-				{ID: "pnpm", Label: "pnpm global package", Command: pnpmPkg("@openai/codex"), Recommended: true, Prereqs: []string{"node", "pnpm"}},
+				{ID: "npm", Label: "npm global package", Command: npmPkg("@openai/codex"), Recommended: true, Prereqs: []string{"node", "npm"}},
 				{ID: "brew", Label: "Homebrew formula", Command: formulaCmd(action, "codex")},
 			}
 		}
@@ -1029,12 +1063,12 @@ func allMethods(agent AgentID, action Action, current OS) []Method {
 			return []Method{
 				{ID: "curl", Label: "Official install script", Command: "curl -fsSL https://opencode.ai/install | bash", Shell: ShellBash, Recommended: true},
 				{ID: "brew", Label: "Homebrew tap", Command: tapCmd(action, "anomalyco/tap/opencode")},
-				{ID: "pnpm", Label: "pnpm global package", Command: pnpmPkg("opencode-ai"), Prereqs: []string{"node", "pnpm"}},
+				{ID: "npm", Label: "npm global package", Command: npmPkg("opencode-ai"), Prereqs: []string{"node", "npm"}},
 			}
 		case OSLinux, OSWSL:
 			return []Method{
 				{ID: "curl", Label: "Official install script", Command: "curl -fsSL https://opencode.ai/install | bash", Shell: ShellBash, Recommended: true},
-				{ID: "pnpm", Label: "pnpm global package", Command: pnpmPkg("opencode-ai"), Prereqs: []string{"node", "pnpm"}},
+				{ID: "npm", Label: "npm global package", Command: npmPkg("opencode-ai"), Prereqs: []string{"node", "npm"}},
 				{ID: "paru", Label: "AUR via paru", Command: paruCmd(action, "opencode")},
 			}
 		case OSWindows:
@@ -1049,9 +1083,9 @@ func allMethods(agent AgentID, action Action, current OS) []Method {
 				{ID: "curl", Label: "Official install script (needs bash + curl)",
 					Command: "curl -fsSL https://opencode.ai/install | bash",
 					Shell:   ShellBash, Recommended: true},
-				{ID: "pnpm", Label: "pnpm global package",
-					Command: pnpmPkg("opencode-ai"),
-					Prereqs: []string{"node", "pnpm"}},
+				{ID: "npm", Label: "npm global package",
+					Command: npmPkg("opencode-ai"),
+					Prereqs: []string{"node", "npm"}},
 			}
 			// If bash isn't on PATH the curl method will be filtered
 			// out; demote pnpm to recommended in that case.
