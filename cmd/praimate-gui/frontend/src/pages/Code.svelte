@@ -25,6 +25,16 @@
     return agentNames.get(chat.AgentID) || chat.AgentID
   }
 
+  async function remove(chat) {
+    if (!confirm(`Delete code session "${chat.Title || chat.WorkspacePath}"?`)) return
+    try {
+      await api.deleteChat(chat.ID)
+      await load()
+    } catch (e) {
+      error = String(e)
+    }
+  }
+
   async function reopenCode(chat) {
     const terms = (await api.listTerminalSessions().catch(() => [])) || []
     const live = findTerminalForChat(terms, chat)
@@ -624,6 +634,7 @@
         </div>
         <button class="btn primary" on:click={() => reopenCode(chat)}>Reopen</button>
         <button class="btn" on:click={() => openConfig(chat)}>Edit</button>
+        <button class="btn danger" on:click={() => remove(chat)}>Delete</button>
       </div>
     {/each}
   {/if}

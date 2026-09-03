@@ -3,6 +3,7 @@
   import { api } from '../lib/api.js'
   import { activePage, openChatId, pageRevision, showToast } from '../lib/stores.js'
   import { localRoutingUnavailableMessage, supportsLocalRouting } from '../lib/localRouting.js'
+  import SkillsPicker from '../lib/SkillsPicker.svelte'
 
   let chats = []
   let agents = []
@@ -12,6 +13,66 @@
   let form = null
   let localOpt = null
   let preflightWarnings = null
+
+  let cfg = null
+  let cfgSaving = false
+  let skillsPickerOpen = false
+  let mcpServers = []
+
+  function normalizeToolsForCli(cli, tools) {
+    if (cli === 'claude' || cli === 'openclaude') return tools || ''
+    if (cli === 'codex' || cli === 'gemini') return ['edits', 'full'].includes(tools) ? tools : ''
+    if (cli === 'opencode' || cli === 'praimate-code') return ['plan', 'full'].includes(tools) ? tools : ''
+    return ''
+  }
+
+  function toolLevelsForCli(c) {
+    if (c === 'claude' || c === 'openclaude') return [{id:'',label:'Safe',hint:''}, {id:'ask',label:'Ask',hint:''}, {id:'edits',label:'Edits',hint:''}, {id:'full',label:'Full',hint:''}]
+    if (c === 'opencode' || c === 'praimate-code') return [{id:'plan',label:'Plan',hint:''}, {id:'',label:'Build',hint:''}, {id:'full',label:'Full',hint:''}]
+    return [{id:'',label:'Safe',hint:''}, {id:'ask',label:'Ask',hint:''}, {id:'edits',label:'Edits',hint:''}, {id:'full',label:'Full',hint:''}]
+  }
+
+  function openConfig(chat) {
+    error = ''
+    cfg = {
+      chat, name: chat.Title || '', cli: chat.CLIAgent, model: chat.Settings?.model || '',
+      tools: normalizeToolsForCli(chat.CLIAgent, chat.Settings?.tools),
+      localEndpoint: chat.Settings?.local?.endpoint || '',
+      localApiKey: chat.Settings?.local?.api_key || '',
+      localModel: chat.Settings?.local?.model || '',
+      suggestions: [], modelLoading: true,
+      skills: (chat.Settings?.skills || []).slice(), skillsCatalogue: [],
+      mcps: (chat.Settings?.mcp_servers || []).slice(),
+    }
+    if (clis.length === 0) api.listCLIs().then((r) => { clis = r || [] }).catch(() => {})
+    if (localOpt === null) api.localLLMModels().then((r) => { localOpt = r }).catch(() => { localOpt = { configured: false } })
+    api.skillsList().then((r) => { if (cfg) cfg.skillsCatalogue = r || [] }).catch(() => {})
+    api.listMCPServers().then((r) => { mcpServers = (r || []).filter((s) => s.enabled) }).catch(() => {})
+    cfgCliChanged()
+  }
+
+  async function cfgCliChanged() {
+    if (!cfg) return
+    if (cfg.localEndpoint && !supportsLocalRouting(cfg.cli)) { cfg.localEndpoint = ''; cfg.localModel = '' }
+    cfg.modelLoading = true
+    cfg.suggestions = (await api.listCLIModels(cfg.cli).catch(() => [])) || []
+    cfg.modelLoading = false
+  }
+
+  async function saveConfig() {
+    if (!cfg) return
+    cfgSaving = true; error = ''
+    try {
+      await api.updateChatConfig(cfg.chat.ID, cfg.cli, cfg.model.trim(), normalizeToolsForCli(cfg.cli, cfg.tools), cfg.localEndpoint.trim(), cfg.localApiKey, cfg.localModel.trim())
+      if (cfg.name.trim() && cfg.name.trim() !== cfg.chat.Title) {
+        await api.renameChat(cfg.chat.ID, cfg.name.trim())
+      }
+      try { await api.setChatSkills(cfg.chat.ID, cfg.skills || []) } catch (e) {}
+      await api.setChatMCPServers(cfg.chat.ID, cfg.mcps || [])
+      cfg = null
+      await load()
+    } catch (e) { error = String(e) } finally { cfgSaving = false }
+  }
 
   function continueLaunch() {
     if (!form) return
@@ -161,6 +222,7 @@
   async function reopen(chat) {
     error = ''
     try {
+      openChatId.set(chat.ID)
       showToast({ title: 'Opening Studio', message: chat.Title, tone: 'busy', duration: 0, dismissible: false })
       await api.openEditorWindow(chat.WorkspacePath, chat.AgentID || '', chat.CLIAgent || '', chat.Settings?.model || '', chat.ID, '', '', '')
       showToast({ title: 'Studio reopened', message: chat.Title, tone: 'ok' })
@@ -168,12 +230,6 @@
       error = String(e)
       showToast({ title: 'Studio failed to open', message: String(e), tone: 'err', duration: 0 })
     }
-  }
-
-  function transcript(chat) {
-    openChatId.set(chat.ID)
-    activePage.set('chats')
-    pageRevision.update((value) => value + 1)
   }
 
   async function remove(chat) {
@@ -208,7 +264,7 @@
       <div class="card-sub mono studio-path">{chat.WorkspacePath}</div>
     </div>
     <button class="btn primary" on:click={() => reopen(chat)}>Open Studio</button>
-    <button class="btn" on:click={() => transcript(chat)}>Transcript</button>
+    <button class="btn" on:click={() => openConfig(chat)}>Edit</button>
     <button class="btn danger" on:click={() => remove(chat)}>Delete</button>
   </div>
 {/each}
@@ -292,10 +348,113 @@
   </div>
 {/if}
 
+{#if cfg}
+  <SkillsPicker
+    bind:open={skillsPickerOpen}
+    cli={cfg.cli}
+    selected={cfg.skills || []}
+    title={`Skills for "${cfg.chat.Title || cfg.chat.WorkspacePath}"`}
+    on:change={(e) => (cfg.skills = e.detail)}
+    on:close={(e) => (cfg.skills = e.detail)} />
+
+  <!-- svelte-ignore a11y-no-static-element-interactions -->
+  <!-- svelte-ignore a11y-click-events-have-key-events -->
+  <div class="picker-backdrop" on:click={() => (cfg = null)}>
+    <div class="picker" on:click|stopPropagation role="dialog" style="max-width:640px; max-height:90vh; overflow-y:auto; display:flex; flex-direction:column;">
+      <div class="picker-head">
+        <strong class="grow">Settings — {cfg.chat.Title || cfg.chat.WorkspacePath}</strong>
+        <button class="picker-x" on:click={() => (cfg = null)}>×</button>
+      </div>
+      <div class="picker-body grow" style="padding:16px;">
+        <div class="card-sub" style="margin-bottom:12px;">Switching the CLI starts a fresh session on the next message; the history stays.</div>
+        <label class="lbl">Session Name</label>
+        <input class="field" style="max-width:320px; margin-bottom:12px" bind:value={cfg.name} />
+
+        <label class="lbl">CLI</label>
+        <select class="field" style="max-width:320px" bind:value={cfg.cli} on:change={cfgCliChanged}>
+          {#if clis.length === 0}<option value={cfg.cli}>{cfg.cli} (probing CLIs…)</option>{/if}
+          {#each clis as c}
+            <option value={c.id} disabled={!c.available && c.id !== cfg.chat.CLIAgent}>
+              {c.label}{c.available ? '' : ' — not installed'}
+            </option>
+          {/each}
+        </select>
+        <label class="lbl">Model (blank = CLI default)</label>
+        <input class="field mono" style="max-width:420px" list="cfg-model-suggestions" bind:value={cfg.model} />
+        <datalist id="cfg-model-suggestions">
+          {#each cfg.suggestions || [] as m}<option value={m}></option>{/each}
+        </datalist>
+        {#if cfg.modelLoading}<div class="card-sub">Loading models...</div>{/if}
+        <label class="lbl">Tools</label>
+        <div class="row">
+            {#each toolLevelsForCli(cfg.cli) as lvl}
+              <button class="btn sm" class:primary={cfg.tools === lvl.id} title={lvl.hint} on:click={() => (cfg.tools = lvl.id)}>{lvl.label}</button>
+            {/each}
+        </div>
+        {#if localOpt?.configured && supportsLocalRouting(cfg.cli)}
+          <label class="row" style="margin-top:10px; gap:8px; cursor:pointer">
+            <input type="checkbox" checked={!!cfg.localEndpoint} on:change={(e) => {
+              cfg.localEndpoint = e.currentTarget.checked ? localOpt.endpoint : ''
+              cfg.localModel = e.currentTarget.checked ? cfg.localModel || localOpt.models?.[0] || '' : ''
+            }} />
+            <span>Use the local LLM <span class="card-sub mono">{localOpt.endpoint}</span></span>
+          </label>
+          {#if cfg.localEndpoint}
+            <label class="lbl" style="margin-top:8px">Local model</label>
+            <input class="field mono" style="max-width:420px" list="cfg-local-models" bind:value={cfg.localModel} placeholder="model on your endpoint" />
+            <datalist id="cfg-local-models">{#each localOpt.models || [] as m}<option value={m}></option>{/each}</datalist>
+          {/if}
+        {/if}
+        <label class="lbl" style="margin-top:10px">Skills</label>
+        <div class="row">
+          <button class="btn" on:click={() => (skillsPickerOpen = true)}>
+            {cfg.skills?.length ? `★ ${cfg.skills.length} skill${cfg.skills.length === 1 ? '' : 's'} enabled` : '+ Choose skills…'}
+          </button>
+          {#if cfg.skills?.length}
+            <button class="btn sm" on:click={() => (cfg.skills = [])} title="Clear all skills for this chat">Clear</button>
+          {/if}
+        </div>
+        <label class="lbl" style="margin-top:10px">MCP servers</label>
+        {#if mcpServers.length === 0}
+          <div class="card-sub">No enabled MCP servers.</div>
+        {:else}
+          <div class="mcp-grid">
+            {#each mcpServers as server}
+              <label class="mcp-card">
+                <input
+                  type="checkbox"
+                  checked={cfg.mcps?.includes(server.id)}
+                  on:change={(e) => {
+                    cfg.mcps = e.currentTarget.checked
+                      ? [...(cfg.mcps || []), server.id]
+                      : (cfg.mcps || []).filter((id) => id !== server.id)
+                  }} />
+                <span><strong>{server.name}</strong> <span class="card-sub">{server.transport}</span></span>
+              </label>
+            {/each}
+          </div>
+        {/if}
+      </div>
+      <div class="picker-foot" style="justify-content:flex-end;">
+        <button class="btn" on:click={() => (cfg = null)}>Cancel</button>
+        <button class="btn primary" on:click={saveConfig} disabled={cfgSaving}>{cfgSaving ? 'Saving…' : 'Save'}</button>
+      </div>
+    </div>
+  </div>
+{/if}
 <style>
   .studio-path { margin-top: 3px; overflow-wrap: anywhere; }
   .studio-modal { max-width: 640px; max-height: 90vh; overflow-y: auto; }
   .local-toggle { margin-top: 12px; cursor: pointer; }
   .preflight { margin-top: 12px; }
   .actions { justify-content: flex-end; margin-top: 16px; }
+  .picker-backdrop { position: fixed; inset: 0; z-index: 10000; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; padding: 24px; }
+  .picker { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 12px 40px rgba(0,0,0,0.25); width: 100%; }
+  .picker-head { display: flex; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  .picker-x { background: none; border: none; font-size: 20px; line-height: 1; color: var(--text-dim); cursor: pointer; }
+  .picker-foot { padding: 12px 16px; border-top: 1px solid var(--border); display: flex; gap: 8px; }
+  .mcp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; margin-top: 8px; }
+  .mcp-card { display: flex; align-items: flex-start; gap: 8px; padding: 8px; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; }
+  .mcp-card:hover { background: var(--bg-raised, rgba(255,255,255,0.04)); }
+  .mcp-card input { margin-top: 2px; }
 </style>

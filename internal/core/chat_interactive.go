@@ -339,27 +339,50 @@ func (c *Core) ContinueChatStream(ctx context.Context, chatID, userMessage, cwd,
 		assistantMeta = map[string]any{"activity": activity}
 	}
 
-	// Interrupted turn: keep whatever streamed instead of erroring —
-	// that's the desktop-app stop-button contract.
-	if err != nil && errors.Is(err, context.Canceled) && reply != nil && reply.Text != "" {
+	// If the turn errored, was interrupted, or exited non-zero, keep whatever streamed
+	// instead of losing the partial reply. That's the desktop-app contract.
+	if (err != nil || (reply != nil && reply.ExitCode != 0)) && reply != nil && reply.Text != "" {
 		if assistantMeta == nil {
 			assistantMeta = map[string]any{}
 		}
-		assistantMeta["interrupted"] = true
+		if err != nil && errors.Is(err, context.Canceled) {
+			assistantMeta["interrupted"] = true
+		} else {
+			if err != nil {
+				assistantMeta["error"] = err.Error()
+			} else {
+				assistantMeta["error"] = fmt.Sprintf("exited with code %d", reply.ExitCode)
+			}
+		}
 		revealed := privacy.Reveal(reply.Text, matches)
-		// ctx is dead — persist with a fresh background context.
+		// ctx might be dead — persist with a fresh background context.
 		pctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if _, perr := c.AddMessage(pctx, chatID, "assistant", revealed, assistantMeta); perr != nil {
-			return nil, fmt.Errorf("persist interrupted reply: %w", perr)
+			if err != nil {
+				return nil, fmt.Errorf("persist failed reply: %w (original error: %v)", perr, err)
+			}
+			return nil, fmt.Errorf("persist failed reply: %w", perr)
 		}
-		return &ChatTurn{
-			UserMessage: userMessage,
-			Reply:       revealed,
-			SessionID:   reply.SessionID,
-			DurationMs:  time.Since(start).Milliseconds(),
-		}, nil
+
+		// If it's a cancellation, we return success so the UI doesn't show a red error banner.
+		if err != nil && errors.Is(err, context.Canceled) {
+			return &ChatTurn{
+				UserMessage: userMessage,
+				Reply:       revealed,
+				SessionID:   reply.SessionID,
+				DurationMs:  time.Since(start).Milliseconds(),
+			}, nil
+		}
+
+		// Otherwise, we still return the error so the UI shows the banner,
+		// but the partial text is safely in the database!
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", adapter.Name(), err)
+		}
+		return nil, fmt.Errorf("%s exited with code %d", adapter.Name(), reply.ExitCode)
 	}
+
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", adapter.Name(), err)
 	}

@@ -164,17 +164,17 @@ eval "$(echo '\n' | gnome-keyring-daemon --unlock)"</pre>
     display: grid;
     place-items: center;
     padding: 32px;
-    color: var(--text, #e7eaf0);
+    color: var(--text);
     background:
       radial-gradient(circle at 50% 0%, rgba(93, 214, 154, 0.09), transparent 35%),
-      var(--bg, #0d0f13);
+      var(--bg);
   }
   .lock-card {
     width: min(480px, 100%);
     padding: 30px;
-    border: 1px solid var(--border, #2a2e36);
+    border: 1px solid var(--border);
     border-radius: 16px;
-    background: var(--panel, #15171c);
+    background: var(--bg-panel);
     box-shadow: 0 24px 80px rgba(0, 0, 0, 0.36);
   }
   .brand {
@@ -182,13 +182,13 @@ eval "$(echo '\n' | gnome-keyring-daemon --unlock)"</pre>
     align-items: center;
     gap: 11px;
     padding-bottom: 22px;
-    border-bottom: 1px solid var(--border, #2a2e36);
+    border-bottom: 1px solid var(--border);
   }
   .brand img { width: 38px; height: 38px; border-radius: 9px; }
   .brand div { display: grid; gap: 2px; }
   .brand span { font-weight: 700; letter-spacing: 0.01em; }
   .brand small, footer, .hint, .remember small {
-    color: var(--muted, #9ca4b2);
+    color: var(--text-dim);
   }
   .heading {
     display: flex;
@@ -201,8 +201,8 @@ eval "$(echo '\n' | gnome-keyring-daemon --unlock)"</pre>
     height: 42px;
     display: grid;
     place-items: center;
-    color: #5dd69a;
-    background: rgba(93, 214, 154, 0.1);
+    color: var(--ok);
+    background: rgba(34, 197, 94, 0.1);
     border-radius: 11px;
   }
   .lock-icon svg { width: 23px; height: 23px; }
@@ -216,8 +216,8 @@ eval "$(echo '\n' | gnome-keyring-daemon --unlock)"</pre>
     height: 42px;
     padding: 0 12px;
     color: inherit;
-    background: var(--input, #101216);
-    border: 1px solid var(--border, #303541);
+    background: var(--bg-input);
+    border: 1px solid var(--border);
     border-radius: 8px;
     outline: none;
   }
@@ -230,7 +230,7 @@ eval "$(echo '\n' | gnome-keyring-daemon --unlock)"</pre>
     top: 7px;
     height: 28px;
     border: 0;
-    color: var(--muted, #a7afbc);
+    color: var(--text-dim);
     background: transparent;
     cursor: pointer;
   }
@@ -241,7 +241,7 @@ eval "$(echo '\n' | gnome-keyring-daemon --unlock)"</pre>
     align-items: flex-start;
     margin: 10px 0 4px;
     padding: 12px;
-    border: 1px solid var(--border, #2f3440);
+    border: 1px solid var(--border);
     border-radius: 9px;
     cursor: pointer;
   }
@@ -253,8 +253,8 @@ eval "$(echo '\n' | gnome-keyring-daemon --unlock)"</pre>
     margin-top: 8px;
     border: 0;
     border-radius: 8px;
-    color: #07140d;
-    background: #5dd69a;
+    color: var(--bg-panel);
+    background: var(--ok);
     font-weight: 700;
     cursor: pointer;
   }
@@ -266,14 +266,14 @@ eval "$(echo '\n' | gnome-keyring-daemon --unlock)"</pre>
     line-height: 1.45;
   }
   .message.error {
-    color: #ffb8b8;
-    border: 1px solid rgba(255, 90, 90, 0.35);
-    background: rgba(160, 35, 35, 0.18);
+    color: var(--err);
+    border: 1px solid var(--border);
+    background: rgba(255, 0, 0, 0.1);
   }
   .message.warning {
-    color: #f4d38b;
-    border: 1px solid rgba(220, 165, 53, 0.35);
-    background: rgba(150, 100, 20, 0.15);
+    color: var(--warn);
+    border: 1px solid var(--border);
+    background: rgba(255, 200, 0, 0.1);
   }
   footer {
     margin-top: 23px;

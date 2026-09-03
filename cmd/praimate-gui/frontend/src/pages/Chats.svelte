@@ -451,7 +451,11 @@
       messages = (await api.chatMessages(selected.ID)) || messages
     } catch (e) {
       error = String(e)
-      messages = messages.filter((m) => !m._pending)
+      try {
+        messages = (await api.chatMessages(selected.ID)) || messages.filter((m) => !m._pending)
+      } catch {
+        messages = messages.filter((m) => !m._pending)
+      }
       attachments = staged
     } finally {
       sending = false

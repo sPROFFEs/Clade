@@ -38,7 +38,7 @@
     } else {
       expandedDirs.add(dirPath)
     }
-    expandedDirs = expandedDirs
+    expandedDirs = new Set(expandedDirs)
   }
 
   $: {
@@ -51,7 +51,7 @@
           expandedDirs.add(dir)
         }
       })
-      expandedDirs = expandedDirs
+      expandedDirs = new Set(expandedDirs)
       initExpanded = false
     }
   }
@@ -672,14 +672,14 @@
     {/if}
     {#each treeNodes as n}
       {#if n.type === 'dir'}
-        <div class="tree-item-wrap" style="padding-left: {n.depth * 12}px">
+        <div class="tree-item-wrap" style="padding-left: {n.depth * 16}px">
           <button class="tree-item grow" on:click={() => toggleDir(n.path)} title={n.path}>
             <span class="file-icon" style="opacity:1">{expandedDirs.has(n.path) ? '📂' : '📁'}</span>
             <span class="file-name" style="font-weight:600">{n.name}</span>
           </button>
         </div>
       {:else}
-        <div class="tree-item-wrap" class:active={n.path === active} style="padding-left: {n.depth * 12}px">
+        <div class="tree-item-wrap" class:active={n.path === active} style="padding-left: {n.depth * 16}px">
           <button
             class="tree-item grow"
             on:click={() => open(n.path)}

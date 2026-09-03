@@ -61,6 +61,78 @@
   let tree = [] // AgentFileNode[]
   let treeLoading = false
 
+  let expandedDirs = new Set()
+  let initExpanded = true
+
+  function toggleDir(dirPath) {
+    if (expandedDirs.has(dirPath)) {
+      expandedDirs.delete(dirPath)
+    } else {
+      expandedDirs.add(dirPath)
+    }
+    expandedDirs = new Set(expandedDirs)
+  }
+
+  $: {
+    if (initExpanded && tree.length > 0) {
+      tree.forEach(n => {
+        if (n.isDir) expandedDirs.add(n.rel)
+      })
+      expandedDirs = new Set(expandedDirs)
+      initExpanded = false
+    }
+  }
+
+  $: visibleTree = buildAndSortAgentTree(tree, expandedDirs)
+
+  function buildAndSortAgentTree(nodes, expanded) {
+    const root = { rel: '', name: '', isDir: true, children: {}, depth: -1 }
+
+    for (const n of nodes) {
+      const parts = n.rel.split('/')
+      let curr = root
+      let currentPath = ''
+
+      for (let i = 0; i < parts.length - 1; i++) {
+        currentPath += (i===0?'':'/') + parts[i]
+        if (!curr.children[parts[i]]) {
+          curr.children[parts[i]] = { name: parts[i], rel: currentPath, isDir: true, children: {}, depth: i }
+        }
+        curr = curr.children[parts[i]]
+      }
+
+      const fileName = parts[parts.length - 1]
+      if (!curr.children[fileName]) {
+        curr.children[fileName] = { ...n, children: {} }
+      } else {
+        Object.assign(curr.children[fileName], n)
+      }
+    }
+
+    const result = []
+    function traverse(node) {
+      if (node.rel !== '') {
+        result.push(node)
+        if (node.isDir && !expanded.has(node.rel)) {
+          return
+        }
+      }
+      if (node.children) {
+        const vals = Object.values(node.children)
+        vals.sort((a, b) => {
+          if (a.isDir !== b.isDir) return a.isDir ? -1 : 1
+          return a.name.localeCompare(b.name)
+        })
+        for (const v of vals) {
+          traverse(v)
+        }
+      }
+    }
+
+    traverse(root)
+    return result
+  }
+
   // --- knowledge / RAG (left-bottom) ---
   let know = null
   let knowBusy = false
@@ -922,17 +994,21 @@
         {#if tree.length === 0}
           <div class="tree-row" style="padding-left:24px"><span class="empty-note">empty — add documents below</span></div>
         {/if}
-        {#each tree as n}
-          <div class="tree-row" style="padding-left:{20 + n.depth * 12}px" title={n.rel}>
+        {#each visibleTree as n}
+          <div class="tree-row" style="padding-left:{16 + n.depth * 16}px" title={n.rel}>
             {#if n.isDir}
-              <span class="tree-item dir" class:idx={n.isIndex}>{n.isIndex ? '🗂' : '📁'} {n.name}{#if n.isIndex} <span class="tag idx">RAG index</span>{/if}</span>
+              <button class="tree-item dir" class:idx={n.isIndex} on:click={() => toggleDir(n.rel)}>
+                {n.isIndex ? '🗂' : (expandedDirs.has(n.rel) ? '📂' : '📁')} {n.name}{#if n.isIndex} <span class="tag idx">RAG index</span>{/if}
+              </button>
             {:else}
-              <button
-                class="tree-item file grow"
-                class:on={active === n.rel}
-                on:click={() => openFile(n.rel)}
-                on:contextmenu={(ev) => fileMenu(ev, n)}
-                title={n.isIndex ? n.rel : `${n.rel} — right-click for options`}>{n.isIndex ? '◦' : '📄'} {n.name}</button>
+              <div class="tree-item-wrap grow" class:on={active === 'know/' + n.rel}>
+                <button
+                  class="tree-item file grow"
+                  on:click={() => openFile(n.rel)}
+                  on:contextmenu={(ev) => fileMenu(ev, n)}
+                  title={n.isIndex ? n.rel : `${n.rel} — right-click for options`}>{n.isIndex ? '◦' : '📄'} {n.name}</button>
+                {#if !n.isIndex}<button class="tree-act danger-hover" on:click={() => rmFile(n.rel)} title="Delete file">✕</button>{/if}
+              </div>
             {/if}
           </div>
         {/each}
@@ -1160,7 +1236,7 @@
   .tree-item { display: block; width: 100%; text-align: left; background: none; border: none; color: var(--text); font-size: 12px; padding: 3px 6px; border-radius: 6px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   button.tree-item:hover { background: var(--bg-raised); }
   .tree-item.on { background: var(--bg-raised); font-weight: 600; }
-  .tree-item.dir { color: var(--text-dim); cursor: default; }
+  .tree-item.dir { color: var(--text-dim); cursor: pointer; }
   .tree-item.idx { color: var(--text-dim); }
   .tag { font-size: 10px; color: var(--text-dim); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
   .tag.idx { color: var(--accent, #7c6cf2); }

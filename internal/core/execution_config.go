@@ -297,11 +297,36 @@ func (c *Core) PrepareExecution(ctx context.Context, cfg *EffectiveExecutionConf
 	if cfg == nil {
 		return errors.New("PrepareExecution: nil config")
 	}
-	if cfg.Local != nil && (cfg.CLI == "opencode" || cfg.CLI == "praimate-code") {
-		if err := writeOpenCodeLocalRoute(cfg.Cwd, *cfg.Local); err != nil {
-			return fmt.Errorf("prepare local OpenCode route: %w", err)
+	if cfg.Local != nil {
+		if cfg.CLI == "opencode" || cfg.CLI == "praimate-code" {
+			if err := writeOpenCodeLocalRoute(cfg.Cwd, *cfg.Local); err != nil {
+				return fmt.Errorf("prepare local OpenCode route: %w", err)
+			}
+		} else if cfg.CLI == "openclaude" {
+			settings := ollama.Settings{
+				Endpoint:      cfg.Local.Endpoint,
+				Model:         cfg.Local.Model,
+				APIKey:        cfg.Local.APIKey,
+				ContextTokens: cfg.Local.ContextTokens,
+				OutputTokens:  cfg.Local.OutputTokens,
+			}
+			ls := launcher.OllamaSettings{
+				Endpoint:      settings.Endpoint,
+				Model:         settings.Model,
+				APIKey:        settings.APIKey,
+				ContextTokens: settings.ContextTokens,
+				OutputTokens:  settings.OutputTokens,
+			}
+			if err := launcher.WriteOpenClaudeLocalProfile(ls, settings.APIKey); err != nil {
+				return fmt.Errorf("prepare local OpenClaude route: %w", err)
+			}
+		}
+	} else if cfg.CLI == "openclaude" {
+		if !launcher.IsOpenClaudeConfigured() {
+			_ = launcher.BackupOpenClaudeLocalProfileIfPresent()
 		}
 	}
+
 	var (
 		mcpEnv map[string]string
 		err    error
