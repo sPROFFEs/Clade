@@ -92,6 +92,7 @@ export const api = {
 
   updateChatConfig: (chatID, cli, model, tools, localEndpoint, localApiKey, localModel) =>
     call('UpdateChatConfig', chatID, cli, model, tools, localEndpoint || '', localApiKey || '', localModel || ''),
+  renameChat: (chatID, newTitle) => call('RenameChat', chatID, newTitle),
   searchChats: (q) => call('SearchChats', q),
 
   listCLIBackends: () => call('ListCLIBackends'),

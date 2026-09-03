@@ -255,7 +255,7 @@ func (a *App) PickProjectFolder() (string, error) {
 // context file (CLAUDE.md / AGENTS.md) so the CLI adopts the persona,
 // without us reimplementing its loop. Returns the terminal session id;
 // output streams over "term:data:<id>" events.
-func (a *App) StartTerminal(agentID, cli, model, cwd, localEndpoint, _ string, localModel string, resume bool) (string, error) {
+func (a *App) StartTerminal(agentID, cli, model, cwd, localEndpoint, _ string, localModel string, resume bool, skills []string) (string, error) {
 	c, err := a.requireCore()
 	if err != nil {
 		return "", err
@@ -302,8 +302,12 @@ func (a *App) StartTerminal(agentID, cli, model, cwd, localEndpoint, _ string, l
 		return "", err
 	}
 	env := appendEnvMap(nil, effective.Env)
-	if agent != nil {
-		_ = exportAgentContext(cwd, cli, agent)
+	var skillsPrefix string
+	if len(skills) > 0 {
+		skillsPrefix = core.ResolveSkillsPrefix(skills)
+	}
+	if agent != nil || skillsPrefix != "" {
+		_ = exportAgentContext(cwd, cli, agent, skillsPrefix)
 	}
 	return a.terms.start(a.ctx, name, args, cwd, env)
 }
@@ -1254,4 +1258,13 @@ func (a *App) SetGUISetting(key, valueJSON string) error {
 		return err
 	}
 	return c.SetSetting(a.ctx, core.ScopeGUI, key, []byte(valueJSON))
+}
+
+// RenameChat changes the title of an existing chat.
+func (a *App) RenameChat(chatID, newTitle string) error {
+	c, err := a.requireCore()
+	if err != nil {
+		return err
+	}
+	return c.RenameChat(a.ctx, chatID, newTitle)
 }

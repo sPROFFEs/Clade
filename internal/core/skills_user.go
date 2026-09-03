@@ -23,7 +23,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -115,13 +114,30 @@ func MergedSkillCatalogue() []Skill {
 	return out
 }
 
-// idSlug normalises a name into a stable kebab-case skill id.
-var idSlugRE = regexp.MustCompile(`[^a-z0-9]+`)
-
-func idSlug(name string) string {
-	s := strings.ToLower(strings.TrimSpace(name))
-	s = idSlugRE.ReplaceAllString(s, "-")
-	return strings.Trim(s, "-")
+// SkillSlug normalises a display name into a predictable kebab-case id.
+func SkillSlug(s string) string {
+	b := make([]byte, 0, len(s))
+	prevDash := true
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= 'A' && c <= 'Z':
+			b = append(b, c+('a'-'A'))
+			prevDash = false
+		case (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'):
+			b = append(b, c)
+			prevDash = false
+		default:
+			if !prevDash {
+				b = append(b, '-')
+				prevDash = true
+			}
+		}
+	}
+	if len(b) > 0 && b[len(b)-1] == '-' {
+		b = b[:len(b)-1]
+	}
+	return string(b)
 }
 
 // AddUserSkill inserts (or updates by id) a user skill. CLIs may be
@@ -139,7 +155,7 @@ func AddUserSkill(s Skill) (*Skill, error) {
 		return nil, errors.New("skill body is empty — paste markdown or import from a URL / ZIP")
 	}
 	if s.ID == "" {
-		s.ID = idSlug(s.Name)
+		s.ID = SkillSlug(s.Name)
 	}
 	if s.ID == "" {
 		return nil, errors.New("skill name has no usable letters or digits")
@@ -232,7 +248,7 @@ func ImportSkillFromURL(ctx context.Context, rawURL string) (*Skill, error) {
 				return nil, err
 			}
 			return &Skill{
-				ID:          idSlug(deriveSkillNameFromURL(rawURL)),
+				ID:          SkillSlug(deriveSkillNameFromURL(rawURL)),
 				Name:        deriveSkillNameFromURL(rawURL),
 				Description: "Imported from " + rawURL,
 				Body:        body,
@@ -244,7 +260,7 @@ func ImportSkillFromURL(ctx context.Context, rawURL string) (*Skill, error) {
 			return nil, fmt.Errorf("fetch %s: %w", rewritten, err)
 		}
 		return &Skill{
-			ID:          idSlug(deriveSkillNameFromURL(rawURL)),
+			ID:          SkillSlug(deriveSkillNameFromURL(rawURL)),
 			Name:        deriveSkillNameFromURL(rawURL),
 			Description: "Imported from " + rawURL,
 			Body:        string(body),
@@ -260,7 +276,7 @@ func ImportSkillFromURL(ctx context.Context, rawURL string) (*Skill, error) {
 			return nil, err
 		}
 		return &Skill{
-			ID:          idSlug(deriveSkillNameFromURL(rawURL)),
+			ID:          SkillSlug(deriveSkillNameFromURL(rawURL)),
 			Name:        deriveSkillNameFromURL(rawURL),
 			Description: "Imported from " + rawURL,
 			Body:        string(body),
@@ -278,7 +294,7 @@ func ImportSkillFromURL(ctx context.Context, rawURL string) (*Skill, error) {
 			return nil, err
 		}
 		return &Skill{
-			ID:          idSlug(deriveSkillNameFromURL(rawURL)),
+			ID:          SkillSlug(deriveSkillNameFromURL(rawURL)),
 			Name:        deriveSkillNameFromURL(rawURL),
 			Description: "Imported (ZIP) from " + rawURL,
 			Body:        body,
@@ -295,7 +311,7 @@ func ImportSkillFromURL(ctx context.Context, rawURL string) (*Skill, error) {
 			return nil, err
 		}
 		return &Skill{
-			ID:          idSlug(deriveSkillNameFromURL(rawURL)),
+			ID:          SkillSlug(deriveSkillNameFromURL(rawURL)),
 			Name:        deriveSkillNameFromURL(rawURL),
 			Description: "Imported from " + rawURL,
 			Body:        string(body),
@@ -481,7 +497,7 @@ func ImportSkillFromZipFile(path string) (*Skill, error) {
 	}
 	name := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	return &Skill{
-		ID:          idSlug(name),
+		ID:          SkillSlug(name),
 		Name:        name,
 		Description: "Imported (ZIP) from " + path,
 		Body:        body,

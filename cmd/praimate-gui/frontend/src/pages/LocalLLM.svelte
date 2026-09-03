@@ -210,4 +210,14 @@
     <button class="btn primary" on:click={() => applyCLI('opencode')} disabled={!!applyBusy || !d.endpoint}>{applyBusy === 'opencode' ? 'Applying…' : 'Apply'}</button>
     <button class="btn" on:click={() => disableCLI('opencode')} disabled={!!applyBusy || !cliStatus.opencode}>Disable</button>
   </div>
+
+  <div class="row" style="margin-top:14px; flex-wrap:wrap; gap:8px">
+    <div class="grow">
+      <strong>openclaude</strong>
+      {#if cliStatus.openclaude}<span class="pill ok">routed to local</span>{:else}<span class="pill">cloud default</span>{/if}
+      <span class="card-sub">(writes global local profile)</span>
+    </div>
+    <button class="btn primary" on:click={() => applyCLI('openclaude')} disabled={!!applyBusy || !d.endpoint}>{applyBusy === 'openclaude' ? 'Applying…' : 'Apply'}</button>
+    <button class="btn" on:click={() => disableCLI('openclaude')} disabled={!!applyBusy || !cliStatus.openclaude}>Disable</button>
+  </div>
 </div>

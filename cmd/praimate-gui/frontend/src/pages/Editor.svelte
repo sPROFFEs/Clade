@@ -29,6 +29,79 @@
   let quickOpenIndex = 0
   let ctx = null
 
+  let expandedDirs = new Set()
+  let initExpanded = true
+
+  function toggleDir(dirPath) {
+    if (expandedDirs.has(dirPath)) {
+      expandedDirs.delete(dirPath)
+    } else {
+      expandedDirs.add(dirPath)
+    }
+    expandedDirs = expandedDirs
+  }
+
+  $: {
+    if (initExpanded && files.length > 0) {
+      files.forEach(f => {
+        let parts = f.split('/')
+        let dir = ''
+        for (let i = 0; i < parts.length - 1; i++) {
+          dir += (i===0?'':'/') + parts[i]
+          expandedDirs.add(dir)
+        }
+      })
+      expandedDirs = expandedDirs
+      initExpanded = false
+    }
+  }
+
+  $: treeNodes = buildAndSortTree(files, expandedDirs)
+
+  function buildAndSortTree(filesArr, expanded) {
+    const root = { name: '', path: '', type: 'dir', children: {}, depth: -1 }
+
+    for (const f of filesArr) {
+      const parts = f.split('/')
+      let curr = root
+      let currentPath = ''
+
+      for (let i = 0; i < parts.length - 1; i++) {
+        currentPath += (i===0?'':'/') + parts[i]
+        if (!curr.children[parts[i]]) {
+          curr.children[parts[i]] = { name: parts[i], path: currentPath, type: 'dir', children: {}, depth: i }
+        }
+        curr = curr.children[parts[i]]
+      }
+
+      const fileName = parts[parts.length - 1]
+      curr.children[fileName] = { name: fileName, path: f, type: 'file', depth: parts.length - 1 }
+    }
+
+    const result = []
+    function traverse(node) {
+      if (node.path !== '') {
+        result.push(node)
+        if (node.type === 'dir' && !expanded.has(node.path)) {
+          return
+        }
+      }
+      if (node.children) {
+        const vals = Object.values(node.children)
+        vals.sort((a, b) => {
+          if (a.type !== b.type) return a.type === 'dir' ? -1 : 1
+          return a.name.localeCompare(b.name)
+        })
+        for (const v of vals) {
+          traverse(v)
+        }
+      }
+    }
+
+    traverse(root)
+    return result
+  }
+
   async function deleteFile(rel) {
     if (!confirm(`Delete ${rel}? This can't be undone from inside the editor.`)) return
     try {
@@ -597,13 +670,26 @@
         <button class="btn sm primary" on:click={newFile}>OK</button>
       </div>
     {/if}
-    {#each files as f}
-      <button
-        class="tree-item"
-        class:active={f === active}
-        on:click={() => open(f)}
-        on:contextmenu={(ev) => fileMenu(ev, f)}
-        title={`${f} — right-click for options`}>{f}</button>
+    {#each treeNodes as n}
+      {#if n.type === 'dir'}
+        <div class="tree-item-wrap" style="padding-left: {n.depth * 12}px">
+          <button class="tree-item grow" on:click={() => toggleDir(n.path)} title={n.path}>
+            <span class="file-icon" style="opacity:1">{expandedDirs.has(n.path) ? '📂' : '📁'}</span>
+            <span class="file-name" style="font-weight:600">{n.name}</span>
+          </button>
+        </div>
+      {:else}
+        <div class="tree-item-wrap" class:active={n.path === active} style="padding-left: {n.depth * 12}px">
+          <button
+            class="tree-item grow"
+            on:click={() => open(n.path)}
+            on:contextmenu={(ev) => fileMenu(ev, n.path)}
+            title={`${n.path} — right-click for options`}>
+            <span class="file-icon">📄</span> <span class="file-name">{n.name}</span>
+          </button>
+          <button class="tree-act danger-hover" title="Delete file" on:click={() => deleteFile(n.path)}>✕</button>
+        </div>
+      {/if}
     {/each}
     {#if files.length === 0}<div class="card-sub" style="padding:8px">No editable files yet — create one.</div>{/if}
   </aside>
@@ -624,8 +710,8 @@
       </div>
       {#if tabs.length > 0}
         <button class="tb-btn" title="Save all dirty tabs (Ctrl+Shift+S)" on:click={saveAll} disabled={dirtyCount === 0}>💾 Save all{dirtyCount > 0 ? ` (${dirtyCount})` : ''}</button>
-        <button class="tb-btn" title="Close others" on:click={() => active && closeOthers(active)} disabled={tabs.length < 2}>↹</button>
-        <button class="tb-btn" title="Close all" on:click={closeAll}>✕</button>
+        <button class="tb-btn" title="Close other tabs" on:click={() => active && closeOthers(active)} disabled={tabs.length < 2}>Close others</button>
+        <button class="tb-btn danger-hover" title="Close all tabs" on:click={closeAll}>Close all</button>
       {/if}
     </div>
     {#if activeTab}
@@ -832,8 +918,29 @@
     flex: none;
   }
   .tree-head .grow { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tree-item-wrap {
+    display: flex;
+    align-items: center;
+    border-radius: 6px;
+    margin-bottom: 2px;
+  }
+  .tree-item-wrap:hover { background: var(--bg-raised, rgba(255,255,255,0.06)); }
+  .tree-item-wrap.active { background: var(--bg-raised, rgba(255,255,255,0.1)); }
+  .tree-item-wrap .tree-act {
+    display: none;
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    padding: 4px 6px;
+    border-radius: 4px;
+    font-size: 10px;
+  }
+  .tree-item-wrap:hover .tree-act { display: block; }
+  .tree-item-wrap .tree-act:hover { background: rgba(220, 53, 69, 0.2); color: #ff6b6b; }
   .tree-item {
-    display: block;
+    display: flex;
+    align-items: center;
     width: 100%;
     text-align: left;
     background: none;
@@ -841,14 +948,11 @@
     color: var(--text);
     font-size: 12px;
     padding: 4px 6px;
-    border-radius: 6px;
     cursor: pointer;
     overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
-  .tree-item:hover { background: var(--bg-raised, rgba(255,255,255,0.06)); }
-  .tree-item.active { background: var(--bg-raised, rgba(255,255,255,0.1)); }
+  .tree-item .file-icon { margin-right: 6px; opacity: 0.7; font-size: 11px; }
+  .tree-item .file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .editor-col { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
   .tabrow { display: flex; align-items: stretch; gap: 4px; margin-bottom: 6px; min-width: 0; }
   .tabrow .tb-btn { flex: 0 0 auto; }

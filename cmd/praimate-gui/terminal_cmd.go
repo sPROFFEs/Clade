@@ -104,8 +104,8 @@ func appendEnvMap(env []string, extra map[string]string) []string {
 //	claude / openclaude           → CLAUDE.md
 //	codex / opencode/praimate-code → AGENTS.md
 //	others                        → no native convention; skipped
-func exportAgentContext(cwd, cli string, agent *core.Agent) error {
-	if agent == nil || strings.TrimSpace(agent.Instructions) == "" {
+func exportAgentContext(cwd, cli string, agent *core.Agent, skillsPrefix string) error {
+	if (agent == nil || strings.TrimSpace(agent.Instructions) == "") && skillsPrefix == "" {
 		return nil
 	}
 	var fname string
@@ -126,8 +126,16 @@ func exportAgentContext(cwd, cli string, agent *core.Agent) error {
 			return nil
 		}
 	}
-	// AgentSystemPrompt = instructions + the knowledge-base pointer, so
-	// terminal sessions get the same context as chats and the studio.
-	body := fmt.Sprintf("%s\n# %s\n\n%s\n", marker, agent.Name, strings.TrimSpace(core.AgentSystemPrompt(agent)))
+
+	body := marker + "\n"
+	if agent != nil {
+		body += fmt.Sprintf("# %s\n\n%s\n", agent.Name, strings.TrimSpace(core.AgentSystemPrompt(agent)))
+	}
+	if skillsPrefix != "" {
+		if agent != nil && strings.TrimSpace(agent.Instructions) != "" {
+			body += "\n---\n\n"
+		}
+		body += skillsPrefix + "\n"
+	}
 	return os.WriteFile(path, []byte(body), 0o644)
 }

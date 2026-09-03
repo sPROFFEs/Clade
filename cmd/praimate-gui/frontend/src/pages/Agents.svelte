@@ -119,6 +119,7 @@
       surface,
       cli: cliOptions[0]?.id || 'claude',
       model: '',
+      name: '',
       cliOptions,
       suggestions: [],
       modelLoading: false,
@@ -177,6 +178,15 @@
     }
   }
 
+  let preflightWarnings = null
+
+  function continueLaunch() {
+    if (!dlg) return
+    dlg.busy = true
+    preflightWarnings = null
+    dlgGo()
+  }
+
   async function dlgGo() {
     if (!dlg || dlg.busy) return
     dlg.busy = true
@@ -209,8 +219,11 @@
           error = (check?.issues || []).filter((i) => i.severity === 'error').map((i) => i.message).join('\n') || 'Execution preflight failed.'
           return
         }
-        // Warnings require one deliberate second click after review.
-        if ((check?.issues || []).length > 0) return
+        const warnings = (check?.issues || []).filter((i) => i.severity !== 'error')
+        if (warnings.length > 0) {
+          preflightWarnings = warnings
+          return
+        }
         dlg.busy = true
       }
       const agentLabel = agent?.name || cli
@@ -222,6 +235,7 @@
       })
       if (surface === 'chat') {
         const c = await api.startChat(agent.id, cli, folder)
+        if (dlg.name) await api.renameChat(c.ID, dlg.name)
         if (local) await api.updateChatConfig(c.ID, cli, '', '', lEnd, lKey, lModel)
         else if (model) await api.updateChatConfig(c.ID, cli, model, '', '', '', '')
         dlg = null
@@ -235,17 +249,21 @@
         let chatId = ''
         try {
           chatId = await api.recordCodeSession(cli, local ? '' : model, folder, lEnd, lKey, lModel)
-          if (chatId) await api.bindChatToTerminal(termId, chatId)
+          if (chatId) {
+            await api.bindChatToTerminal(termId, chatId)
+            if (dlg.name) await api.renameChat(chatId, dlg.name)
+          }
         } catch { /* the live terminal remains usable even if persistence fails */ }
         dlg = null
         showToast({ title: 'Terminal ready', message: `${agentLabel} is running through ${cli}.`, tone: 'ok' })
-        pendingTerm.set({ termId, chatId, cli, cwd: folder, label: (agent ? agent.name : cli) + (local ? ' · local' : ''), note: '' })
+        pendingTerm.set({ termId, chatId, cli, cwd: folder, label: dlg.name || ((agent ? agent.name : cli) + (local ? ' · local' : '')), note: '' })
         activePage.set('code')
         pageRevision.update((n) => n + 1)
         return
       }
       // studio
-      await api.openEditorWindow(folder, agent ? agent.id : '', cli, local ? '' : model, '', lEnd, lKey, lModel)
+      const createdChatId = await api.openEditorWindow(folder, agent ? agent.id : '', cli, local ? '' : model, '', lEnd, lKey, lModel)
+      if (dlg.name && createdChatId) await api.renameChat(createdChatId, dlg.name)
       dlg = null
       notice = 'Studio window opened.'
       showToast({ title: 'Studio opened', message: `${agentLabel} is ready in a separate Studio window.`, tone: 'ok' })
@@ -601,6 +619,9 @@
         {dlg.agent ? ` — ${dlg.agent.name}` : ''}
         </span>
       </div>
+      <label class="lbl">Session Name (optional)</label>
+      <input class="field" style="max-width:320px; margin-bottom:10px" bind:value={dlg.name} placeholder="e.g. Refactor API" />
+
       <label class="lbl">CLI</label>
       <select class="field" style="max-width:320px" bind:value={dlg.cli} on:change={dlgCliChanged}>
         {#each dlg.cliOptions as c}
@@ -634,14 +655,6 @@
           Capabilities: {dlg.capabilities.streaming ? 'streaming' : 'buffered'} · {dlg.capabilities.resume ? 'resume' : 'no resume'} · {dlg.capabilities.mcp ? 'MCP' : 'no MCP'} · permissions {(dlg.capabilities.toolLevels || []).map((x) => x || 'safe').join(', ')}
         </div>
       {/if}
-      {#if dlg.preflight?.issues?.length}
-        <div style="margin-top:10px">
-          {#each dlg.preflight.issues as issue}
-            <div class="banner" class:ok={issue.severity !== 'error'}>{issue.severity === 'error' ? 'Blocked' : 'Warning'}: {issue.message}</div>
-          {/each}
-          {#if dlg.preflight.ok}<div class="card-sub">Review the warnings, then press Launch again to continue.</div>{/if}
-        </div>
-      {/if}
       {#if true}
         <label class="lbl">Project folder *</label>
         <div class="row">
@@ -656,6 +669,27 @@
     </div>
     </div>
   {/if}
+
+{#if preflightWarnings}
+  <div class="modal-backdrop" style="z-index: 12000" on:click|self={() => (preflightWarnings = null)}>
+    <div class="modal-content warning-modal" role="dialog" aria-modal="true" style="border: 1px solid #d39e00; max-width: 500px">
+      <h2 style="color: #d39e00; display:flex; align-items:center; gap:8px">
+        <span style="font-size:20px">⚠️</span> Preflight Warnings
+      </h2>
+      <div style="margin: 16px 0; max-height: 50vh; overflow-y: auto">
+        {#each preflightWarnings as issue}
+          <div style="background: rgba(211, 158, 0, 0.1); color: var(--text); padding: 10px 14px; border-radius: 6px; margin-bottom: 8px; font-size: 13px;">
+            {issue.message}
+          </div>
+        {/each}
+      </div>
+      <div class="row actions" style="justify-content: flex-end; margin-top:20px">
+        <button class="btn" on:click={() => (preflightWarnings = null)}>Cancel</button>
+        <button class="btn" style="background: #d39e00; color: #fff; border-color: #d39e00" on:click={continueLaunch}>Continue</button>
+      </div>
+    </div>
+  </div>
+{/if}
 
   {#each agents as a}
     <div class="card">

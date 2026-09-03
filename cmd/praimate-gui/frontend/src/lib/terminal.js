@@ -9,8 +9,8 @@ function app() {
 
 export const term = {
   pickFolder: () => app()?.PickProjectFolder() ?? Promise.reject(new Error('no backend')),
-  start: (agentID, cli, model, cwd, localEndpoint, localApiKey, localModel, resume = false) =>
-    app()?.StartTerminal(agentID, cli, model || '', cwd, localEndpoint || '', localApiKey || '', localModel || '', !!resume) ??
+  start: (agentID, cli, model, cwd, localEndpoint, localApiKey, localModel, resume = false, skills = []) =>
+    app()?.StartTerminal(agentID, cli, model || '', cwd, localEndpoint || '', localApiKey || '', localModel || '', !!resume, skills) ??
     Promise.reject(new Error('no backend')),
   write: (id, text) => app()?.WriteTerminal(id, encodeTerminalInput(text)),
   resize: (id, cols, rows) => app()?.ResizeTerminal(id, cols, rows),

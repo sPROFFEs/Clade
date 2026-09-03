@@ -61,6 +61,7 @@
   // setup state
   let agent = null
   let cli = ''
+  let sessionName = ''
   let model = ''
   let cwd = ''
   let sessionLabel = '' // header label for the running session
@@ -90,7 +91,7 @@
   function openConfig(chat) {
     error = ''
     cfg = {
-      chat, cli: chat.CLIAgent, model: chat.Settings?.model || '',
+      chat, name: chat.Title || '', cli: chat.CLIAgent, model: chat.Settings?.model || '',
       tools: normalizeToolsForCli(chat.CLIAgent, chat.Settings?.tools),
       localEndpoint: chat.Settings?.local?.endpoint || '',
       localApiKey: chat.Settings?.local?.api_key || '',
@@ -109,6 +110,9 @@
     cfgSaving = true; error = ''
     try {
       await api.updateChatConfig(cfg.chat.ID, cfg.cli, cfg.model.trim(), normalizeToolsForCli(cfg.cli, cfg.tools), cfg.localEndpoint.trim(), cfg.localApiKey, cfg.localModel.trim())
+      if (cfg.name.trim() && cfg.name.trim() !== cfg.chat.Title) {
+        await api.renameChat(cfg.chat.ID, cfg.name.trim())
+      }
       try { await api.setChatSkills(cfg.chat.ID, cfg.skills || []) } catch (e) {}
       await api.setChatMCPServers(cfg.chat.ID, cfg.mcps || [])
       cfg = null
@@ -290,6 +294,8 @@
         local ? localOpt.endpoint : '',
         '',
         local ? localModel.trim() : '',
+        false,
+        sessionSkills
       )
     } catch (e) {
       error = String(e)
@@ -310,6 +316,9 @@
       )
       sessionChatId = chatId || ''
       if (sessionChatId && termId) await api.bindChatToTerminal(termId, sessionChatId)
+      if (sessionChatId && sessionName.trim()) {
+        await api.renameChat(sessionChatId, sessionName.trim())
+      }
       if (sessionChatId) {
         try { sessionSkills = (await api.chatSkills(sessionChatId)) || [] } catch {}
       }
@@ -464,7 +473,7 @@
     try {
       termId = await term.start(
         p.agentId || '', cli, p.model || '', cwd,
-        p.localEndpoint || '', p.localApiKey || '', p.localModel || '', true)
+        p.localEndpoint || '', p.localApiKey || '', p.localModel || '', true, sessionSkills)
       if (sessionChatId) await api.bindChatToTerminal(termId, sessionChatId)
     } catch (e) {
       error = String(e)
@@ -551,6 +560,8 @@
     <div class="card">
       <div class="card-title">New code session</div>
       <div class="card-sub">Run a CLI live in your project folder — no agent persona or context file is written. Pick the CLI and (optionally) the model.</div>
+      <label class="lbl">Session Name</label>
+      <input class="field" style="max-width:320px; margin-bottom:10px" bind:value={sessionName} placeholder="e.g. My Code Session" />
       <label class="lbl">CLI</label>
       <select class="field" style="max-width:320px" bind:value={cli}>
         {#if clis.length === 0}<option value="">probing installed CLIs…</option>{/if}
@@ -637,6 +648,8 @@
       <button class="btn" on:click={() => (agent = null)}>← Agents</button>
       <strong>{agent.name}</strong>
     </div>
+    <label class="lbl">Session Name</label>
+    <input class="field" style="max-width:320px; margin-bottom:10px" bind:value={sessionName} placeholder="e.g. Debugging" />
     <label class="lbl">CLI</label>
     <select class="field" bind:value={cli} style="max-width:240px">
       {#each agent.supports || [] as s}<option value={s}>{s}</option>{/each}
@@ -712,6 +725,9 @@
       </div>
       <div class="picker-body grow" style="padding:16px;">
         <div class="card-sub" style="margin-bottom:12px;">Switching the CLI starts a fresh session on the next message; the history stays.</div>
+        <label class="lbl">Session Name</label>
+        <input class="field" style="max-width:320px; margin-bottom:12px" bind:value={cfg.name} />
+
         <label class="lbl">CLI</label>
         <select class="field" style="max-width:320px" bind:value={cfg.cli} on:change={cfgCliChanged}>
           {#if clis.length === 0}<option value={cfg.cli}>{cfg.cli} (probing CLIs…)</option>{/if}

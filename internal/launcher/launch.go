@@ -276,7 +276,7 @@ func Plan(ws Workspace, agent Agent) (LaunchPlan, error) {
 			// OPENAI_* env block. OpenClaude expects its OpenAI-compatible
 			// base URL to include /v1.
 			openAIBaseURL := openAICompatibleBaseURL(o.Endpoint)
-			if err := writeOpenClaudeLocalProfile(o, authToken); err != nil {
+			if err := WriteOpenClaudeLocalProfile(o, authToken); err != nil {
 				return LaunchPlan{}, fmt.Errorf("openclaude local profile: %w", err)
 			}
 			plan.Env = map[string]string{
@@ -297,8 +297,12 @@ func Plan(ws Workspace, agent Agent) (LaunchPlan, error) {
 			// model selection loses to a default elsewhere in the chain.
 			plan.Args = []string{"--model", o.Model}
 		} else {
-			if err := backupOpenClaudeLocalProfileIfPresent(); err != nil {
-				return LaunchPlan{}, fmt.Errorf("openclaude local profile backup: %w", err)
+			// If global local profile is set, we preserve it.
+			// Otherwise, we ensure it's removed so it defaults to Anthropic.
+			if !IsOpenClaudeConfigured() {
+				if err := BackupOpenClaudeLocalProfileIfPresent(); err != nil {
+					return LaunchPlan{}, fmt.Errorf("openclaude local profile backup: %w", err)
+				}
 			}
 		}
 	case AgentCodex:

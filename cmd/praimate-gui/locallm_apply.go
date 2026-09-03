@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"git.jtsec.local/lab/PrAImate/internal/launcher"
 	"git.jtsec.local/lab/PrAImate/internal/ollama"
 )
 
@@ -15,13 +16,15 @@ import (
 // the OpenCode fork (name-only rebrand) and reads the SAME opencode.json,
 // so the opencode route covers it.
 type LocalCLIStatus struct {
-	Opencode bool `json:"opencode"` // also governs praimate-code (shared config)
+	Opencode   bool `json:"opencode"` // also governs praimate-code (shared config)
+	Openclaude bool `json:"openclaude"`
 }
 
 // LocalCLIStatusNow probes the on-disk config of the config-file CLIs.
 func (a *App) LocalCLIStatusNow() LocalCLIStatus {
 	return LocalCLIStatus{
-		Opencode: ollama.OpenCodeConfigured(),
+		Opencode:   ollama.OpenCodeConfigured(),
+		Openclaude: launcher.IsOpenClaudeConfigured(),
 	}
 }
 
@@ -60,8 +63,21 @@ func (a *App) ApplyLocalToCLI(cli, model string) (string, error) {
 			return "", err
 		}
 		return "opencode + praimate-code routed to the local model — wrote " + path, nil
+	case "openclaude":
+		ls := launcher.OllamaSettings{
+			Endpoint:      s.Endpoint,
+			Model:         s.Model,
+			APIKey:        s.APIKey,
+			ContextTokens: s.ContextTokens,
+			OutputTokens:  s.OutputTokens,
+		}
+		err := launcher.WriteOpenClaudeLocalProfile(ls, apiKey)
+		if err != nil {
+			return "", err
+		}
+		return "openclaude routed to the local model", nil
 	default:
-		return "", fmt.Errorf("apply-to-local supports only opencode/praimate-code — OpenClaude uses the per-launch toggle and Claude Code stays on Anthropic")
+		return "", fmt.Errorf("apply-to-local supports opencode/praimate-code and openclaude — Claude Code stays on Anthropic")
 	}
 }
 
@@ -75,6 +91,12 @@ func (a *App) DisableLocalForCLI(cli string) (string, error) {
 			return "", err
 		}
 		return "opencode + praimate-code local route removed — " + path, nil
+	case "openclaude":
+		err := launcher.BackupOpenClaudeLocalProfileIfPresent()
+		if err != nil {
+			return "", err
+		}
+		return "openclaude local route removed", nil
 	default:
 		return "", fmt.Errorf("nothing to disable for %s", cli)
 	}

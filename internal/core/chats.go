@@ -420,3 +420,11 @@ func chatSlug(s string) string {
 	}
 	return string(b)
 }
+
+func (c *Core) RenameChat(ctx context.Context, chatID, newTitle string) error {
+	if c.store == nil {
+		return nil
+	}
+	_, err := c.store.DB().ExecContext(ctx, "UPDATE chats SET title = ? WHERE id = ?", newTitle, chatID)
+	return err
+}

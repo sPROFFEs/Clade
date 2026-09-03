@@ -37,7 +37,7 @@ func openClaudeProfileBackupPath(home string) string {
 	return openClaudeProfilePath(home) + ".bak"
 }
 
-func writeOpenClaudeLocalProfile(settings OllamaSettings, authToken string) error {
+func WriteOpenClaudeLocalProfile(settings OllamaSettings, authToken string) error {
 	home := homeDir()
 	if home == "" {
 		return fmt.Errorf("no home dir resolved")
@@ -73,7 +73,7 @@ func writeOpenClaudeLocalProfile(settings OllamaSettings, authToken string) erro
 	return nil
 }
 
-func backupOpenClaudeLocalProfileIfPresent() error {
+func BackupOpenClaudeLocalProfileIfPresent() error {
 	home := homeDir()
 	if home == "" {
 		return nil
@@ -93,4 +93,23 @@ func backupOpenClaudeLocalProfileIfPresent() error {
 		return fmt.Errorf("rename %s to %s: %w", path, bak, err)
 	}
 	return nil
+}
+
+// IsOpenClaudeConfigured reports whether the OpenClaude local profile
+// currently points to a local endpoint via the "openai" profile.
+func IsOpenClaudeConfigured() bool {
+	home := homeDir()
+	if home == "" {
+		return false
+	}
+	path := openClaudeProfilePath(home)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	var profile openClaudeProfile
+	if err := json.Unmarshal(raw, &profile); err != nil {
+		return false
+	}
+	return profile.Profile == "openai" && profile.Env["OPENAI_BASE_URL"] != ""
 }

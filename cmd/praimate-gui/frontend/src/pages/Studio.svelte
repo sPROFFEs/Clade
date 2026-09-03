@@ -11,6 +11,14 @@
   let error = ''
   let form = null
   let localOpt = null
+  let preflightWarnings = null
+
+  function continueLaunch() {
+    if (!form) return
+    form.busy = true
+    preflightWarnings = null
+    launch()
+  }
 
   $: sessions = chats.filter((chat) => chat.Settings?.surface === 'studio')
   $: editorAgents = agents.filter((agent) => !agent.surfaces?.length || agent.surfaces.includes('editor'))
@@ -56,6 +64,7 @@
       const first = clis.find((cli) => cli.available) || clis[0]
       form = {
         agentID: '', cli: first?.id || '', model: '', folder: '', useLocal: false,
+        name: '',
         localModel: '', suggestions: [], busy: false, preflight: null, preflightChecked: false,
       }
       await cliChanged()
@@ -127,13 +136,18 @@
           error = (check?.issues || []).filter((issue) => issue.severity === 'error').map((issue) => issue.message).join('\n') || 'Studio preflight failed.'
           return
         }
-        if ((check?.issues || []).length) return
+        const warnings = (check?.issues || []).filter((i) => i.severity !== 'error')
+        if (warnings.length > 0) {
+          preflightWarnings = warnings
+          return
+        }
         form.busy = true
       }
       const cli = form.cli
       const folder = form.folder
       showToast({ title: 'Opening Studio', message: `Starting ${agentName({ AgentID: form.agentID })} with ${cli} in ${folder}`, tone: 'busy', duration: 0, dismissible: false })
-      await api.openEditorWindow(folder, form.agentID, cli, model, '', endpoint, '', localModel)
+      const createdChatId = await api.openEditorWindow(folder, form.agentID, cli, model, '', endpoint, '', localModel)
+      if (form.name && createdChatId) await api.renameChat(createdChatId, form.name)
       form = null
       await load()
       showToast({ title: 'Studio opened', message: 'The session is ready in a separate Studio window.', tone: 'ok' })
@@ -207,6 +221,9 @@
       <h2 id="new-studio-title">New Studio</h2>
       <p class="subtitle">Choose the workspace, optional persona, and CLI used by the Studio assistant.</p>
 
+      <label class="lbl" for="studio-name">Session Name</label>
+      <input id="studio-name" class="field" bind:value={form.name} placeholder="e.g. Frontend Work" />
+
       <label class="lbl" for="studio-agent">Agent persona</label>
       <select id="studio-agent" class="field" bind:value={form.agentID} on:change={agentChanged}>
         <option value="">No agent persona</option>
@@ -246,16 +263,30 @@
         <button class="btn" on:click={pickFolder}>Browse…</button>
       </div>
 
-      {#if form.preflight?.issues?.length}
-        <div class="preflight">
-          {#each form.preflight.issues as issue}<div class="banner">{issue.severity === 'error' ? 'Blocked' : 'Warning'}: {issue.message}</div>{/each}
-          {#if form.preflight.ok}<div class="card-sub">Review the warnings, then press Open Studio again.</div>{/if}
-        </div>
-      {/if}
-
-      <div class="row actions">
+      <div class="row actions" style="margin-top:20px">
         <button class="btn" on:click={() => (form = null)} disabled={form.busy}>Cancel</button>
         <button class="btn primary" on:click={launch} disabled={form.busy}>{form.busy ? 'Opening…' : 'Open Studio'}</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if preflightWarnings}
+  <div class="modal-backdrop" style="z-index: 12000" on:click|self={() => (preflightWarnings = null)}>
+    <div class="modal-content warning-modal" role="dialog" aria-modal="true" style="border: 1px solid #d39e00; max-width: 500px">
+      <h2 style="color: #d39e00; display:flex; align-items:center; gap:8px">
+        <span style="font-size:20px">⚠️</span> Preflight Warnings
+      </h2>
+      <div style="margin: 16px 0; max-height: 50vh; overflow-y: auto">
+        {#each preflightWarnings as issue}
+          <div style="background: rgba(211, 158, 0, 0.1); color: var(--text); padding: 10px 14px; border-radius: 6px; margin-bottom: 8px; font-size: 13px;">
+            {issue.message}
+          </div>
+        {/each}
+      </div>
+      <div class="row actions" style="justify-content: flex-end; margin-top:20px">
+        <button class="btn" on:click={() => (preflightWarnings = null)}>Cancel</button>
+        <button class="btn" style="background: #d39e00; color: #fff; border-color: #d39e00" on:click={continueLaunch}>Continue</button>
       </div>
     </div>
   </div>

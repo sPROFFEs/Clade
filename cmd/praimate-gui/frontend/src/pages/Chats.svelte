@@ -128,6 +128,7 @@
         label: (agentName(chat) || chat.CLIAgent || 'CLI') + (l?.endpoint ? ' · local' : ''),
         model: chat.Settings?.model || '',
         localEndpoint: l?.endpoint || '', localApiKey: l?.api_key || '', localModel: l?.model || '',
+        skills: chat.Settings?.skills || [],
         note: live
           ? 'reattached to the running session'
           : supportsNativeTerminalResume(chat.CLIAgent)
@@ -168,6 +169,7 @@
     // CLIs takes seconds — a dialog that waits for it reads as broken).
     cfg = {
       chat,
+      name: chat.Title || '',
       cli: chat.CLIAgent,
       model: chat.Settings?.model || '',
       tools: normalizeToolsForCli(chat.CLIAgent, chat.Settings?.tools),
@@ -219,6 +221,9 @@
       await api.updateChatConfig(
         cfg.chat.ID, cfg.cli, cfg.model.trim(), normalizeToolsForCli(cfg.cli, cfg.tools),
         cfg.localEndpoint.trim(), cfg.localApiKey, cfg.localModel.trim())
+      if (cfg.name.trim() && cfg.name.trim() !== cfg.chat.Title) {
+        await api.renameChat(cfg.chat.ID, cfg.name.trim())
+      }
       try { await api.setChatSkills(cfg.chat.ID, cfg.skills || []) } catch (e) { /* non-fatal */ }
       await api.setChatMCPServers(cfg.chat.ID, cfg.mcps || [])
       const id = cfg.chat.ID
@@ -561,6 +566,10 @@
       </div>
       <div class="picker-body grow" style="padding:16px;">
         <div class="card-sub" style="margin-bottom:12px;">Switching the CLI starts a fresh session on the next message; the history stays.</div>
+
+    <label class="lbl">Session Name</label>
+    <input class="field" style="max-width:320px; margin-bottom:12px" bind:value={cfg.name} />
+
     <label class="lbl">CLI</label>
     <select class="field" style="max-width:320px" bind:value={cfg.cli} on:change={cfgCliChanged}>
       {#if clis.length === 0}

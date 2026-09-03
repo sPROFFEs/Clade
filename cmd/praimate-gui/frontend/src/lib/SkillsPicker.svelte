@@ -67,7 +67,7 @@
 {#if open}
   <!-- svelte-ignore a11y-click-events-have-key-events -->
   <!-- svelte-ignore a11y-no-static-element-interactions -->
-  <div class="picker-backdrop" on:click={done}>
+  <div class="picker-backdrop" style="z-index:10000" on:click={done}>
     <div class="picker" on:click|stopPropagation role="dialog">
       <div class="picker-head">
         <strong class="grow">{title}</strong>

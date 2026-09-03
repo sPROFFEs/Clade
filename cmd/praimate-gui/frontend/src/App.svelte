@@ -107,7 +107,28 @@
     }
   }
 
+  let zoomLevel = 1.0;
+
+  function handleKeydown(e) {
+    if (e.ctrlKey || e.metaKey) {
+      if (e.key === '=' || e.key === '+') {
+        e.preventDefault()
+        zoomLevel = Math.min(zoomLevel + 0.1, 3.0)
+        document.body.style.zoom = zoomLevel
+      } else if (e.key === '-') {
+        e.preventDefault()
+        zoomLevel = Math.max(zoomLevel - 0.1, 0.5)
+        document.body.style.zoom = zoomLevel
+      } else if (e.key === '0') {
+        e.preventDefault()
+        zoomLevel = 1.0
+        document.body.style.zoom = zoomLevel
+      }
+    }
+  }
+
   onMount(async () => {
+    window.addEventListener('keydown', handleKeydown)
     initTheme()
     try {
       databaseLock = await api.databaseLockStatus()
