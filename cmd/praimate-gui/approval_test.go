@@ -2,12 +2,44 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestApprovalBrokerDenyScopeReleasesDetachedRequest(t *testing.T) {
+	emitted := make(chan ApprovalRequest, 1)
+	b := &approvalBroker{
+		pending: map[string]chan approvalDecision{},
+		scopes:  map[string]string{},
+		always:  map[string]map[string]bool{},
+		emit:    func(req ApprovalRequest) { emitted <- req },
+	}
+	result := make(chan bool, 1)
+	go func() {
+		allowed, _ := b.request(context.Background(), "chat-detached", "Bash", nil)
+		result <- allowed
+	}()
+	req := <-emitted
+	if !b.hasPending("chat-detached") {
+		t.Fatal("pending approval was not tracked by chat scope")
+	}
+	if b.resolveScoped("another-chat", req.ID, true, false) {
+		t.Fatal("a detached chat resolved another chat's approval")
+	}
+	b.denyScope("chat-detached")
+	select {
+	case allowed := <-result:
+		if allowed {
+			t.Fatal("closing a detached window allowed its pending request")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("scoped denial did not release the pending request")
+	}
+}
 
 // Drives the MCP shim loop end-to-end over buffers: initialize →
 // tools/list → tools/call(approve), with a decide func standing in for

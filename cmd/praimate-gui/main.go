@@ -80,6 +80,14 @@ func main() {
 	// opens the document-studio window instead of the main app (Wails
 	// v2 has one window per process — see editor_window.go).
 	title := "PrAImate"
+	if len(os.Args) >= 2 && os.Args[1] == "-detached-window" {
+		detachedProcessMode = detachedModeFromEnvironment()
+		if !detachedProcessMode.active {
+			fmt.Fprintln(os.Stderr, "invalid detached-window environment")
+			os.Exit(2)
+		}
+		title = "PrAImate — " + detachedProcessMode.title
+	}
 	if len(os.Args) >= 3 && os.Args[1] == "-editor" {
 		editorFolder = os.Args[2]
 		for i := 3; i+1 < len(os.Args); i++ {
@@ -102,6 +110,7 @@ func main() {
 		BackgroundColour: &options.RGBA{R: 16, G: 18, B: 24, A: 255},
 		OnStartup:        app.startup,
 		OnShutdown:       app.shutdown,
+		OnBeforeClose:    app.beforeClose,
 		Bind: []interface{}{
 			app,
 		},

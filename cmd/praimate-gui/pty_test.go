@@ -177,6 +177,31 @@ func TestTerminalEnvironmentUpgradesNonUTF8Locale(t *testing.T) {
 	}
 }
 
+func TestOpenCodeLogDirectoryIsPreparedBeforeFirstLaunch(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", root)
+	if err := ensureOpenCodeLogDir(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "opencode", "log")); err != nil {
+		t.Fatalf("OpenCode log directory was not prepared: %v", err)
+	}
+}
+
+func TestOpenCodeLogDirectoryUsesPlatformDataRoots(t *testing.T) {
+	if got := opencodeLogDir("linux", "/home/test", "", ""); got != "/home/test/.local/share/opencode/log" {
+		t.Fatalf("linux log directory = %q", got)
+	}
+	if got := opencodeLogDir("linux", "/home/test", "/tmp/data", ""); got != "/tmp/data/opencode/log" {
+		t.Fatalf("XDG log directory = %q", got)
+	}
+	if runtime.GOOS == "windows" {
+		if got := opencodeLogDir("windows", `C:\\Users\\test`, "", `C:\\Users\\test\\AppData\\Local`); got != `C:\\Users\\test\\AppData\\Local\\opencode\\log` {
+			t.Fatalf("Windows log directory = %q", got)
+		}
+	}
+}
+
 func environmentByKey(env []string) map[string]string {
 	out := make(map[string]string, len(env))
 	for _, kv := range env {

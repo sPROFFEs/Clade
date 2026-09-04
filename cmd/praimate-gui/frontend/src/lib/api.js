@@ -20,6 +20,11 @@ function call(method, ...args) {
 
 export const api = {
   databaseLockStatus: () => call('DatabaseLockStatus'),
+  detachedMode: () => call('DetachedMode'),
+  detachSession: (kind, sessionID, title) => call('DetachSession', kind, sessionID, title || ''),
+  detachedWindows: () => call('DetachedWindows'),
+  detachedSessionActive: () => call('DetachedSessionActive'),
+  detachedRendererReady: () => call('DetachedRendererReady'),
   initializeDatabasePassword: (password, confirmation, remember) =>
     call('InitializeDatabasePassword', password, confirmation, !!remember),
   unlockDatabase: (password, remember) =>

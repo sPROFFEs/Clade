@@ -5,19 +5,7 @@
   import { initTheme, themeMode, setThemeMode } from './lib/theme.js'
   import logo from './assets/monke-icon.png'
   import mascot from './assets/monke-mascot.png'
-  import Chats from './pages/Chats.svelte'
-  import Studio from './pages/Studio.svelte'
-  import Code from './pages/Code.svelte'
-  import Agents from './pages/Agents.svelte'
-  import CLIs from './pages/CLIs.svelte'
-  import LocalLLM from './pages/LocalLLM.svelte'
-  import MCP from './pages/MCP.svelte'
-  import Settings from './pages/Settings.svelte'
-  import About from './pages/About.svelte'
-  import Editor from './pages/Editor.svelte'
-  import AgentStudio from './pages/AgentStudio.svelte'
   import Setup from './pages/Setup.svelte'
-  import Skills from './pages/Skills.svelte'
   import SessionPanel from './lib/SessionPanel.svelte'
   import PrivacyNotice from './lib/PrivacyNotice.svelte'
   import DatabaseUnlock from './lib/DatabaseUnlock.svelte'
@@ -57,19 +45,66 @@
   // Code-oriented order: lead with the live coding terminal, then
   // conversations and agents, with config last.
   const pages = [
-    { id: 'code', label: 'Code', icon: icons.code, component: Code },
-    { id: 'chats', label: 'Chats', icon: icons.chats, component: Chats },
-    { id: 'studio', label: 'Studio', icon: icons.studio, component: Studio },
-    { id: 'agents', label: 'Agents', icon: icons.run, component: Agents },
-    { id: 'skills', label: 'Skills', icon: icons.mcp, component: Skills },
-    { id: 'clis', label: 'CLI & Tools', icon: icons.agents, component: CLIs },
-    { id: 'localllm', label: 'Local LLM', icon: icons.monitor, component: LocalLLM },
-    { id: 'mcp', label: 'MCP', icon: icons.mcp, component: MCP },
-    { id: 'settings', label: 'Settings', icon: icons.settings, component: Settings },
-    { id: 'about', label: 'About', icon: icons.info, component: About },
+    { id: 'code', label: 'Code', icon: icons.code, load: () => import('./pages/Code.svelte') },
+    { id: 'chats', label: 'Chats', icon: icons.chats, load: () => import('./pages/Chats.svelte') },
+    { id: 'studio', label: 'Studio', icon: icons.studio, load: () => import('./pages/Studio.svelte') },
+    { id: 'agents', label: 'Agents', icon: icons.run, load: () => import('./pages/Agents.svelte') },
+    { id: 'skills', label: 'Skills', icon: icons.mcp, load: () => import('./pages/Skills.svelte') },
+    { id: 'clis', label: 'CLI & Tools', icon: icons.agents, load: () => import('./pages/CLIs.svelte') },
+    { id: 'localllm', label: 'Local LLM', icon: icons.monitor, load: () => import('./pages/LocalLLM.svelte') },
+    { id: 'mcp', label: 'MCP', icon: icons.mcp, load: () => import('./pages/MCP.svelte') },
+    { id: 'settings', label: 'Settings', icon: icons.settings, load: () => import('./pages/Settings.svelte') },
+    { id: 'about', label: 'About', icon: icons.info, load: () => import('./pages/About.svelte') },
   ]
 
+  // Load only the surface the user is looking at. In particular, detached
+  // windows no longer parse the full main UI and the main window does not pay
+  // CodeMirror's memory cost until Studio/agent editing is opened.
+  let pageComponent = null
+  let requestedPage = ''
+  let pageLoadToken = 0
+  async function loadPage(id) {
+    if (requestedPage === id && pageComponent) return
+    requestedPage = id
+    pageComponent = null
+    const token = ++pageLoadToken
+    const page = pages.find((item) => item.id === id) || pages[0]
+    try {
+      const module = await page.load()
+      if (token === pageLoadToken) pageComponent = module.default
+    } catch (e) {
+      if (token === pageLoadToken) health = { ok: false, error: `Could not load ${page.label}: ${String(e)}` }
+    }
+  }
+
+  let specialComponent = null
+  let specialError = ''
+  let requestedSpecial = ''
+  let specialLoadToken = 0
+  async function loadSpecial(kind) {
+    if (requestedSpecial === kind && specialComponent) return
+    requestedSpecial = kind
+    specialComponent = null
+    specialError = ''
+    const token = ++specialLoadToken
+    const loaders = {
+      detached: () => import('./pages/DetachedSession.svelte'),
+      editor: () => import('./pages/Editor.svelte'),
+      agentStudio: () => import('./pages/AgentStudio.svelte'),
+    }
+    try {
+      const module = await loaders[kind]()
+      if (token === specialLoadToken) specialComponent = module.default
+    } catch (e) {
+      if (token === specialLoadToken) specialError = `Could not load window: ${String(e)}`
+    }
+  }
+
   let health = null
+  // Detached chat/terminal children are presentation-only processes. Detect
+  // them before asking for the encrypted DB password; the main process owns
+  // the database and sends this window only its scoped session data.
+  let detachedMode = null
   // Studio mode: this process was spawned as a document-editor window —
   // render the Editor shell instead of the main app.
   let editorMode = null
@@ -77,6 +112,7 @@
   let firstRun = null
   let privacyNotice = null
   let databaseLock = null
+  let closeBlocked = null
 
   async function loadUnlockedApp() {
     try {
@@ -131,6 +167,15 @@
     window.addEventListener('keydown', handleKeydown)
     initTheme()
     try {
+      detachedMode = await api.detachedMode()
+    } catch {
+      detachedMode = { active: false }
+    }
+    if (detachedMode?.active) return
+    if (window.runtime?.EventsOn) {
+      window.runtime.EventsOn('praimate:close-blocked', (event) => { closeBlocked = event })
+    }
+    try {
       databaseLock = await api.databaseLockStatus()
     } catch (e) {
       databaseLock = { unlocked: false, setupRequired: false, error: String(e) }
@@ -165,19 +210,27 @@
   // Re-key the page component on navigation (and explicit attach revisions)
   // so Code/Chats consume freshly queued cross-page requests.
   $: current = pages.find((p) => p.id === $activePage) || pages[0]
+  $: if (detachedMode?.active) loadSpecial('detached')
+  $: if (!detachedMode?.active && editorMode?.active) loadSpecial('editor')
+  $: if (!detachedMode?.active && editorMode && !editorMode.active && $agentStudio) loadSpecial('agentStudio')
+  $: if (!detachedMode?.active && editorMode && !editorMode.active && !firstRun?.needed && !$agentStudio) loadPage($activePage)
 </script>
 
-{#if !databaseLock}
+{#if !detachedMode}
+  <div class="boot-screen">Preparing PrAImate…</div>
+{:else if detachedMode.active}
+  {#if specialComponent}<svelte:component this={specialComponent} mode={detachedMode} />{:else if specialError}<div class="boot-screen"><div class="banner">{specialError}</div></div>{:else}<div class="boot-screen">Opening session…</div>{/if}
+{:else if !databaseLock}
   <div class="boot-screen">Preparing secure storage…</div>
 {:else if !databaseLock.unlocked}
   <DatabaseUnlock info={databaseLock} on:unlocked={databaseUnlocked} />
 {:else if editorMode?.active}
-  <Editor folder={editorMode.folder} chatId={editorMode.chatId} />
+  {#if specialComponent}<svelte:component this={specialComponent} folder={editorMode.folder} chatId={editorMode.chatId} />{:else if specialError}<div class="boot-screen"><div class="banner">{specialError}</div></div>{:else}<div class="boot-screen">Opening Studio…</div>{/if}
 {:else if editorMode && firstRun?.needed}
   <Setup defaultRoot={firstRun.defaultRoot} on:done={setupDone} />
 {:else if editorMode && $agentStudio}
   {#key $agentStudio.id ?? 'new'}
-    <AgentStudio />
+    {#if specialComponent}<svelte:component this={specialComponent} />{:else if specialError}<div class="boot-screen"><div class="banner">{specialError}</div></div>{:else}<div class="boot-screen">Opening agent studio…</div>{/if}
   {/key}
 {:else if editorMode}
 <div class="shell">
@@ -233,7 +286,7 @@
       <div class="banner">Backend failed to initialise: {health.error}</div>
     {/if}
     {#key `${$activePage}:${$pageRevision}`}
-      <svelte:component this={current.component} />
+      {#if pageComponent}<svelte:component this={pageComponent} />{:else}<div class="boot-screen">Opening {current.label}…</div>{/if}
     {/key}
   </main>
 </div>
@@ -241,6 +294,21 @@
 
 <Toast />
 
-{#if databaseLock?.unlocked && privacyNotice?.required && !editorMode?.active}
+{#if closeBlocked}
+  <div class="picker-backdrop">
+    <div class="picker" role="dialog" aria-modal="true" aria-label="Detached windows are still open" style="max-width:520px">
+      <div class="picker-head"><strong class="grow">Close secondary windows first</strong><button class="picker-x" on:click={() => (closeBlocked = null)}>×</button></div>
+      <div class="picker-body" style="padding:16px">
+        <p style="margin-top:0">PrAImate stays open while {closeBlocked.count} secondary session window{closeBlocked.count === 1 ? ' is' : 's are'} running. Close those windows, then close PrAImate.</p>
+        {#each closeBlocked.windows || [] as child}
+          <div class="card-sub">• {child.title} <span class="pill">{child.kind}</span></div>
+        {/each}
+      </div>
+      <div class="picker-foot" style="justify-content:flex-end"><button class="btn primary" on:click={() => (closeBlocked = null)}>Keep PrAImate open</button></div>
+    </div>
+  </div>
+{/if}
+
+{#if !detachedMode?.active && databaseLock?.unlocked && privacyNotice?.required && !editorMode?.active}
   <PrivacyNotice on:accepted={privacyAccepted} />
 {/if}

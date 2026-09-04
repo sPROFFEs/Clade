@@ -39,6 +39,10 @@
     const terms = (await api.listTerminalSessions().catch(() => [])) || []
     const live = findTerminalForChat(terms, chat)
     if (live) {
+      if (detachedTerms.has(live.id)) {
+        error = 'This terminal is open in a detached window. Close that window to reattach it here.'
+        return
+      }
       try { await api.bindChatToTerminal(live.id, chat.ID) } catch {}
       attachPending({ termId: live.id, chat })
       return
@@ -67,6 +71,8 @@
   // compile (BuildToolFromSource) instead of a retry that can't work.
   let compileOffer = false
   let unsubInstall = () => {}
+  let unsubDetached = () => {}
+  let detachedTerms = new Set()
 
   // setup state
   let agent = null
@@ -447,6 +453,23 @@
     sessionSkills = []
   }
 
+  async function detachTerminal() {
+    if (!termId) return
+    const id = termId
+    error = ''
+    try {
+      await api.detachSession('terminal', id, sessionLabel || cli || 'Terminal')
+      detachedTerms = new Set([...detachedTerms, id])
+      teardown(false)
+      started = false
+      exited = false
+      sessionChatId = ''
+      sessionSkills = []
+    } catch (e) {
+      error = String(e)
+    }
+  }
+
   // Attach to a PTY the Chats / Sessions page already started, OR
   // resume the CLI's latest native session in the same folder when the prior
   // PTY is gone (or fall back to a normal launch for unsupported CLIs).
@@ -505,6 +528,9 @@
   onMount(() => {
     load()
     checkCode()
+    api.detachedWindows().then((items) => {
+      detachedTerms = new Set((items || []).filter((item) => item.kind === 'terminal').map((item) => item.sessionId))
+    }).catch(() => {})
     // Live install/compile output for the PrAImate Code card.
     if (typeof window !== 'undefined' && window.runtime?.EventsOn) {
       window.runtime.EventsOn('praimate:install', (ev) => {
@@ -515,6 +541,10 @@
         }
       })
       unsubInstall = () => window.runtime.EventsOff('praimate:install')
+      window.runtime.EventsOn('praimate:detached-windows', (items) => {
+        detachedTerms = new Set((items || []).filter((item) => item.kind === 'terminal').map((item) => item.sessionId))
+      })
+      unsubDetached = () => window.runtime.EventsOff('praimate:detached-windows')
     }
     const p = get(pendingTerm)
     if (p) {
@@ -524,7 +554,7 @@
   })
   // Page navigation/minimising detaches the renderer but intentionally keeps
   // the PTY alive. Stop/New session are the explicit process-ending actions.
-  onDestroy(() => { unsubInstall(); teardown(false) })
+  onDestroy(() => { unsubInstall(); unsubDetached(); teardown(false) })
 </script>
 
 <div class="row" style="margin-bottom:4px">
@@ -701,6 +731,7 @@
       </button>
     {/if}
     {#if exited}<button class="btn primary" on:click={reset}>New session</button>{/if}
+    <button class="btn" on:click={detachTerminal} disabled={exited} title="Move this terminal into its own window">Detach</button>
     <button class="btn danger" on:click={reset}>Stop</button>
   </div>
   <div class="termhost" bind:this={el}></div>

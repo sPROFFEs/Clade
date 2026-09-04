@@ -47,6 +47,11 @@ func (a *App) StoredDataInfo() (*StoredDataInfo, error) {
 // confirmations; the backend independently pins the typed phrase and exact
 // configured projects path so a forged or stale UI call cannot widen scope.
 func (a *App) DeleteAllStoredData(projectsRoot, phrase string) error {
+	if a.detached != nil {
+		if windows := a.detached.list(); len(windows) > 0 {
+			return fmt.Errorf("close all %d secondary window(s) before deleting PrAImate data", len(windows))
+		}
+	}
 	if phrase != deleteAllDataPhrase {
 		return errors.New("confirmation phrase does not match")
 	}
@@ -152,6 +157,7 @@ func (a *App) stopBackgroundWork() {
 		cancel()
 	}
 	a.chatCancels = map[string]context.CancelFunc{}
+	a.chatCancelIDs = map[string]uint64{}
 	a.chatCancelMu.Unlock()
 	a.managedCancelMu.Lock()
 	for _, cancel := range a.managedCancels {

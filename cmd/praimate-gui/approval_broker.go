@@ -56,6 +56,7 @@ type approvalBroker struct {
 
 	mu      sync.Mutex
 	pending map[string]chan approvalDecision
+	scopes  map[string]string          // request ID -> chat ID
 	always  map[string]map[string]bool // chatID → tool name → allowed
 	seq     int
 
@@ -70,6 +71,7 @@ func newApprovalBroker(emit func(ApprovalRequest)) (*approvalBroker, error) {
 	b := &approvalBroker{
 		token:   hex.EncodeToString(tok),
 		pending: map[string]chan approvalDecision{},
+		scopes:  map[string]string{},
 		always:  map[string]map[string]bool{},
 		emit:    emit,
 	}
@@ -127,10 +129,12 @@ func (b *approvalBroker) request(ctx context.Context, scope, tool string, input 
 	id := fmt.Sprintf("ap-%d", b.seq)
 	ch := make(chan approvalDecision, 1)
 	b.pending[id] = ch
+	b.scopes[id] = scope
 	b.mu.Unlock()
 	defer func() {
 		b.mu.Lock()
 		delete(b.pending, id)
+		delete(b.scopes, id)
 		b.mu.Unlock()
 	}()
 
@@ -155,6 +159,36 @@ func (b *approvalBroker) request(ctx context.Context, scope, tool string, input 
 	}
 }
 
+func (b *approvalBroker) hasPending(scope string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, pendingScope := range b.scopes {
+		if pendingScope == scope {
+			return true
+		}
+	}
+	return false
+}
+
+func (b *approvalBroker) denyScope(scope string) {
+	b.mu.Lock()
+	channels := make([]chan approvalDecision, 0)
+	for id, pendingScope := range b.scopes {
+		if pendingScope == scope {
+			if ch := b.pending[id]; ch != nil {
+				channels = append(channels, ch)
+			}
+		}
+	}
+	b.mu.Unlock()
+	for _, ch := range channels {
+		select {
+		case ch <- approvalDecision{}:
+		default:
+		}
+	}
+}
+
 func (b *approvalBroker) resolve(id string, allow, always bool) {
 	b.mu.Lock()
 	ch, ok := b.pending[id]
@@ -164,6 +198,24 @@ func (b *approvalBroker) resolve(id string, allow, always bool) {
 		case ch <- approvalDecision{allow: allow, always: always}:
 		default:
 		}
+	}
+}
+
+func (b *approvalBroker) resolveScoped(scope, id string, allow, always bool) bool {
+	b.mu.Lock()
+	ch, ok := b.pending[id]
+	if b.scopes[id] != scope {
+		ok = false
+	}
+	b.mu.Unlock()
+	if !ok {
+		return false
+	}
+	select {
+	case ch <- approvalDecision{allow: allow, always: always}:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -200,6 +252,9 @@ func (a *App) ensureApprovalBroker() (*approvalBroker, error) {
 	}
 	b, err := newApprovalBroker(func(req ApprovalRequest) {
 		wruntime.EventsEmit(a.ctx, "praimate:approval", req)
+		if a.detached != nil {
+			a.detached.publish("chat", req.ChatID, "praimate:approval", req)
+		}
 	})
 	if err != nil {
 		return nil, err
@@ -235,6 +290,10 @@ func (a *App) approvalProvider(chatID string) *core.ApprovalConfig {
 // ResolveApproval answers a pending approval card. always=true
 // remembers "allow" for this tool in this chat until the GUI exits.
 func (a *App) ResolveApproval(id string, allow, always bool) {
+	if a.detachedClient != nil {
+		_ = a.detachedClient.resolveApproval(id, allow, always)
+		return
+	}
 	a.approvalMu.Lock()
 	b := a.approval
 	a.approvalMu.Unlock()

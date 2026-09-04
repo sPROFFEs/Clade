@@ -8,6 +8,8 @@ const agents = await readFile(new URL('./Agents.svelte', import.meta.url), 'utf8
 const chats = await readFile(new URL('./Chats.svelte', import.meta.url), 'utf8')
 const clis = await readFile(new URL('./CLIs.svelte', import.meta.url), 'utf8')
 const studio = await readFile(new URL('./Studio.svelte', import.meta.url), 'utf8')
+const code = await readFile(new URL('./Code.svelte', import.meta.url), 'utf8')
+const detached = await readFile(new URL('./DetachedSession.svelte', import.meta.url), 'utf8')
 
 test('Studio owns studio-session navigation and Chats excludes its rows', () => {
   assert.match(app, /id: 'studio', label: 'Studio'/)
@@ -49,4 +51,22 @@ test('CLI installation remains modal through PATH refresh and detection', () => 
   assert.match(clis, /await load\(\)/)
   assert.match(clis, /Installation complete\. PATH was refreshed and the executable was detected\./)
   assert.match(clis, /detected\.binary/)
+})
+
+test('chat and terminal sessions can detach without stopping their backend work', () => {
+  assert.match(chats, /api\.detachSession\('chat', chat\.ID/)
+  assert.match(chats, /detachedChats\.has\(req\.chatId\)/)
+  assert.match(code, /api\.detachSession\('terminal', id/)
+  assert.match(code, /teardown\(false\)/)
+  assert.match(detached, /Move this terminal|Connected to PrAImate|praimate:detached-disconnected/)
+  assert.match(detached, /if \(!disconnectTimer\) disconnectTimer = setTimeout/)
+  assert.match(detached, /async function stopTerminal[\s\S]*window\.runtime\?\.Quit\?\.\(\)/)
+})
+
+test('detached mode is resolved before database unlock and heavy pages are lazy-loaded', () => {
+  assert.match(app, /detachedMode = await api\.detachedMode\(\)/)
+  assert.ok(app.indexOf('detachedMode = await api.detachedMode()') < app.indexOf('databaseLock = await api.databaseLockStatus()'))
+  assert.match(app, /load: \(\) => import\('\.\/pages\/Code\.svelte'\)/)
+  assert.doesNotMatch(app, /import Code from '\.\/pages\/Code\.svelte'/)
+  assert.match(app, /Close secondary windows first/)
 })

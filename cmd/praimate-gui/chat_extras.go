@@ -124,6 +124,9 @@ func (a *App) SearchChats(query string) ([]core.Chat, error) {
 // RunChatCommand executes a "!" composer command in the chat's working
 // directory and returns the persisted output turn.
 func (a *App) RunChatCommand(chatID, command string) (*core.ChatTurn, error) {
+	if a.detachedClient != nil {
+		return a.detachedClient.runChatCommand(chatID, command)
+	}
 	c, err := a.requireCore()
 	if err != nil {
 		return nil, err

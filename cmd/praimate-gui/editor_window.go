@@ -374,7 +374,10 @@ func (a *App) OpenEditorWindow(folder, agentID, cli, model, chatID, localEndpoin
 	}
 	cmd := exec.Command(exe, "-editor", folder, "-editor-chat", chatID)
 	cmd.Dir = folder
-	if err := cmd.Start(); err != nil {
+	if a.detached == nil {
+		return "", errors.New("window coordinator is unavailable")
+	}
+	if err := a.detached.openExternal("studio", chatID, "Studio — "+filepath.Base(folder), cmd); err != nil {
 		return "", fmt.Errorf("open studio window: %w", err)
 	}
 	return chatID, nil

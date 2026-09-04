@@ -27,6 +27,8 @@
   let unsubStream = () => {}
   let unsubApproval = () => {}
   let approvals = [] // pending mid-turn permission requests for this chat
+  let detachedChats = new Set()
+  let unsubDetached = () => {}
   const TOOL_LEVELS = [
     { id: '', label: 'Safe', hint: 'read & answer only — edits/commands denied' },
     { id: 'ask', label: 'Ask', hint: 'ask you before each edit/command (claude & openclaude; other CLIs run safe)' },
@@ -327,6 +329,10 @@
   }
 
   async function open(chat) {
+    if (detachedChats.has(chat.ID)) {
+      error = 'This chat is open in a detached window. Close that window to reattach it here.'
+      return
+    }
     selected = chat
     toolsLevel = normalizeToolsForCli(chat.CLIAgent, chat.Settings?.tools)
     attachments = []
@@ -410,6 +416,9 @@
   }
 
   function handleApproval(req) {
+    // The detached child is subscribed before DetachSession resolves. Do not
+    // fail-close an approval that belongs to that active renderer.
+    if (detachedChats.has(req.chatId)) return
     if (!selected || req.chatId !== selected.ID) {
       // Approval for a chat that isn't open — fail closed immediately
       // rather than letting it hang until the broker timeout.
@@ -428,6 +437,7 @@
   async function send() {
     const text = draft.trim()
     if ((!text && attachments.length === 0) || sending || !selected) return
+    const chatID = selected.ID
     sending = true
     error = ''
     stream = null
@@ -441,18 +451,18 @@
     try {
       if (isCommand) {
         // "!cmd" runs locally in the chat folder — never sent to the model.
-        await api.runChatCommand(selected.ID, text.slice(1))
+        await api.runChatCommand(chatID, text.slice(1))
       } else {
         // Streams live events for CLIs that support it; others resolve
         // in one shot. Interrupting (Stop) resolves with the partial.
-        await api.sendChatStream(selected.ID, text, staged.map((a) => a.path))
+        await api.sendChatStream(chatID, text, staged.map((a) => a.path))
       }
       // Replace the optimistic copy with the persisted pair.
-      messages = (await api.chatMessages(selected.ID)) || messages
+      if (selected?.ID === chatID) messages = (await api.chatMessages(chatID)) || messages
     } catch (e) {
       error = String(e)
       try {
-        messages = (await api.chatMessages(selected.ID)) || messages.filter((m) => !m._pending)
+        if (selected?.ID === chatID) messages = (await api.chatMessages(chatID)) || messages.filter((m) => !m._pending)
       } catch {
         messages = messages.filter((m) => !m._pending)
       }
@@ -462,6 +472,32 @@
       stream = null
       approvals = [] // turn is over; anything unanswered was denied/cancelled
       await scrollToBottom()
+    }
+  }
+
+  async function detachChat() {
+    if (!selected) return
+    if (approvals.length > 0) {
+      error = 'Answer the pending approval before detaching this chat.'
+      return
+    }
+    const chat = selected
+    error = ''
+    try {
+      await api.detachSession('chat', chat.ID, chat.Title || 'Chat')
+      detachedChats = new Set([...detachedChats, chat.ID])
+      // Release only this renderer. The authoritative turn, cancel function,
+      // and transcript stay in the main Go process.
+      selected = null
+      messages = []
+      draft = ''
+      attachments = []
+      approvals = []
+      sending = false
+      stream = null
+      openChatId.set(null)
+    } catch (e) {
+      error = String(e)
     }
   }
 
@@ -538,6 +574,13 @@
   onMount(async () => {
     unsubStream = onChatStream(handleStreamEvent)
     unsubApproval = onApproval(handleApproval)
+    try { detachedChats = new Set(((await api.detachedWindows()) || []).filter((item) => item.kind === 'chat').map((item) => item.sessionId)) } catch {}
+    if (window.runtime?.EventsOn) {
+      window.runtime.EventsOn('praimate:detached-windows', (items) => {
+        detachedChats = new Set((items || []).filter((item) => item.kind === 'chat').map((item) => item.sessionId))
+      })
+      unsubDetached = () => window.runtime.EventsOff('praimate:detached-windows')
+    }
     await load()
     // If Agents started a chat and routed us here, open it.
     const id = $openChatId
@@ -550,6 +593,7 @@
   onDestroy(() => {
     unsubStream()
     unsubApproval()
+    unsubDetached()
   })
 </script>
 
@@ -814,6 +858,7 @@
       bind:value={draft}
       on:keydown={onKey}
       disabled={sending}></textarea>
+    <button class="btn" on:click={detachChat} disabled={approvals.length > 0} title="Move this chat into its own window">Detach</button>
     {#if sending}
       <button class="btn danger" on:click={stop} title="Interrupt the turn — text streamed so far is kept">■ Stop</button>
     {:else}
@@ -926,13 +971,14 @@
         <div class="card-title">{chat.Title}</div>
         <div class="card-sub">
           {chat.CLIAgent}
+          {#if detachedChats.has(chat.ID)} · detached window{/if}
           {#if chat.AgentID} · Agent: {agentName(chat)}{/if}
           {#if chat.Settings?.model} · model: {chat.Settings.model}{/if}
           · {fmtDate(chat.UpdatedAt)}
           {#if chat.ExitKind} · {chat.ExitKind}{/if}
         </div>
       </div>
-      <button class="btn" on:click={() => open(chat)}>Open</button>
+      <button class="btn" on:click={() => open(chat)} disabled={detachedChats.has(chat.ID)}>{detachedChats.has(chat.ID) ? 'Detached' : 'Open'}</button>
       <button class="btn" on:click={() => openConfig(chat)} title="Change CLI / model / tools">Edit</button>
       <button class="btn danger" on:click={() => remove(chat)}>Delete</button>
     </div>

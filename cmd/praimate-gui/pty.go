@@ -16,17 +16,16 @@ package main
 // arbitrary bytes survive JSON) and a one-shot "term:exit:<id>".
 
 import (
-	"context"
 	"encoding/base64"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 
 	"github.com/aymanbagabas/go-pty"
-	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 type termSession struct {
@@ -192,9 +191,9 @@ func (tm *termManager) snapshot(id string) (TerminalSnapshot, error) {
 }
 
 // start spawns name with args in cwd inside a new PTY. env adds to the
-// inherited environment. PTY output streams to the frontend over Wails
-// events on emitCtx until the child exits.
-func (tm *termManager) start(emitCtx context.Context, name string, args []string, cwd string, env []string) (string, error) {
+// inherited environment. emit fans PTY output into the main Wails window and
+// any detached renderer until the child exits.
+func (tm *termManager) start(name string, args []string, cwd string, env []string, emit func(string, any)) (string, error) {
 	if cwd == "" {
 		if home, err := os.UserHomeDir(); err == nil {
 			cwd = home
@@ -215,6 +214,14 @@ func (tm *termManager) start(emitCtx context.Context, name string, args []string
 	resolved, lpErr := exec.LookPath(name)
 	if lpErr != nil {
 		return "", fmt.Errorf("%s not on PATH — install it (CLIs tab) or click 'Re-scan PATH' if you just installed it in another terminal", name)
+	}
+	if name == "opencode" || name == "praimate-code" {
+		// Some OpenCode builds open their log file before creating its parent
+		// directory. Prepare only the directory (PrAImate never writes logs)
+		// so a first launch from the GUI is as reliable as a second launch.
+		if err := ensureOpenCodeLogDir(); err != nil {
+			return "", fmt.Errorf("prepare OpenCode state directory: %w", err)
+		}
 	}
 	p, err := pty.New()
 	if err != nil {
@@ -245,7 +252,9 @@ func (tm *termManager) start(emitCtx context.Context, name string, args []string
 			n, rerr := p.Read(buf)
 			if n > 0 {
 				if chunk, ok := tm.recordOutput(id, buf[:n]); ok {
-					wruntime.EventsEmit(emitCtx, "term:data:"+id, chunk)
+					if emit != nil {
+						emit("term:data:"+id, chunk)
+					}
 				}
 			}
 			if rerr != nil {
@@ -253,11 +262,39 @@ func (tm *termManager) start(emitCtx context.Context, name string, args []string
 			}
 		}
 		_ = c.Wait()
-		wruntime.EventsEmit(emitCtx, "term:exit:"+id)
+		if emit != nil {
+			emit("term:exit:"+id, nil)
+		}
 		tm.close(id)
 	}()
 
 	return id, nil
+}
+
+func opencodeLogDir(goos, home, xdgDataHome, localAppData string) string {
+	base := xdgDataHome
+	if goos == "windows" {
+		base = localAppData
+	} else if strings.TrimSpace(base) == "" {
+		base = filepath.Join(home, ".local", "share")
+	}
+	return filepath.Join(base, "opencode", "log")
+}
+
+func ensureOpenCodeLogDir() error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	localAppData := ""
+	if runtime.GOOS == "windows" {
+		localAppData, err = os.UserCacheDir()
+		if err != nil {
+			return err
+		}
+	}
+	dir := opencodeLogDir(runtime.GOOS, home, os.Getenv("XDG_DATA_HOME"), localAppData)
+	return os.MkdirAll(dir, 0o700)
 }
 
 // terminalEnvironment merges a small launch overlay into the host process

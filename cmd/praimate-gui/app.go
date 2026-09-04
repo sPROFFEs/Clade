@@ -59,6 +59,8 @@ type App struct {
 	// (binding calls run on independent goroutines).
 	chatCancelMu    sync.Mutex
 	chatCancels     map[string]context.CancelFunc
+	chatCancelIDs   map[string]uint64
+	chatCancelSeq   uint64
 	managedCancelMu sync.Mutex
 	managedCancels  map[string]context.CancelFunc
 
@@ -84,17 +86,31 @@ type App struct {
 	// file flushes (editor_window.go). Guarded by editorMu.
 	editorMu        sync.Mutex
 	editorOwnWrites map[string]time.Time
+
+	// detached coordinates lightweight chat/terminal windows. Only the main
+	// process owns it; detached child processes use detachedClient and never
+	// open the database or start background daemons.
+	detached       *detachedCoordinator
+	detachedClient *detachedClient
 }
 
 func NewApp() *App {
-	return &App{
+	a := &App{
 		terms:               newTermManager(),
 		chatCancels:         map[string]context.CancelFunc{},
+		chatCancelIDs:       map[string]uint64{},
 		managedCancels:      map[string]context.CancelFunc{},
 		ragCancels:          map[string]*ragRun{},
 		requirementsCancels: map[string]*requirementsRun{},
 		quit:                wruntime.Quit,
 	}
+	if detachedProcessMode.active {
+		a.terms = nil
+		a.detachedClient = newDetachedClient(detachedProcessMode)
+	} else {
+		a.detached = newDetachedCoordinator(a)
+	}
+	return a
 }
 
 // startup opens the shared DB and seeds builtins. Failures are
@@ -102,6 +118,12 @@ func NewApp() *App {
 // Health().
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	if a.detachedClient != nil {
+		a.detachedClient.start(ctx, func(name string, payload any) {
+			wruntime.EventsEmit(ctx, name, payload)
+		})
+		return
+	}
 
 	// Add managed tool prefixes (graphify, gstack, scrapegraph) and the praimate bin dir
 	// (praimate-code). Without it the GUI — and every CLI child it
@@ -213,6 +235,10 @@ func (a *App) initializeUnlockedStore(ctx context.Context, st *store.Store) erro
 }
 
 func (a *App) shutdown(ctx context.Context) {
+	if a.detachedClient != nil {
+		a.detachedClient.close()
+		return
+	}
 	a.resetMu.Lock()
 	resetting := a.dataReset
 	a.resetMu.Unlock()
@@ -236,6 +262,9 @@ func (a *App) shutdown(ctx context.Context) {
 	}
 	if a.st != nil {
 		_ = a.st.Close()
+	}
+	if a.detached != nil {
+		a.detached.close()
 	}
 }
 
@@ -309,12 +338,15 @@ func (a *App) StartTerminal(agentID, cli, model, cwd, localEndpoint, _ string, l
 	if agent != nil || skillsPrefix != "" {
 		_ = exportAgentContext(cwd, cli, agent, skillsPrefix)
 	}
-	return a.terms.start(a.ctx, name, args, cwd, env)
+	return a.terms.start(name, args, cwd, env, a.emitTerminalEvent)
 }
 
 // WriteTerminal forwards a base64-encoded chunk of keystrokes to the
 // PTY. The frontend base64-encodes so arbitrary control bytes survive.
 func (a *App) WriteTerminal(id, b64 string) error {
+	if a.detachedClient != nil {
+		return a.detachedClient.terminalWrite(id, b64)
+	}
 	data, err := base64.StdEncoding.DecodeString(b64)
 	if err != nil {
 		return fmt.Errorf("decode terminal input: %w", err)
@@ -323,16 +355,26 @@ func (a *App) WriteTerminal(id, b64 string) error {
 }
 
 func (a *App) ResizeTerminal(id string, cols, rows int) error {
+	if a.detachedClient != nil {
+		return a.detachedClient.terminalResize(id, cols, rows)
+	}
 	return a.terms.resize(id, cols, rows)
 }
 
 // GetTerminalSnapshot returns the retained output of a live PTY so the Code
 // page can reconstruct xterm after it was minimized/navigated away from.
 func (a *App) GetTerminalSnapshot(id string) (TerminalSnapshot, error) {
+	if a.detachedClient != nil {
+		return a.detachedClient.terminalSnapshot(id)
+	}
 	return a.terms.snapshot(id)
 }
 
 func (a *App) CloseTerminal(id string) {
+	if a.detachedClient != nil {
+		_ = a.detachedClient.terminalClose(id)
+		return
+	}
 	a.terms.close(id)
 }
 
@@ -480,6 +522,9 @@ func (a *App) SendChat(chatID, message string) (*core.ChatTurn, error) {
 }
 
 func (a *App) ChatMessages(chatID string) ([]core.Message, error) {
+	if a.detachedClient != nil {
+		return a.detachedClient.chatMessages(chatID)
+	}
 	c, err := a.requireCore()
 	if err != nil {
 		return nil, err
@@ -738,7 +783,7 @@ func (a *App) OpenWorkspaceChat(chatID string) (*OpenWorkspaceChatResult, error)
 	}
 	resume := launcher.RestoreNativeSession(*agent, *chat)
 	args = append(args, resume.Args...)
-	termID, err := a.terms.start(a.ctx, name, args, chat.SandboxDir, nil)
+	termID, err := a.terms.start(name, args, chat.SandboxDir, nil, a.emitTerminalEvent)
 	if err != nil {
 		return nil, err
 	}
