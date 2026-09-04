@@ -182,7 +182,9 @@
 
   function continueLaunch() {
     if (!dlg) return
-    dlg.busy = true
+    // dlgGo() owns the busy transition; leaving this true trips its
+    // re-entry guard and strands the launch after a warning.
+    dlg.busy = false
     preflightWarnings = null
     dlgGo()
   }

@@ -34,6 +34,9 @@ func openPathInFileManager(dir string) error {
 // OpenEditorFolder reveals the studio's working folder in the OS file
 // manager. Only valid in editor mode (the second-process Studio window).
 func (a *App) OpenEditorFolder() error {
+	if a.detachedClient != nil && a.detachedClient.mode.kind == "studio" {
+		return a.detachedClient.openEditorFolder()
+	}
 	if editorFolder == "" {
 		return errors.New("not an editor window")
 	}

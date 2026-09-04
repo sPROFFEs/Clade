@@ -254,6 +254,7 @@ func (a *App) ensureApprovalBroker() (*approvalBroker, error) {
 		wruntime.EventsEmit(a.ctx, "praimate:approval", req)
 		if a.detached != nil {
 			a.detached.publish("chat", req.ChatID, "praimate:approval", req)
+			a.detached.publish("studio", req.ChatID, "praimate:approval", req)
 		}
 	})
 	if err != nil {

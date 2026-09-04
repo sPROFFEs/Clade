@@ -104,6 +104,7 @@ func (a *App) SendChatStream(chatID, message string, attachments []string) (*cor
 		wruntime.EventsEmit(a.ctx, "praimate:chat-stream", streamEvent)
 		if a.detached != nil {
 			a.detached.publish("chat", chatID, "praimate:chat-stream", streamEvent)
+			a.detached.publish("studio", chatID, "praimate:chat-stream", streamEvent)
 		}
 	}
 	turn, streamErr := c.ContinueChatStream(ctx, chatID, message, chat.WorkspacePath, systemPrompt, attachments, onEvent)
@@ -114,6 +115,7 @@ func (a *App) SendChatStream(chatID, message string, attachments []string) (*cor
 			finished.Error = streamErr.Error()
 		}
 		a.detached.publish("chat", chatID, "praimate:chat-finished", finished)
+		a.detached.publish("studio", chatID, "praimate:chat-finished", finished)
 	}
 	return turn, streamErr
 }

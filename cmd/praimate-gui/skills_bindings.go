@@ -149,6 +149,9 @@ func (a *App) SetSkillsDefaults(ids []string) error {
 
 // ChatSkills returns the IDs of skills currently enabled on a chat.
 func (a *App) ChatSkills(chatID string) []string {
+	if a.detachedClient != nil {
+		return a.detachedClient.chatSkills(chatID)
+	}
 	c, err := a.requireCore()
 	if err != nil {
 		return []string{}
@@ -182,6 +185,9 @@ func (a *App) applyDefaultSkills(chatID string) {
 
 // SetChatSkills overwrites the skills list on a chat.
 func (a *App) SetChatSkills(chatID string, ids []string) error {
+	if a.detachedClient != nil {
+		return a.detachedClient.setChatSkills(chatID, ids)
+	}
 	c, err := a.requireCore()
 	if err != nil {
 		return err

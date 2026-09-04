@@ -31,6 +31,19 @@ func TestDetachedModeRequiresCompleteScopedEnvironment(t *testing.T) {
 	}
 }
 
+func TestDetachedStudioModeCarriesFolder(t *testing.T) {
+	t.Setenv("PRAIMATE_DETACHED_KIND", "studio")
+	t.Setenv("PRAIMATE_DETACHED_SESSION", "chat-1")
+	t.Setenv("PRAIMATE_DETACHED_WINDOW", "00112233445566778899aabb")
+	t.Setenv("PRAIMATE_DETACHED_BROKER", "http://127.0.0.1:1234")
+	t.Setenv("PRAIMATE_DETACHED_TOKEN", "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff")
+	t.Setenv("PRAIMATE_DETACHED_FOLDER", "/tmp/project")
+	mode := detachedModeFromEnvironment()
+	if !mode.active || mode.kind != "studio" || mode.folder != "/tmp/project" {
+		t.Fatalf("unexpected studio mode: %+v", mode)
+	}
+}
+
 func TestDetachedChildAppDoesNotOwnCoreOrTerminalManager(t *testing.T) {
 	old := detachedProcessMode
 	detachedProcessMode = detachedMode{

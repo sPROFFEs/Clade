@@ -76,7 +76,9 @@
 
   function continueLaunch() {
     if (!form) return
-    form.busy = true
+    // launch() owns the busy transition. Setting it here makes launch's
+    // re-entry guard return immediately after a preflight warning.
+    form.busy = false
     preflightWarnings = null
     launch()
   }

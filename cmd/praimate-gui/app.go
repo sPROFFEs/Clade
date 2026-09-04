@@ -85,6 +85,7 @@ type App struct {
 	// editorOwnWrites suppresses fsnotify echoes of the studio's own
 	// file flushes (editor_window.go). Guarded by editorMu.
 	editorMu        sync.Mutex
+	editorScopeMu   sync.Mutex
 	editorOwnWrites map[string]time.Time
 
 	// detached coordinates lightweight chat/terminal windows. Only the main
@@ -122,6 +123,9 @@ func (a *App) startup(ctx context.Context) {
 		a.detachedClient.start(ctx, func(name string, payload any) {
 			wruntime.EventsEmit(ctx, name, payload)
 		})
+		// A detached child is ready as soon as its broker client is alive.
+		// Do not make the parent wait for a heavy Studio renderer/import tree.
+		go func() { _ = a.detachedClient.rpc("window.ready", nil, nil) }()
 		return
 	}
 
@@ -460,6 +464,9 @@ func (a *App) Health() Health {
 // --- Chats ---------------------------------------------------------------
 
 func (a *App) ListChats() ([]core.Chat, error) {
+	if a.detachedClient != nil {
+		return a.detachedClient.listChats()
+	}
 	c, err := a.requireCore()
 	if err != nil {
 		return nil, err
@@ -820,6 +827,9 @@ var hiddenAgentIDs = map[string]bool{
 }
 
 func (a *App) ListAgents() ([]core.Agent, error) {
+	if a.detachedClient != nil {
+		return a.detachedClient.listAgents()
+	}
 	c, err := a.requireCore()
 	if err != nil {
 		return nil, err

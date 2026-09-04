@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -49,6 +48,9 @@ type EditorModeInfo struct {
 }
 
 func (a *App) EditorMode() EditorModeInfo {
+	if a.detachedClient != nil && a.detachedClient.mode.kind == "studio" {
+		return EditorModeInfo{Active: true, Folder: a.detachedClient.mode.folder, ChatID: a.detachedClient.mode.sessionID}
+	}
 	return EditorModeInfo{Active: editorFolder != "", Folder: editorFolder, ChatID: editorChatID}
 }
 
@@ -85,6 +87,9 @@ func editorPath(rel string) (string, error) {
 // EditorListFiles walks the studio folder and returns the editable
 // files as sorted slash-relative paths (the frontend builds the tree).
 func (a *App) EditorListFiles() ([]string, error) {
+	if a.detachedClient != nil {
+		return a.detachedClient.editorListFiles()
+	}
 	if editorFolder == "" {
 		return nil, errors.New("not an editor window")
 	}
@@ -116,6 +121,9 @@ func (a *App) EditorListFiles() ([]string, error) {
 }
 
 func (a *App) EditorReadFile(rel string) (string, error) {
+	if a.detachedClient != nil {
+		return a.detachedClient.editorReadFile(rel)
+	}
 	abs, err := editorPath(rel)
 	if err != nil {
 		return "", err
@@ -130,6 +138,9 @@ func (a *App) EditorReadFile(rel string) (string, error) {
 // EditorWriteFile flushes editor content to disk. The write is recorded
 // so the fsnotify watcher suppresses the echo event.
 func (a *App) EditorWriteFile(rel, content string) error {
+	if a.detachedClient != nil {
+		return a.detachedClient.editorWriteFile(rel, content)
+	}
 	abs, err := editorPath(rel)
 	if err != nil {
 		return err
@@ -148,6 +159,9 @@ func (a *App) EditorWriteFile(rel, content string) error {
 // EditorCreateFile creates an empty file (errors when it exists) and
 // returns the normalized rel path.
 func (a *App) EditorCreateFile(rel string) (string, error) {
+	if a.detachedClient != nil {
+		return a.detachedClient.editorCreateFile(rel)
+	}
 	abs, err := editorPath(rel)
 	if err != nil {
 		return "", err
@@ -170,6 +184,9 @@ func (a *App) EditorCreateFile(rel string) (string, error) {
 // is safety-checked; refusing to descend through a symlink avoids
 // turning these bindings into a generic filesystem primitive.
 func (a *App) EditorDeleteFile(rel string) error {
+	if a.detachedClient != nil {
+		return a.detachedClient.editorDeleteFile(rel)
+	}
 	rel = strings.TrimSpace(rel)
 	if rel == "" {
 		return errors.New("path required")
@@ -193,6 +210,9 @@ func (a *App) EditorDeleteFile(rel string) error {
 // src and dst are slash-relative paths; both are path-safety checked.
 // Returns the normalized destination rel.
 func (a *App) EditorRenameFile(src, dst string) (string, error) {
+	if a.detachedClient != nil {
+		return a.detachedClient.editorRenameFile(src, dst)
+	}
 	src = strings.TrimSpace(src)
 	dst = strings.TrimSpace(dst)
 	if src == "" || dst == "" {
@@ -368,16 +388,10 @@ func (a *App) OpenEditorWindow(folder, agentID, cli, model, chatID, localEndpoin
 			}
 		})
 	}
-	exe, err := os.Executable()
-	if err != nil {
-		return "", err
-	}
-	cmd := exec.Command(exe, "-editor", folder, "-editor-chat", chatID)
-	cmd.Dir = folder
 	if a.detached == nil {
 		return "", errors.New("window coordinator is unavailable")
 	}
-	if err := a.detached.openExternal("studio", chatID, "Studio — "+filepath.Base(folder), cmd); err != nil {
+	if err := a.detached.openWithFolder("studio", chatID, "Studio — "+filepath.Base(folder), folder); err != nil {
 		return "", fmt.Errorf("open studio window: %w", err)
 	}
 	return chatID, nil

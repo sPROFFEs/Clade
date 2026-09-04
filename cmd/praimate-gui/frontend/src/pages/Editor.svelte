@@ -594,6 +594,10 @@
 
   let unsubFs = () => {}
   onMount(async () => {
+    // Studio runs as a brokered child process. Signal readiness before any
+    // project scan or chat hydration so the main window does not time out
+    // while a large workspace is being indexed.
+    try { await api.detachedRendererReady() } catch {}
     unsubStream = onChatStream(handleStreamEvent)
     unsubApproval = onApproval(handleApproval)
     if (typeof window !== 'undefined' && window.runtime?.EventsOn) {

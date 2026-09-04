@@ -171,7 +171,13 @@
     } catch {
       detachedMode = { active: false }
     }
-    if (detachedMode?.active) return
+    if (detachedMode?.active) {
+      // A Studio/Chat/Terminal child must acknowledge the broker before
+      // loading its potentially heavy surface. This keeps the parent launch
+      // call bounded even when a project tree or editor bundle is large.
+      try { await api.detachedRendererReady() } catch {}
+      return
+    }
     if (window.runtime?.EventsOn) {
       window.runtime.EventsOn('praimate:close-blocked', (event) => { closeBlocked = event })
     }
@@ -210,7 +216,7 @@
   // Re-key the page component on navigation (and explicit attach revisions)
   // so Code/Chats consume freshly queued cross-page requests.
   $: current = pages.find((p) => p.id === $activePage) || pages[0]
-  $: if (detachedMode?.active) loadSpecial('detached')
+  $: if (detachedMode?.active) loadSpecial(detachedMode.kind === 'studio' ? 'editor' : 'detached')
   $: if (!detachedMode?.active && editorMode?.active) loadSpecial('editor')
   $: if (!detachedMode?.active && editorMode && !editorMode.active && $agentStudio) loadSpecial('agentStudio')
   $: if (!detachedMode?.active && editorMode && !editorMode.active && !firstRun?.needed && !$agentStudio) loadPage($activePage)
@@ -219,7 +225,9 @@
 {#if !detachedMode}
   <div class="boot-screen">Preparing PrAImate…</div>
 {:else if detachedMode.active}
-  {#if specialComponent}<svelte:component this={specialComponent} mode={detachedMode} />{:else if specialError}<div class="boot-screen"><div class="banner">{specialError}</div></div>{:else}<div class="boot-screen">Opening session…</div>{/if}
+  {#if specialComponent}
+    {#if detachedMode.kind === 'studio'}<svelte:component this={specialComponent} folder={detachedMode.folder} chatId={detachedMode.sessionId} />{:else}<svelte:component this={specialComponent} mode={detachedMode} />{/if}
+  {:else if specialError}<div class="boot-screen"><div class="banner">{specialError}</div></div>{:else}<div class="boot-screen">Opening session…</div>{/if}
 {:else if !databaseLock}
   <div class="boot-screen">Preparing secure storage…</div>
 {:else if !databaseLock.unlocked}

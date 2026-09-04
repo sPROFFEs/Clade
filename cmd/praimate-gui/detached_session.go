@@ -46,6 +46,7 @@ type detachedMode struct {
 	brokerURL string
 	token     string
 	title     string
+	folder    string
 }
 
 var detachedProcessMode detachedMode
@@ -59,18 +60,22 @@ func detachedModeFromEnvironment() detachedMode {
 		brokerURL: os.Getenv("PRAIMATE_DETACHED_BROKER"),
 		token:     os.Getenv("PRAIMATE_DETACHED_TOKEN"),
 		title:     os.Getenv("PRAIMATE_DETACHED_TITLE"),
+		folder:    os.Getenv("PRAIMATE_DETACHED_FOLDER"),
 	}
 	broker, brokerErr := url.Parse(m.brokerURL)
 	_, tokenErr := hex.DecodeString(m.token)
 	_, windowErr := hex.DecodeString(m.windowID)
 	validBroker := brokerErr == nil && broker.Scheme == "http" && broker.Hostname() == "127.0.0.1" &&
 		broker.Port() != "" && broker.User == nil && broker.Path == "" && broker.RawQuery == "" && broker.Fragment == ""
-	if (m.kind != "chat" && m.kind != "terminal") || m.sessionID == "" ||
+	if (m.kind != "chat" && m.kind != "terminal" && m.kind != "studio") || m.sessionID == "" ||
 		len(m.windowID) != 24 || windowErr != nil || !validBroker || len(m.token) != 64 || tokenErr != nil {
 		return detachedMode{}
 	}
 	if strings.TrimSpace(m.title) == "" {
 		m.title = "Detached " + m.kind
+	}
+	if m.kind == "studio" && strings.TrimSpace(m.folder) == "" {
+		return detachedMode{}
 	}
 	return m
 }
@@ -83,11 +88,12 @@ type DetachedModeInfo struct {
 	Kind      string `json:"kind,omitempty"`
 	SessionID string `json:"sessionId,omitempty"`
 	Title     string `json:"title,omitempty"`
+	Folder    string `json:"folder,omitempty"`
 }
 
 func (a *App) DetachedMode() DetachedModeInfo {
 	m := detachedProcessMode
-	return DetachedModeInfo{Active: m.active, Kind: m.kind, SessionID: m.sessionID, Title: m.title}
+	return DetachedModeInfo{Active: m.active, Kind: m.kind, SessionID: m.sessionID, Title: m.title, Folder: m.folder}
 }
 
 type detachedWireEvent struct {
@@ -100,6 +106,7 @@ type detachedWindow struct {
 	kind      string
 	sessionID string
 	title     string
+	folder    string
 	cmd       *exec.Cmd
 	events    chan detachedWireEvent
 	ready     chan struct{}
@@ -179,7 +186,11 @@ func (a *App) DetachSession(kind, sessionID, title string) error {
 }
 
 func (d *detachedCoordinator) open(kind, sessionID, title string) error {
-	if kind != "chat" && kind != "terminal" {
+	return d.openWithFolder(kind, sessionID, title, "")
+}
+
+func (d *detachedCoordinator) openWithFolder(kind, sessionID, title, folder string) error {
+	if kind != "chat" && kind != "terminal" && kind != "studio" {
 		return fmt.Errorf("unsupported detached session kind %q", kind)
 	}
 	if strings.TrimSpace(sessionID) == "" {
@@ -206,6 +217,9 @@ func (d *detachedCoordinator) open(kind, sessionID, title string) error {
 		if approval != nil && approval.hasPending(sessionID) {
 			return errors.New("answer the pending approval before detaching this chat")
 		}
+	}
+	if kind == "studio" && strings.TrimSpace(folder) == "" {
+		return errors.New("studio folder is required")
 	}
 
 	d.mu.Lock()
@@ -241,7 +255,7 @@ func (d *detachedCoordinator) open(kind, sessionID, title string) error {
 		title = string(titleRunes[:120])
 	}
 	w := &detachedWindow{
-		id: windowID, kind: kind, sessionID: sessionID, title: title,
+		id: windowID, kind: kind, sessionID: sessionID, title: title, folder: folder,
 		events: make(chan detachedWireEvent, 256), ready: make(chan struct{}), done: make(chan struct{}),
 	}
 	d.windows[windowID] = w
@@ -261,6 +275,7 @@ func (d *detachedCoordinator) open(kind, sessionID, title string) error {
 		"PRAIMATE_DETACHED_BROKER="+addr,
 		"PRAIMATE_DETACHED_TOKEN="+token,
 		"PRAIMATE_DETACHED_TITLE="+title,
+		"PRAIMATE_DETACHED_FOLDER="+folder,
 	)
 	if err := cmd.Start(); err != nil {
 		d.remove(windowID)
@@ -342,7 +357,7 @@ func (d *detachedCoordinator) remove(id string) {
 	w := d.windows[id]
 	delete(d.windows, id)
 	d.mu.Unlock()
-	if w != nil && w.kind == "chat" {
+	if w != nil && (w.kind == "chat" || w.kind == "studio") {
 		d.app.approvalMu.Lock()
 		approval := d.app.approval
 		d.app.approvalMu.Unlock()
@@ -582,12 +597,36 @@ func (d *detachedCoordinator) call(w *detachedWindow, req detachedRPCRequest) (a
 		d.app.chatCancelMu.Unlock()
 		return active, nil
 	case "chat.messages":
-		if w.kind != "chat" {
+		if w.kind != "chat" && w.kind != "studio" {
 			return nil, errors.New("operation is outside this window's scope")
 		}
 		return d.app.ChatMessages(w.sessionID)
+	case "chat.list":
+		if w.kind != "studio" {
+			return nil, errors.New("operation is outside this window's scope")
+		}
+		return d.app.ListChats()
+	case "agent.list":
+		if w.kind != "studio" {
+			return nil, errors.New("operation is outside this window's scope")
+		}
+		return d.app.ListAgents()
+	case "chat.skills":
+		if w.kind != "studio" {
+			return nil, errors.New("operation is outside this window's scope")
+		}
+		return d.app.ChatSkills(w.sessionID), nil
+	case "chat.skills.set":
+		if w.kind != "studio" {
+			return nil, errors.New("operation is outside this window's scope")
+		}
+		var ids []string
+		if err := decodeRPCBody(req.Body, &ids); err != nil {
+			return nil, err
+		}
+		return nil, d.app.SetChatSkills(w.sessionID, ids)
 	case "chat.send":
-		if w.kind != "chat" {
+		if w.kind != "chat" && w.kind != "studio" {
 			return nil, errors.New("operation is outside this window's scope")
 		}
 		var body struct {
@@ -599,13 +638,13 @@ func (d *detachedCoordinator) call(w *detachedWindow, req detachedRPCRequest) (a
 		}
 		return d.app.SendChatStream(w.sessionID, body.Message, body.Attachments)
 	case "chat.cancel":
-		if w.kind != "chat" {
+		if w.kind != "chat" && w.kind != "studio" {
 			return nil, errors.New("operation is outside this window's scope")
 		}
 		d.app.CancelChatTurn(w.sessionID)
 		return nil, nil
 	case "chat.command":
-		if w.kind != "chat" {
+		if w.kind != "chat" && w.kind != "studio" {
 			return nil, errors.New("operation is outside this window's scope")
 		}
 		var body struct {
@@ -616,7 +655,7 @@ func (d *detachedCoordinator) call(w *detachedWindow, req detachedRPCRequest) (a
 		}
 		return d.app.RunChatCommand(w.sessionID, body.Command)
 	case "chat.approval":
-		if w.kind != "chat" {
+		if w.kind != "chat" && w.kind != "studio" {
 			return nil, errors.New("operation is outside this window's scope")
 		}
 		var body struct {
@@ -634,6 +673,67 @@ func (d *detachedCoordinator) call(w *detachedWindow, req detachedRPCRequest) (a
 			return nil, errors.New("approval is no longer pending for this chat")
 		}
 		return nil, nil
+	case "editor.list":
+		if w.kind != "studio" {
+			return nil, errors.New("operation is outside this window's scope")
+		}
+		return d.withEditorFolder(w.folder, func() (any, error) { return d.app.EditorListFiles() })
+	case "editor.read":
+		if w.kind != "studio" {
+			return nil, errors.New("operation is outside this window's scope")
+		}
+		var body struct {
+			Path string `json:"path"`
+		}
+		if err := decodeRPCBody(req.Body, &body); err != nil {
+			return nil, err
+		}
+		return d.withEditorFolder(w.folder, func() (any, error) { return d.app.EditorReadFile(body.Path) })
+	case "editor.write":
+		if w.kind != "studio" {
+			return nil, errors.New("operation is outside this window's scope")
+		}
+		var body struct{ Path, Content string }
+		if err := decodeRPCBody(req.Body, &body); err != nil {
+			return nil, err
+		}
+		return nil, d.withEditorFolderErr(w.folder, func() error { return d.app.EditorWriteFile(body.Path, body.Content) })
+	case "editor.create":
+		if w.kind != "studio" {
+			return nil, errors.New("operation is outside this window's scope")
+		}
+		var body struct {
+			Path string `json:"path"`
+		}
+		if err := decodeRPCBody(req.Body, &body); err != nil {
+			return nil, err
+		}
+		return d.withEditorFolder(w.folder, func() (any, error) { return d.app.EditorCreateFile(body.Path) })
+	case "editor.delete":
+		if w.kind != "studio" {
+			return nil, errors.New("operation is outside this window's scope")
+		}
+		var body struct {
+			Path string `json:"path"`
+		}
+		if err := decodeRPCBody(req.Body, &body); err != nil {
+			return nil, err
+		}
+		return nil, d.withEditorFolderErr(w.folder, func() error { return d.app.EditorDeleteFile(body.Path) })
+	case "editor.rename":
+		if w.kind != "studio" {
+			return nil, errors.New("operation is outside this window's scope")
+		}
+		var body struct{ Src, Dst string }
+		if err := decodeRPCBody(req.Body, &body); err != nil {
+			return nil, err
+		}
+		return d.withEditorFolder(w.folder, func() (any, error) { return d.app.EditorRenameFile(body.Src, body.Dst) })
+	case "editor.open-folder":
+		if w.kind != "studio" {
+			return nil, errors.New("operation is outside this window's scope")
+		}
+		return nil, openPathInFileManager(w.folder)
 	case "terminal.snapshot":
 		if w.kind != "terminal" {
 			return nil, errors.New("operation is outside this window's scope")
@@ -671,6 +771,19 @@ func (d *detachedCoordinator) call(w *detachedWindow, req detachedRPCRequest) (a
 	default:
 		return nil, fmt.Errorf("unsupported detached RPC method %q", req.Method)
 	}
+}
+
+func (d *detachedCoordinator) withEditorFolder(folder string, fn func() (any, error)) (any, error) {
+	d.app.editorScopeMu.Lock()
+	defer d.app.editorScopeMu.Unlock()
+	old := editorFolder
+	editorFolder = folder
+	defer func() { editorFolder = old }()
+	return fn()
+}
+func (d *detachedCoordinator) withEditorFolderErr(folder string, fn func() error) error {
+	_, err := d.withEditorFolder(folder, func() (any, error) { return nil, fn() })
+	return err
 }
 
 func (d *detachedCoordinator) close() {
@@ -873,6 +986,28 @@ func (c *detachedClient) chatMessages(id string) ([]core.Message, error) {
 	var out []core.Message
 	return out, c.rpc("chat.messages", nil, &out)
 }
+func (c *detachedClient) listChats() ([]core.Chat, error) {
+	var out []core.Chat
+	return out, c.rpc("chat.list", nil, &out)
+}
+func (c *detachedClient) listAgents() ([]core.Agent, error) {
+	var out []core.Agent
+	return out, c.rpc("agent.list", nil, &out)
+}
+func (c *detachedClient) chatSkills(id string) []string {
+	if id != c.mode.sessionID {
+		return nil
+	}
+	var out []string
+	_ = c.rpc("chat.skills", nil, &out)
+	return out
+}
+func (c *detachedClient) setChatSkills(id string, ids []string) error {
+	if id != c.mode.sessionID {
+		return errors.New("chat is outside this detached window")
+	}
+	return c.rpc("chat.skills.set", ids, nil)
+}
 
 func (c *detachedClient) sendChatStream(id, message string, attachments []string) (*core.ChatTurn, error) {
 	if id != c.mode.sessionID {
@@ -902,6 +1037,30 @@ func (c *detachedClient) runChatCommand(id, command string) (*core.ChatTurn, err
 func (c *detachedClient) resolveApproval(id string, allow, always bool) error {
 	return c.rpc("chat.approval", map[string]any{"id": id, "allow": allow, "always": always}, nil)
 }
+
+func (c *detachedClient) editorListFiles() ([]string, error) {
+	var out []string
+	return out, c.rpc("editor.list", nil, &out)
+}
+func (c *detachedClient) editorReadFile(path string) (string, error) {
+	var out string
+	return out, c.rpc("editor.read", map[string]string{"path": path}, &out)
+}
+func (c *detachedClient) editorWriteFile(path, content string) error {
+	return c.rpc("editor.write", map[string]string{"Path": path, "Content": content}, nil)
+}
+func (c *detachedClient) editorCreateFile(path string) (string, error) {
+	var out string
+	return out, c.rpc("editor.create", map[string]string{"path": path}, &out)
+}
+func (c *detachedClient) editorDeleteFile(path string) error {
+	return c.rpc("editor.delete", map[string]string{"path": path}, nil)
+}
+func (c *detachedClient) editorRenameFile(src, dst string) (string, error) {
+	var out string
+	return out, c.rpc("editor.rename", map[string]string{"Src": src, "Dst": dst}, &out)
+}
+func (c *detachedClient) openEditorFolder() error { return c.rpc("editor.open-folder", nil, nil) }
 
 func (c *detachedClient) terminalSnapshot(id string) (TerminalSnapshot, error) {
 	if id != c.mode.sessionID {
