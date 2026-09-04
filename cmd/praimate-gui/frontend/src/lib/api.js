@@ -136,8 +136,8 @@ export const api = {
   openAgentKnowledgeFolder: (id) => call('OpenAgentKnowledgeFolder', id),
   openEditorWindow: (folder, agentID, cli, model, chatID, localEndpoint, localApiKey, localModel) =>
     call('OpenEditorWindow', folder, agentID, cli, model || '', chatID, localEndpoint || '', localApiKey || '', localModel || ''),
-  startTerminal: (agentID, cli, model, cwd, localEndpoint, localApiKey, localModel, resume = false) =>
-    call('StartTerminal', agentID, cli, model || '', cwd, localEndpoint || '', localApiKey || '', localModel || '', !!resume),
+  startTerminal: (agentID, cli, model, cwd, localEndpoint, localApiKey, localModel, resume = false, skills = []) =>
+    call('StartTerminal', agentID, cli, model || '', cwd, localEndpoint || '', localApiKey || '', localModel || '', !!resume, skills || []),
   localLLMModels: () => call('LocalLLMModels'),
   recordCodeSession: (agentID, cli, model, cwd, localEndpoint, localApiKey, localModel) =>
     call('RecordCodeSession', agentID || '', cli, model || '', cwd, localEndpoint || '', localApiKey || '', localModel || ''),

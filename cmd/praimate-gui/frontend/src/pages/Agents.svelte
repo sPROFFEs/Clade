@@ -192,6 +192,7 @@
     dlg.busy = true
     error = ''
     const { agent, surface, cli, folder } = dlg
+    const sessionName = dlg.name.trim()
     const model = dlg.model.trim()
     const local = dlg.useLocal && localOpt?.configured
     const lEnd = local ? localOpt.endpoint : ''
@@ -235,7 +236,7 @@
       })
       if (surface === 'chat') {
         const c = await api.startChat(agent.id, cli, folder)
-        if (dlg.name) await api.renameChat(c.ID, dlg.name)
+        if (sessionName) await api.renameChat(c.ID, sessionName)
         if (local) await api.updateChatConfig(c.ID, cli, '', '', lEnd, lKey, lModel)
         else if (model) await api.updateChatConfig(c.ID, cli, model, '', '', '', '')
         dlg = null
@@ -248,22 +249,22 @@
         const termId = await api.startTerminal(agent ? agent.id : '', cli, local ? '' : model, folder, lEnd, lKey, lModel)
         let chatId = ''
         try {
-          chatId = await api.recordCodeSession(cli, local ? '' : model, folder, lEnd, lKey, lModel)
+          chatId = await api.recordCodeSession(agent ? agent.id : '', cli, local ? '' : model, folder, lEnd, lKey, lModel)
           if (chatId) {
             await api.bindChatToTerminal(termId, chatId)
-            if (dlg.name) await api.renameChat(chatId, dlg.name)
+            if (sessionName) await api.renameChat(chatId, sessionName)
           }
         } catch { /* the live terminal remains usable even if persistence fails */ }
         dlg = null
         showToast({ title: 'Terminal ready', message: `${agentLabel} is running through ${cli}.`, tone: 'ok' })
-        pendingTerm.set({ termId, chatId, cli, cwd: folder, label: dlg.name || ((agent ? agent.name : cli) + (local ? ' · local' : '')), note: '' })
+        pendingTerm.set({ termId, chatId, cli, cwd: folder, label: sessionName || ((agent ? agent.name : cli) + (local ? ' · local' : '')), note: '' })
         activePage.set('code')
         pageRevision.update((n) => n + 1)
         return
       }
       // studio
       const createdChatId = await api.openEditorWindow(folder, agent ? agent.id : '', cli, local ? '' : model, '', lEnd, lKey, lModel)
-      if (dlg.name && createdChatId) await api.renameChat(createdChatId, dlg.name)
+      if (sessionName && createdChatId) await api.renameChat(createdChatId, sessionName)
       dlg = null
       notice = 'Studio window opened.'
       showToast({ title: 'Studio opened', message: `${agentLabel} is ready in a separate Studio window.`, tone: 'ok' })
